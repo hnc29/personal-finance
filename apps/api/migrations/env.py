@@ -5,6 +5,10 @@ from alembic import context
 from app.core.config import settings
 from app.core.database import engine
 
+# Importing the models package registers every model on Base.metadata,
+# so all models are loaded before the metadata is used below.
+from app.models import Base
+
 config = context.config
 
 
@@ -12,9 +16,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 
-# TASK-001 chưa có SQLAlchemy models.
-# TASK-003 sẽ thay thành Base.metadata.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
