@@ -3,6 +3,7 @@
 import datetime
 import enum
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
@@ -18,6 +19,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.money import scaled_to_money
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.import_batch import RawImportRow
 
 
 class FinancialEventType(str, enum.Enum):
@@ -63,11 +67,15 @@ class FinancialEvent(Base):
     payee_text: Mapped[str | None] = mapped_column(String, nullable=True)
     trip_event_text: Mapped[str | None] = mapped_column(String, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_import_row_id: Mapped[int | None] = mapped_column(
+        ForeignKey("raw_import_rows.id"), nullable=True, unique=True
+    )
 
     entries: Mapped[list["AccountEntry"]] = relationship(
         "AccountEntry",
         back_populates="financial_event",
     )
+    raw_import_row: Mapped["RawImportRow | None"] = relationship("RawImportRow")
 
     __table_args__ = (
         Index("ix_financial_events_transaction_date", "transaction_date"),
