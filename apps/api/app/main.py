@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 
 from app.api.accounts import router as accounts_router
 from app.api.categories import router as categories_router
+from app.api.financial_events import router as financial_events_router
 from app.core.config import settings
 from app.core.database import check_database
 
@@ -12,6 +13,7 @@ app = FastAPI(
 
 app.include_router(accounts_router)
 app.include_router(categories_router)
+app.include_router(financial_events_router)
 
 
 @app.get("/api/v1/health")

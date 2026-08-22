@@ -2,6 +2,7 @@
 
 import datetime
 import enum
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
@@ -15,6 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.money import scaled_to_money
 from app.models.base import Base
 
 
@@ -97,6 +99,11 @@ class AccountEntry(Base):
         "FinancialEvent",
         back_populates="entries",
     )
+
+    @property
+    def amount(self) -> Decimal:
+        """Expose the application-layer Decimal amount for API schemas."""
+        return scaled_to_money(self.amount_scaled)
 
     __table_args__ = (
         Index("ix_account_entries_financial_event_id", "financial_event_id"),
