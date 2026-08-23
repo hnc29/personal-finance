@@ -37,6 +37,14 @@ from app.models.precious_metal import (
     PreciousMetalType,
     quantity_to_grams,
 )
+from app.models.pricing import (
+    PriceQuote,
+    PricingAssetType,
+    PricingInstrument,
+    PricingProvider,
+    QuoteMatchLevel,
+    QuoteState,
+)
 from app.models.reconciliation import (
     ReconciliationCandidate,
     ReconciliationCandidateState,
@@ -82,6 +90,12 @@ __all__ = [
     "PreciousMetalLot",
     "PreciousMetalQuantityUnit",
     "PreciousMetalType",
+    "PriceQuote",
+    "PricingAssetType",
+    "PricingInstrument",
+    "PricingProvider",
+    "QuoteMatchLevel",
+    "QuoteState",
     "RawImportRow",
     "ReconciliationCandidate",
     "ReconciliationCandidateState",
