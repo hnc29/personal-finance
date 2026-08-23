@@ -29,12 +29,13 @@ def test_exactly_expected_revisions() -> None:
         "0006_reconciliation",
         "0007_credit_card_profiles",
         "0008_credit_card_statements",
+        "0009_savings",
     }
 
 
 def test_exactly_one_head() -> None:
     script = _script_directory()
-    assert script.get_heads() == ["0008_credit_card_statements"]
+    assert script.get_heads() == ["0009_savings"]
 
 
 def test_migration_chain_order() -> None:
@@ -48,6 +49,7 @@ def test_migration_chain_order() -> None:
     reconciliation = script.get_revision("0006_reconciliation")
     credit_cards = script.get_revision("0007_credit_card_profiles")
     statements = script.get_revision("0008_credit_card_statements")
+    savings = script.get_revision("0009_savings")
 
     assert core.down_revision is None
     assert ledger.down_revision == "0001_core"
@@ -57,10 +59,12 @@ def test_migration_chain_order() -> None:
     assert reconciliation.down_revision == "0005_misa_export"
     assert credit_cards.down_revision == "0006_reconciliation"
     assert statements.down_revision == "0007_credit_card_profiles"
+    assert savings.down_revision == "0008_credit_card_statements"
 
     # walk_revisions is heads-first over the whole tree.
     chain = [revision.revision for revision in script.walk_revisions()]
     assert chain == [
+        "0009_savings",
         "0008_credit_card_statements",
         "0007_credit_card_profiles",
         "0006_reconciliation",

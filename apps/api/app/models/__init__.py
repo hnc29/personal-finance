@@ -25,6 +25,15 @@ from app.models.reconciliation import (
     ReconciliationCandidate,
     ReconciliationCandidateState,
 )
+from app.models.savings import (
+    DayCountConvention,
+    InterestPaymentMethod,
+    MaturityAction,
+    SavingsAccount,
+    SavingsAccountStatus,
+    SavingsProduct,
+    SavingsTerm,
+)
 
 __all__ = [
     "Account",
@@ -35,9 +44,12 @@ __all__ = [
     "CreditCardProfile",
     "CreditCardStatement",
     "CreditCardStatementStatus",
+    "DayCountConvention",
     "FinancialEvent",
     "FinancialEventType",
     "ImportBatch",
+    "InterestPaymentMethod",
+    "MaturityAction",
     "MisaAccountMapping",
     "MisaExportConfiguration",
     "MisaExportFormat",
@@ -46,4 +58,8 @@ __all__ = [
     "RawImportRow",
     "ReconciliationCandidate",
     "ReconciliationCandidateState",
+    "SavingsAccount",
+    "SavingsAccountStatus",
+    "SavingsProduct",
+    "SavingsTerm",
 ]
