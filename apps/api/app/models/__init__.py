@@ -27,6 +27,11 @@ from app.models.misa_export import (
     MisaExportFormat,
     MisaExportRun,
 )
+from app.models.portfolio import (
+    PortfolioComponentType,
+    PortfolioSnapshot,
+    PortfolioSnapshotComponent,
+)
 from app.models.precious_metal import (
     GRAMS_PER_UNIT,
     SUPPORTED_PRECIOUS_METAL_BRANDS,
@@ -85,6 +90,9 @@ __all__ = [
     "MisaExportFormat",
     "MisaExportRun",
     "MisaExportedEvent",
+    "PortfolioComponentType",
+    "PortfolioSnapshot",
+    "PortfolioSnapshotComponent",
     "PreciousMetalBrand",
     "PreciousMetalHolding",
     "PreciousMetalLot",
