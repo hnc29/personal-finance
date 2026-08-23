@@ -21,6 +21,16 @@ from app.models.misa_export import (
     MisaExportFormat,
     MisaExportRun,
 )
+from app.models.precious_metal import (
+    GRAMS_PER_UNIT,
+    SUPPORTED_PRECIOUS_METAL_BRANDS,
+    PreciousMetalBrand,
+    PreciousMetalHolding,
+    PreciousMetalLot,
+    PreciousMetalQuantityUnit,
+    PreciousMetalType,
+    quantity_to_grams,
+)
 from app.models.reconciliation import (
     ReconciliationCandidate,
     ReconciliationCandidateState,
@@ -36,6 +46,8 @@ from app.models.savings import (
 )
 
 __all__ = [
+    "GRAMS_PER_UNIT",
+    "SUPPORTED_PRECIOUS_METAL_BRANDS",
     "Account",
     "AccountEntry",
     "AccountType",
@@ -55,6 +67,11 @@ __all__ = [
     "MisaExportFormat",
     "MisaExportRun",
     "MisaExportedEvent",
+    "PreciousMetalBrand",
+    "PreciousMetalHolding",
+    "PreciousMetalLot",
+    "PreciousMetalQuantityUnit",
+    "PreciousMetalType",
     "RawImportRow",
     "ReconciliationCandidate",
     "ReconciliationCandidateState",
@@ -62,4 +79,5 @@ __all__ = [
     "SavingsAccountStatus",
     "SavingsProduct",
     "SavingsTerm",
+    "quantity_to_grams",
 ]
