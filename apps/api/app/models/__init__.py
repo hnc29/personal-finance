@@ -7,6 +7,11 @@ is imported (used later as the Alembic target metadata).
 from app.models.account import Account, AccountType
 from app.models.base import Base
 from app.models.category import Category
+from app.models.credit_card import (
+    CreditCardProfile,
+    CreditCardStatement,
+    CreditCardStatementStatus,
+)
 from app.models.import_batch import ImportBatch, RawImportRow
 from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
 from app.models.misa_export import (
@@ -27,6 +32,9 @@ __all__ = [
     "AccountType",
     "Base",
     "Category",
+    "CreditCardProfile",
+    "CreditCardStatement",
+    "CreditCardStatementStatus",
     "FinancialEvent",
     "FinancialEventType",
     "ImportBatch",

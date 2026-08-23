@@ -83,7 +83,7 @@ def test_preserves_transaction_date_and_nullable_occurred_at() -> None:
     assert event.occurred_at == occurred
 
 
-@pytest.mark.parametrize("event_type", [FinancialEventType.TRANSFER, FinancialEventType.CREDIT_CARD_PAYMENT])
+@pytest.mark.parametrize("event_type", [FinancialEventType.TRANSFER])
 def test_balanced_pair_events_require_exact_opposite_distinct_entries(event_type: FinancialEventType) -> None:
     session = FakeSession([account(1), account(2)])
     event = create_financial_event(session, payload(event_type, [
@@ -99,6 +99,29 @@ def test_balanced_pair_events_require_exact_opposite_distinct_entries(event_type
     ):
         with pytest.raises(InvalidEventEntriesError):
             create_financial_event(session, payload(event_type, entries))
+
+
+def test_credit_card_payment_requires_card_credit_and_funding_debit() -> None:
+    session = FakeSession([
+        account(1),
+        Account(id=2, name="Synthetic card", account_type=AccountType.CREDIT_CARD),
+    ])
+    event = create_financial_event(
+        session,
+        payload(FinancialEventType.CREDIT_CARD_PAYMENT, [
+            AccountEntryCreate(account_id=1, amount=Decimal(-25)),
+            AccountEntryCreate(account_id=2, amount=Decimal(25)),
+        ]),
+    )
+    assert [entry.amount_scaled for entry in event.entries] == [-250000, 250000]
+
+    invalid = (
+        [AccountEntryCreate(account_id=1, amount=Decimal(25)), AccountEntryCreate(account_id=2, amount=Decimal(-25))],
+        [AccountEntryCreate(account_id=1, amount=Decimal(-25)), AccountEntryCreate(account_id=1, amount=Decimal(25))],
+    )
+    for entries in invalid:
+        with pytest.raises(InvalidEventEntriesError):
+            create_financial_event(session, payload(FinancialEventType.CREDIT_CARD_PAYMENT, entries))
 
 
 def test_unknown_account_is_rejected_before_persisting() -> None:

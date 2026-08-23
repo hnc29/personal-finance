@@ -29,7 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.money import money_to_scaled, scaled_to_money
-from app.models.account import Account
+from app.models.account import Account, AccountType
 from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
 from app.schemas.ledger import FinancialEventCreate
 
@@ -74,6 +74,8 @@ def create_financial_event(
 
     if payload.event_type in _BALANCED_PAIR_EVENT_TYPES:
         _validate_balanced_pair(payload.event_type, entries)
+    if payload.event_type is FinancialEventType.CREDIT_CARD_PAYMENT:
+        _validate_credit_card_payment(session, entries)
 
     event = FinancialEvent(
         event_type=payload.event_type,
@@ -210,4 +212,28 @@ def _validate_balanced_pair(
     if first.amount_scaled + second.amount_scaled != 0:
         raise InvalidEventEntriesError(
             f"{event_type.value} entries must be exact opposites summing to zero"
+        )
+
+
+def _validate_credit_card_payment(
+    session: Session, entries: Sequence[AccountEntry]
+) -> None:
+    """Require payment direction: funding account out, card account in."""
+    first, second = entries
+    first_account = session.get(Account, first.account_id)
+    second_account = session.get(Account, second.account_id)
+    assert first_account is not None and second_account is not None
+    card_entries = [
+        (entry, account)
+        for entry, account in ((first, first_account), (second, second_account))
+        if account.account_type is AccountType.CREDIT_CARD
+    ]
+    if len(card_entries) != 1:
+        raise InvalidEventEntriesError(
+            "CREDIT_CARD_PAYMENT requires exactly one CREDIT_CARD account"
+        )
+    card_entry, _ = card_entries[0]
+    if card_entry.amount_scaled <= 0:
+        raise InvalidEventEntriesError(
+            "CREDIT_CARD_PAYMENT must increase the credit-card balance"
         )
