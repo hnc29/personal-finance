@@ -4,7 +4,7 @@ import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, Account, AccountType, Category, EventType } from "../lib/api";
 
-type View = "transactions" | "accounts" | "categories";
+type View = "transactions" | "accounts" | "categories" | "review" | "portfolio";
 type EntryDraft = { accountId: string; amount: string };
 const accountTypes: AccountType[] = ["CASH", "BANK", "CREDIT_CARD", "EWALLET"];
 const eventTypes: EventType[] = ["EXPENSE", "INCOME", "TRANSFER", "CREDIT_CARD_PAYMENT", "INTEREST", "SAVINGS_DEPOSIT", "SAVINGS_WITHDRAWAL", "ASSET_PURCHASE", "ASSET_SALE", "ADJUSTMENT"];
@@ -13,8 +13,27 @@ const label = (value: string) => value.replaceAll("_", " ").toLowerCase().replac
 
 export default function Home() {
   const [view, setView] = useState<View>("transactions");
-  return <main><header><div><p className="eyebrow">Local-first ledger</p><h1>Personal Finance</h1></div><nav aria-label="Main navigation">{(["transactions", "accounts", "categories"] as View[]).map(item => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} onClick={() => setView(item)} key={item}>{item}</button>)}</nav></header>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : <Transactions />}</main>;
+  return <main><header><div><p className="eyebrow">Local-first ledger</p><h1>Personal Finance</h1></div><nav aria-label="Main navigation">{(["transactions", "accounts", "categories", "review", "portfolio"] as View[]).map(item => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} aria-label={`View ${label(item)}`} onClick={() => setView(item)} key={item}>{label(item)}</button>)}</nav></header>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "review" ? <Review /> : view === "portfolio" ? <Portfolio /> : <Transactions />}</main>;
 }
+
+function Review() {
+  const events = useQuery({ queryKey: ["events"], queryFn: api.events.list });
+  const accounts = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
+  const accountNames = new Map(accounts.data?.map(x => [x.id, x.name]));
+  return <Section title="Import & reconciliation review" subtitle="Inspect imported activity and resolve matches before they become part of your trusted ledger."><div className="review-grid"><article className="panel"><div className="panel-heading"><div><h3>Import batches</h3><p>Import and raw-row endpoints are not enabled in this API build.</p></div><span className="badge muted">Unavailable</span></div><p className="notice">Connect the import API to review source rows, duplicates, and validation errors. No files or local paths are shown here.</p></article><article className="panel"><div className="panel-heading"><div><h3>Reconciliation candidates</h3><p>Ledger activity ready for review.</p></div><span className="badge">{events.data?.length ?? 0} events</span></div><Loading show={events.isPending || accounts.isPending} /><Error error={events.error ?? accounts.error} /><div className="review-list">{events.data?.slice(0, 8).map(event => <div className="review-row" key={event.id}><div><strong>{event.payee_text ?? event.note ?? "Untitled event"}</strong><small>{event.transaction_date} · {label(event.event_type)}</small></div><div>{event.entries.map(entry => <small className="entry" key={entry.id}>{entry.amount} · {accountNames.get(entry.account_id) ?? `Account #${entry.account_id}`}</small>)}</div><span className="badge warning">Review</span></div>)}</div>{!events.isPending && events.data?.length === 0 && <p className="notice">No candidate events yet.</p>}</article></div></Section>;
+}
+
+function Portfolio() {
+  const accounts = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
+  const accountCount = accounts.data?.length ?? 0;
+  return <Section title="Portfolio & net worth" subtitle="Savings, credit cards, metals, and crypto in one reviewable snapshot.">
+    <div className="quote-notice"><strong>Valuation health</strong><span>Provider connections are read-only in this build.</span><span className="badge warning">Manual / stale values require review</span></div>
+    <div className="portfolio-grid metrics-grid"><article className="panel"><h3>Net worth</h3><p className="metric">₫ —</p><small>Snapshot unavailable · manual review</small></article><article className="panel"><h3>Accounts in scope</h3><p className="metric">{accountCount}</p><small>Cash, bank, credit card, and e-wallet</small></article><article className="panel"><h3>Invested assets</h3><p className="metric">₫ —</p><small>Precious metals and crypto</small></article></div>
+    <div className="asset-sections"><AssetSection title="Savings" subtitle="Deposits and maturity tracking" rows={[["Emergency reserve", "₫ 120,000,000", "Manual", "2026-08-20"] , ["12-month term deposit", "₫ 80,000,000", "Bank import", "2026-08-21"]]} /><AssetSection title="Credit cards" subtitle="Statement balances and utilization" rows={[["Everyday card", "₫ 4,250,000 due", "Statement import", "2026-08-18"], ["Travel card", "₫ 0 due", "Manual", "2026-08-01"]]} /><AssetSection title="Precious metals" subtitle="Holdings valued by quote provider" rows={[["24K gold · 2.0 tael", "₫ 168,400,000", "BTMC", "2026-08-22"], ["Silver · 500 g", "₫ 9,800,000", "Manual", "2026-07-12"]]} /><AssetSection title="Crypto" subtitle="Lots and latest market quote" rows={[["BTC · 0.015", "₫ 23,100,000", "Manual", "2026-08-10"], ["ETH · 0.20", "₫ 8,900,000", "CoinGecko", "2026-08-22"]]} /></div>
+  </Section>;
+}
+
+function AssetSection({ title, subtitle, rows }: { title: string; subtitle: string; rows: string[][] }) { return <article className="panel asset-panel"><div className="panel-heading"><div><h3>{title}</h3><p>{subtitle}</p></div><span className="badge muted">Synthetic preview</span></div><div className="asset-list">{rows.map(row => { const manual = row[2] === "Manual"; return <div className="asset-row" key={row[0]}><div><strong>{row[0]}</strong><small>{row[1]}</small></div><div><span className={`provider ${manual ? "manual" : ""}`}>{row[2]}</span><span className={`quote-state ${manual ? "manual" : "current"}`}>{manual ? "Manual value" : "Provider quote"}</span><small>Updated {row[3]}</small></div></div>; })}</div><p className="stale-warning">{rows.some(row => row[2] === "Manual") ? "Manual value: confirm source and timestamp before relying on this total." : "Quote timestamp is shown for auditability."}</p></article>; }
 
 function Accounts() {
   const qc = useQueryClient();
@@ -56,5 +75,5 @@ function Field({ label: text, children }: { label: string; children: React.React
 function Submit({ pending, text }: { pending: boolean; text: string }) { return <button className="primary" disabled={pending}>{pending ? "Saving…" : text}</button>; }
 function Status({ active }: { active: boolean }) { return <small className={`status ${active ? "active-status" : ""}`}>{active ? "Active" : "Inactive"}</small>; }
 function Error({ error }: { error: Error | null }) { return error ? <p className="error" role="alert">{error.message}</p> : null; }
-function Loading({ show }: { show: boolean }) { return show ? <p className="notice">Loading…</p> : null; }
+function Loading({ show }: { show: boolean }) { return show ? <p className="notice" role="status" aria-live="polite">Loading…</p> : null; }
 function Empty({ show, text }: { show: boolean; text: string }) { return show ? <p className="notice">{text}</p> : null; }
