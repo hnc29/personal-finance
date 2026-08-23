@@ -102,4 +102,8 @@ def semantic_fingerprint(payload: dict[str, object]) -> str:
 
     This is informational only: callers must not use it to merge or discard rows.
     """
-    return hashlib.sha256(raw_payload_text(payload).encode("utf-8")).hexdigest()
+    # Money Lover identifiers are export-local and may be regenerated.  The
+    # semantic key therefore deliberately excludes ``Id`` while retaining all
+    # transaction fields that describe the row.
+    semantic_payload = {key: value for key, value in payload.items() if key != "Id"}
+    return hashlib.sha256(raw_payload_text(semantic_payload).encode("utf-8")).hexdigest()
