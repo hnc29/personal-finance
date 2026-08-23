@@ -12,6 +12,12 @@ from app.models.credit_card import (
     CreditCardStatement,
     CreditCardStatementStatus,
 )
+from app.models.crypto import (
+    CRYPTO_QUANTITY_SCALE,
+    CryptoAsset,
+    CryptoHolding,
+    CryptoLot,
+)
 from app.models.import_batch import ImportBatch, RawImportRow
 from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
 from app.models.misa_export import (
@@ -46,6 +52,7 @@ from app.models.savings import (
 )
 
 __all__ = [
+    "CRYPTO_QUANTITY_SCALE",
     "GRAMS_PER_UNIT",
     "SUPPORTED_PRECIOUS_METAL_BRANDS",
     "Account",
@@ -56,6 +63,9 @@ __all__ = [
     "CreditCardProfile",
     "CreditCardStatement",
     "CreditCardStatementStatus",
+    "CryptoAsset",
+    "CryptoHolding",
+    "CryptoLot",
     "DayCountConvention",
     "FinancialEvent",
     "FinancialEventType",
