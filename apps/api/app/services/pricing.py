@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Iterable, Mapping, Sequence
 from decimal import Decimal
-from typing import Protocol
+from typing import Final, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.pricing import PriceQuote, PricingInstrument, QuoteState
+from app.models.pricing import (
+    PriceQuote,
+    PricingInstrument,
+    QuoteMatchLevel,
+    QuoteState,
+)
+
+VN_METAL_FALLBACK_PRIORITY: Final[tuple[str, ...]] = (
+    "BTMC",
+    "BTMH",
+    "DOJI",
+    "SJC",
+)
 
 
 class PricingProvider(Protocol):
@@ -55,6 +68,77 @@ def provider_quote(
         raise ValueError("provider quote cannot be observed after as_of")
     cache.put(canonical_instrument, quote)
     return quote
+
+
+def metal_provider_order(
+    brand: str,
+    configured_provider_codes: Iterable[str],
+    fallback_priority: Sequence[str] = VN_METAL_FALLBACK_PRIORITY,
+) -> tuple[str, ...]:
+    """Put an available own-brand provider first, followed by configured fallbacks."""
+    configured = {code.upper() for code in configured_provider_codes}
+    order: list[str] = []
+    normalized_brand = brand.upper()
+    if normalized_brand in configured:
+        order.append(normalized_brand)
+    for code in fallback_priority:
+        normalized_code = code.upper()
+        if normalized_code in configured and normalized_code not in order:
+            order.append(normalized_code)
+    return tuple(order)
+
+
+def select_metal_quote(
+    *,
+    instrument: str,
+    brand: str,
+    as_of: datetime.datetime,
+    providers: Mapping[str, PricingProvider],
+    historical_quotes: Mapping[str, Iterable[PriceQuote]] | None = None,
+    manual_quote: PriceQuote | None = None,
+    fallback_priority: Sequence[str] = VN_METAL_FALLBACK_PRIORITY,
+    recoverable_errors: tuple[type[Exception], ...] = (Exception,),
+) -> PriceQuote | None:
+    """Resolve an exact live quote, then prior successful BUY, then manual quote."""
+    normalized_providers = {code.upper(): provider for code, provider in providers.items()}
+    for code in metal_provider_order(
+        brand, normalized_providers, fallback_priority=fallback_priority
+    ):
+        try:
+            quote = normalized_providers[code].quote(instrument, as_of)
+        except recoverable_errors:
+            quote = None
+        if (
+            quote is not None
+            and quote.provider.code.upper() == code
+            and quote.match_level is QuoteMatchLevel.EXACT
+            and quote.state is QuoteState.LIVE
+            and quote.buy_price is not None
+            and quote.observed_at <= as_of
+        ):
+            return quote
+
+    previous = [
+        quote
+        for quote in (() if historical_quotes is None else historical_quotes.get(instrument, ()))
+        if quote.state in {QuoteState.LIVE, QuoteState.STALE}
+        and quote.match_level is QuoteMatchLevel.EXACT
+        and quote.buy_price is not None
+        and quote.observed_at <= as_of
+    ]
+    if previous:
+        return max(
+            previous,
+            key=lambda quote: (quote.observed_at, quote.quoted_at, quote.id or 0),
+        )
+    if (
+        manual_quote is not None
+        and manual_quote.state is QuoteState.MANUAL
+        and manual_quote.buy_price is not None
+        and manual_quote.observed_at <= as_of
+    ):
+        return manual_quote
+    return None
 
 
 def quote_state(

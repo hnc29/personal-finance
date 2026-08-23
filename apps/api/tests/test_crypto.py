@@ -1,10 +1,12 @@
 """Synthetic persistence checks for the crypto domain."""
 
 import datetime
+import json
 import os
 import subprocess
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import BigInteger, Float, Integer, Numeric, create_engine, text
@@ -14,7 +16,10 @@ from sqlalchemy.orm import Session
 from app.core.money import InvalidMoneyValue
 from app.models import Account, AccountType, FinancialEvent, FinancialEventType
 from app.models.crypto import CryptoAsset, CryptoHolding, CryptoLot
-from app.services.crypto_pricing import UnconfiguredCryptoPriceProvider
+from app.services.crypto_pricing import (
+    CoinGeckoPriceAdapter,
+    UnconfiguredCryptoPriceProvider,
+)
 
 
 @pytest.fixture
@@ -126,3 +131,25 @@ def test_live_pricing_is_an_explicit_unconfigured_boundary() -> None:
     provider = UnconfiguredCryptoPriceProvider()
     with pytest.raises(NotImplementedError, match="no live crypto price provider"):
         provider.get_price(CryptoAsset.BTC, "BTC_USD", datetime.date(2026, 8, 23))
+
+
+def test_coingecko_adapter_uses_exact_mapping_and_decimal_json() -> None:
+    response = Mock()
+    response.text = json.dumps(
+        {"bitcoin": {"usd": "65000.1234", "last_updated_at": 1787457600}}
+    )
+    client = Mock()
+    client.get.return_value = response
+    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
+    adapter = CoinGeckoPriceAdapter(
+        client,
+        "https://prices.example.invalid/simple/price",
+        {"BTC/USD": ("bitcoin", "usd")},
+    )
+
+    quote = adapter.quote("BTC/USD", as_of)
+
+    assert quote.provider.code == "COINGECKO"
+    assert quote.product_code == "bitcoin/usd"
+    assert quote.buy_price == Decimal("65000.1234")
+    assert quote.sell_price == Decimal("65000.1234")
