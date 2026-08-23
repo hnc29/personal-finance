@@ -16,6 +16,10 @@ from app.models.misa_export import (
     MisaExportFormat,
     MisaExportRun,
 )
+from app.models.reconciliation import (
+    ReconciliationCandidate,
+    ReconciliationCandidateState,
+)
 
 __all__ = [
     "Account",
@@ -32,4 +36,6 @@ __all__ = [
     "MisaExportRun",
     "MisaExportedEvent",
     "RawImportRow",
+    "ReconciliationCandidate",
+    "ReconciliationCandidateState",
 ]

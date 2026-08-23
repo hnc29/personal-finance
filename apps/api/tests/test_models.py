@@ -29,6 +29,7 @@ EXPECTED_TABLES = {
     "misa_account_mappings",
     "misa_export_runs",
     "misa_exported_events",
+    "reconciliation_candidates",
 }
 
 
