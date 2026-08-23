@@ -11,12 +11,26 @@ WEB_URL="http://127.0.0.1:$WEB_PORT"
 SMOKE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/personal-finance-smoke.XXXXXX")"
 API_PID=""
 WEB_PID=""
+kill_tree() {
+  local pid="${1:-}"
+
+  [[ -z "$pid" ]] && return 0
+
+  local child
+  while read -r child; do
+    [[ -n "$child" ]] && kill_tree "$child"
+  done < <(pgrep -P "$pid" 2>/dev/null || true)
+
+  kill "$pid" 2>/dev/null || true
+}
 
 cleanup() {
-  if [[ -n "$WEB_PID" ]]; then kill "$WEB_PID" 2>/dev/null || true; fi
-  if [[ -n "$API_PID" ]]; then kill "$API_PID" 2>/dev/null || true; fi
-  wait "$WEB_PID" 2>/dev/null || true
-  wait "$API_PID" 2>/dev/null || true
+  kill_tree "$WEB_PID"
+  kill_tree "$API_PID"
+
+  [[ -n "$WEB_PID" ]] && wait "$WEB_PID" 2>/dev/null || true
+  [[ -n "$API_PID" ]] && wait "$API_PID" 2>/dev/null || true
+
   rm -rf "$SMOKE_DIR"
 }
 trap cleanup EXIT INT TERM
@@ -25,7 +39,7 @@ wait_for_url() {
   local url="$1"
   local pid="$2"
   for _ in {1..60}; do
-    if curl --fail --silent --show-error "$url" >/dev/null; then return 0; fi
+   if curl --fail --silent "$url" >/dev/null 2>&1; then return 0; fi
     if ! kill -0 "$pid" 2>/dev/null; then return 1; fi
     sleep 0.25
   done
