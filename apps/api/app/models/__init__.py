@@ -9,6 +9,13 @@ from app.models.base import Base
 from app.models.category import Category
 from app.models.import_batch import ImportBatch, RawImportRow
 from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
+from app.models.misa_export import (
+    MisaAccountMapping,
+    MisaExportConfiguration,
+    MisaExportedEvent,
+    MisaExportFormat,
+    MisaExportRun,
+)
 
 __all__ = [
     "Account",
@@ -19,5 +26,10 @@ __all__ = [
     "FinancialEvent",
     "FinancialEventType",
     "ImportBatch",
+    "MisaAccountMapping",
+    "MisaExportConfiguration",
+    "MisaExportFormat",
+    "MisaExportRun",
+    "MisaExportedEvent",
     "RawImportRow",
 ]

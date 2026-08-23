@@ -25,12 +25,13 @@ def test_exactly_expected_revisions() -> None:
         "0002_ledger",
         "0003_import",
         "0004_normalized_import",
+        "0005_misa_export",
     }
 
 
 def test_exactly_one_head() -> None:
     script = _script_directory()
-    assert script.get_heads() == ["0004_normalized_import"]
+    assert script.get_heads() == ["0005_misa_export"]
 
 
 def test_migration_chain_order() -> None:
@@ -40,15 +41,18 @@ def test_migration_chain_order() -> None:
     ledger = script.get_revision("0002_ledger")
     imports = script.get_revision("0003_import")
     normalized_import = script.get_revision("0004_normalized_import")
+    misa_export = script.get_revision("0005_misa_export")
 
     assert core.down_revision is None
     assert ledger.down_revision == "0001_core"
     assert imports.down_revision == "0002_ledger"
     assert normalized_import.down_revision == "0003_import"
+    assert misa_export.down_revision == "0004_normalized_import"
 
     # walk_revisions is heads-first over the whole tree.
     chain = [revision.revision for revision in script.walk_revisions()]
     assert chain == [
+        "0005_misa_export",
         "0004_normalized_import",
         "0003_import",
         "0002_ledger",
