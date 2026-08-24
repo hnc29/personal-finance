@@ -11,5 +11,5 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body><QueryProvider>{children}</QueryProvider><ServiceWorker /></body></html>;
+  return <html lang="vi"><body><QueryProvider>{children}</QueryProvider><ServiceWorker /></body></html>;
 }

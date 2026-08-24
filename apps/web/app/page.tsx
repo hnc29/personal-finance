@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, Account, AccountType, Category, EventType } from "../lib/api";
+import { copy, Language, useLanguage } from "../lib/i18n";
 
 type View = "transactions" | "accounts" | "categories" | "review" | "portfolio";
 type EntryDraft = { accountId: string; amount: string };
@@ -13,7 +14,9 @@ const label = (value: string) => value.replaceAll("_", " ").toLowerCase().replac
 
 export default function Home() {
   const [view, setView] = useState<View>("transactions");
-  return <main><header><div><p className="eyebrow">Local-first ledger</p><h1>Personal Finance</h1></div><nav aria-label="Main navigation">{(["transactions", "accounts", "categories", "review", "portfolio"] as View[]).map(item => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} aria-label={`View ${label(item)}`} onClick={() => setView(item)} key={item}>{label(item)}</button>)}</nav></header>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "review" ? <Review /> : view === "portfolio" ? <Portfolio /> : <Transactions />}</main>;
+  const [language, setLanguage] = useLanguage();
+  const t = copy[language];
+  return <main><header><div><p className="eyebrow">{t.eyebrow}</p><h1>{t.title}</h1></div><div className="header-tools"><label className="language"><span>{t.language}</span><select aria-label={t.language} value={language} onChange={e => setLanguage(e.target.value as Language)}><option value="vi">Tiếng Việt</option><option value="en">English</option></select></label><nav aria-label="Main navigation">{(["transactions", "accounts", "categories", "review", "portfolio"] as View[]).map(item => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} onClick={() => setView(item)} key={item}>{t[item]}</button>)}</nav></div></header>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "review" ? <Review /> : view === "portfolio" ? <Portfolio /> : <Transactions />}</main>;
 }
 
 function Review() {
