@@ -13,6 +13,7 @@ from app.services.portfolio import (
     calculate_net_worth,
     persist_daily_snapshot,
 )
+from app.services.read_models import money, quote_meta
 
 
 class FakeSession:
@@ -137,3 +138,35 @@ def test_daily_snapshot_rejects_duplicate_date_and_partial_quote_metadata() -> N
                 )
             ],
         )
+
+
+def test_credit_card_negative_ledger_value_is_normalized_before_net_worth() -> None:
+    components = [
+        PortfolioComponentValue(PortfolioComponentType.BANK, "account:1", Decimal("100.0000")),
+        PortfolioComponentValue(PortfolioComponentType.CREDIT_CARD, "account:2", Decimal("-25.0000")),
+    ]
+    assert calculate_net_worth(components) == Decimal("75.0000")
+
+
+def test_money_serialization_uses_exact_fixed_point_contract() -> None:
+    assert money(Decimal("12.3400")) == "12.3400"
+    with pytest.raises(ValueError):
+        money(Decimal("12.34001"))
+
+
+def test_quote_metadata_preserves_state_times_and_valuation_price() -> None:
+    quoted_at = datetime.datetime(2026, 8, 23, 11, tzinfo=datetime.UTC)
+    observed_at = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
+    quote = PriceQuote(
+        provider=PricingProvider(code="SYNTHETIC", name="Synthetic"),
+        state=QuoteState.STALE,
+        quoted_at=quoted_at,
+        observed_at=observed_at,
+    )
+    quote.buy_price = Decimal("123.4567")
+    result = quote_meta(quote)
+    assert result.state == "STALE"
+    assert result.provider == "SYNTHETIC"
+    assert result.quoted_at == quoted_at
+    assert result.observed_at == observed_at
+    assert result.valuation_price == "123.4567"

@@ -7,6 +7,8 @@ class QuoteMeta(BaseModel):
     state: str
     provider: str | None = None
     quoted_at: datetime | None = None
+    observed_at: datetime | None = None
+    valuation_price: str | None = None
 
 class PortfolioRow(BaseModel):
     id: int
@@ -17,8 +19,9 @@ class PortfolioRow(BaseModel):
 
 class PortfolioOverview(BaseModel):
     as_of: datetime
-    net_worth: str
-    invested_assets: str
+    valuation_complete: bool
+    net_worth: str | None
+    invested_assets: str | None
     account_count: int
     accounts: list[PortfolioRow]
     savings: list[PortfolioRow]

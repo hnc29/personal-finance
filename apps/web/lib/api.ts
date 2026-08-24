@@ -10,9 +10,9 @@ export interface CategoryInput { name: string; parent_id?: number | null; is_act
 export type AccountUpdate = Partial<AccountInput>;
 export type CategoryUpdate = Partial<CategoryInput>;
 export interface EventInput { event_type: EventType; transaction_date: string; occurred_at?: string | null; category_id?: number | null; payee_text?: string; trip_event_text?: string; note?: string; entries: { account_id: number; amount: string }[] }
-export interface QuoteMeta { state: "LIVE" | "STALE" | "MANUAL" | "UNAVAILABLE"; provider: string | null; quoted_at: string | null }
+export interface QuoteMeta { state: "LIVE" | "STALE" | "MANUAL" | "UNAVAILABLE"; provider: string | null; quoted_at: string | null; observed_at: string | null; valuation_price: string | null }
 export interface PortfolioRow { id: number; name: string; value: string | null; quantity?: string | null; quote?: QuoteMeta | null }
-export interface PortfolioOverview { as_of: string; net_worth: string; invested_assets: string; account_count: number; accounts: PortfolioRow[]; savings: PortfolioRow[]; credit_cards: PortfolioRow[]; precious_metals: PortfolioRow[]; crypto: PortfolioRow[] }
+export interface PortfolioOverview { as_of: string; valuation_complete: boolean; net_worth: string | null; invested_assets: string | null; account_count: number; accounts: PortfolioRow[]; savings: PortfolioRow[]; credit_cards: PortfolioRow[]; precious_metals: PortfolioRow[]; crypto: PortfolioRow[] }
 export interface ImportBatch { id: number; source: string; original_filename: string; imported_at: string; row_count: number }
 export interface ReconciliationCandidate { id: number; state: string; raw_row_id: number; source_row_number: number; source_row_id: string | null; financial_event_id: number; transaction_date: string; event_type: string }
 

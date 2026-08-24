@@ -13,9 +13,14 @@ app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
 )
+cors_origins = list(
+    dict.fromkeys(
+        [*settings.cors_origins, "http://localhost:3000", "http://127.0.0.1:3000"]
+    )
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type", "Accept"],
