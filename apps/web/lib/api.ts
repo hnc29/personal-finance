@@ -21,6 +21,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? `Request failed (${response.status})`);
   return response.json() as Promise<T>;
 }
+export interface SavingsInput { name: string; institution: string; principal: string; opened_date: string }
+export interface MetalInput { metal_type: "GOLD" | "SILVER"; product_type: string; purity: string; quantity_grams: string; purchase_date: string; purchase_price: string; total_cost: string; pricing_instrument?: string }
+export interface CryptoInput { quantity: string; purchase_date: string; purchase_price: string; total_cost: string; pricing_instrument?: string }
 export const api = {
   accounts: { list: () => request<Account[]>("/accounts"), create: (input: AccountInput) => request<Account>("/accounts", { method: "POST", body: JSON.stringify(input) }), update: (id: number, input: AccountUpdate) => request<Account>(`/accounts/${id}`, { method: "PATCH", body: JSON.stringify(input) }) },
   categories: { list: () => request<Category[]>("/categories"), create: (input: CategoryInput) => request<Category>("/categories", { method: "POST", body: JSON.stringify(input) }), update: (id: number, input: CategoryUpdate) => request<Category>(`/categories/${id}`, { method: "PATCH", body: JSON.stringify(input) }) },
@@ -28,5 +31,9 @@ export const api = {
   portfolio: { overview: () => request<PortfolioOverview>("/portfolio/overview") },
   imports: { list: () => request<ImportBatch[]>("/import-batches") },
   reconciliation: { list: () => request<ReconciliationCandidate[]>("/reconciliation-candidates") },
-  assets: { savings: { list: () => request<unknown[]>("/assets/savings") }, metals: { list: () => request<unknown[]>("/assets/metals") }, crypto: { list: () => request<unknown[]>("/assets/crypto") } },
+  assets: {
+    savings: { list: () => request<unknown[]>("/assets/savings"), create: (input: SavingsInput) => request<unknown>("/assets/savings", { method: "POST", body: JSON.stringify(input) }) },
+    metals: { list: () => request<unknown[]>("/assets/metals"), create: (input: MetalInput) => request<unknown>("/assets/metals", { method: "POST", body: JSON.stringify(input) }) },
+    crypto: { list: () => request<unknown[]>("/assets/crypto"), create: (input: CryptoInput) => request<unknown>("/assets/crypto", { method: "POST", body: JSON.stringify(input) }) },
+  },
 };
