@@ -23,6 +23,6 @@ if (leaks.length) {
 }
 
 const dictionary = readFileSync(new URL("../lib/i18n.ts", import.meta.url), "utf8");
-for (const value of ["Không có", "Bút toán tài khoản", "Chọn tài khoản", "Thêm bút toán", "Tải dữ liệu thất bại", "Chi tiết"]) {
+for (const value of ["Không có", "Tài khoản giao dịch", "Chọn tài khoản", "Thêm dòng giao dịch", "Số tiền", "Thêm chi tiết", "Ẩn chi tiết", "Chọn danh mục", "Ghi giao dịch", "Tải dữ liệu thất bại", "Chi tiết"]) {
   if (!dictionary.includes(value)) throw new Error(`Missing Vietnamese regression string: ${value}`);
 }
