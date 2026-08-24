@@ -6,7 +6,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.models.category import Category
-from app.services.default_categories import seed_default_categories
+from app.services.default_categories import (
+    merge_default_categories,
+    missing_default_categories,
+)
 
 
 @pytest.fixture
@@ -20,7 +23,7 @@ def db(tmp_path) -> Session:
 
 
 def test_empty_database_gets_expected_hierarchy(db: Session) -> None:
-    assert seed_default_categories(db) == 61
+    assert merge_default_categories(db)["inserted"] == 61
     rows = list(db.scalars(select(Category)))
     by_name = {row.name: row for row in rows}
     assert by_name["Groceries"].parent is by_name["Food & Drinks"]
@@ -29,20 +32,22 @@ def test_empty_database_gets_expected_hierarchy(db: Session) -> None:
 
 
 def test_second_seed_is_idempotent(db: Session) -> None:
-    seed_default_categories(db)
-    assert seed_default_categories(db) == 0
+    merge_default_categories(db)
+    assert merge_default_categories(db)["inserted"] == 0
     assert len(list(db.scalars(select(Category)))) == 61
 
 
-def test_non_empty_database_is_untouched(db: Session) -> None:
-    db.add(Category(name="My category"))
+def test_non_empty_database_preserves_custom_and_merges(db: Session) -> None:
+    custom = Category(name="My category", is_active=False)
+    db.add(custom)
     db.commit()
-    assert seed_default_categories(db) == 0
-    assert [row.name for row in db.scalars(select(Category))] == ["My category"]
+    assert merge_default_categories(db)["inserted"] == 61
+    db.refresh(custom)
+    assert (custom.name, custom.parent_id, custom.is_active) == ("My category", None, False)
 
 
 def test_catalog_depth_is_at_most_three(db: Session) -> None:
-    seed_default_categories(db)
+    merge_default_categories(db)
     for row in db.scalars(select(Category)):
         depth = 1
         parent = row.parent
@@ -50,3 +55,25 @@ def test_catalog_depth_is_at_most_three(db: Session) -> None:
             depth += 1
             parent = parent.parent
         assert depth <= 3
+
+
+def test_partial_tree_is_completed_without_duplicates(db: Session) -> None:
+    expenses = Category(name="Expenses")
+    food = Category(name="Food & Drinks", parent=expenses)
+    db.add_all([expenses, food])
+    db.commit()
+    assert merge_default_categories(db)["inserted"] == 59
+    assert merge_default_categories(db)["inserted"] == 0
+    assert len(list(db.scalars(select(Category)))) == 61
+
+
+def test_conflict_is_preserved_and_reported(db: Session) -> None:
+    custom = Category(name="Custom")
+    groceries = Category(name="Groceries", parent=custom, is_active=False)
+    db.add_all([custom, groceries])
+    db.commit()
+    result = merge_default_categories(db)
+    db.refresh(groceries)
+    assert result["conflicts"] == 1
+    assert (groceries.parent_id, groceries.is_active) == (custom.id, False)
+    assert missing_default_categories(db) == 0

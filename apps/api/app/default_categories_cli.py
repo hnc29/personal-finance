@@ -3,16 +3,22 @@
 import argparse
 
 from app.core.database import SessionLocal
-from app.services.default_categories import seed_default_categories
+from app.services.default_categories import (
+    merge_default_categories,
+    missing_default_categories,
+)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed starter finance categories")
-    parser.add_argument("--force", action="store_true", help="add missing catalog paths to a non-empty table")
+    parser.add_argument("command", nargs="?", choices=("merge", "check"), default="merge")
     args = parser.parse_args()
     with SessionLocal() as db:
-        count = seed_default_categories(db, force=args.force)
-    print(f"Default categories: {count} created")
+        if args.command == "check":
+            result = {"missing": missing_default_categories(db)}
+        else:
+            result = merge_default_categories(db)
+    print("Default categories: " + ", ".join(f"{k}={v}" for k, v in result.items()))
 
 
 if __name__ == "__main__":

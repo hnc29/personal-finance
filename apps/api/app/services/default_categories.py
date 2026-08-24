@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.category import Category
@@ -27,23 +27,68 @@ DEFAULT_CATEGORIES: Sequence[CategoryNode] = (
 )
 
 
-def seed_default_categories(db: Session, *, force: bool = False) -> int:
-    """Seed the catalog when empty; forced calls add only missing exact paths."""
-    if not force and db.scalar(select(func.count(Category.id))) != 0:
-        return 0
-    created = 0
+def merge_default_categories(db: Session) -> dict[str, int]:
+    """Safely merge the canonical tree, preserving conflicting user rows."""
+    created = existing = conflicts = 0
 
     def add(nodes: Sequence[CategoryNode], parent: Category | None = None) -> None:
-        nonlocal created
+        nonlocal created, existing, conflicts
         for name, children in nodes:
-            category = db.scalar(select(Category).where(Category.name == name, Category.parent_id == (parent.id if parent else None)))
+            parent_id = parent.id if parent else None
+            category = db.scalar(select(Category).where(Category.name == name, Category.parent_id == parent_id))
             if category is None:
+                conflict = db.scalar(select(Category).where(Category.name == name))
+                if conflict is not None:
+                    conflicts += 1
+                    existing += 1
+                    add(children, conflict)
+                    continue
                 category = Category(name=name, parent=parent)
                 db.add(category)
                 db.flush()
                 created += 1
+            else:
+                existing += 1
             add(children, category)
 
-    add(DEFAULT_CATEGORIES)
-    db.commit()
-    return created
+    try:
+        add(DEFAULT_CATEGORIES)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {"inserted": created, "existing": existing, "conflicts": conflicts}
+
+
+def seed_default_categories(db: Session, *, force: bool = False) -> int:
+    """Backward-compatible wrapper for the safe merge."""
+    if not force and db.scalar(select(Category.id)) is not None:
+        return 0
+    return merge_default_categories(db)["inserted"]
+
+
+def missing_default_categories(db: Session) -> int:
+    """Count canonical paths that are absent without changing the database."""
+    missing = 0
+
+    def check(nodes: Sequence[CategoryNode], parent: Category | None = None) -> None:
+        nonlocal missing
+        for name, children in nodes:
+            parent_id = parent.id if parent else None
+            category = db.scalar(select(Category).where(Category.name == name, Category.parent_id == parent_id))
+            if category is None:
+                category = db.scalar(select(Category).where(Category.name == name))
+            if category is None:
+                missing += 1
+                check_missing(children)
+            else:
+                check(children, category)
+
+    def check_missing(nodes: Sequence[CategoryNode]) -> None:
+        nonlocal missing
+        for _name, children in nodes:
+            missing += 1
+            check_missing(children)
+
+    check(DEFAULT_CATEGORIES)
+    return missing

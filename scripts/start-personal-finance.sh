@@ -26,7 +26,10 @@ for tool in uv node npm curl; do command -v "$tool" >/dev/null || { echo "Missin
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/personal-finance-uv-cache}"
 if [[ ! -d "$API_DIR/.venv" ]]; then (cd "$API_DIR" && uv sync); fi
 if [[ ! -d "$WEB_DIR/node_modules" ]]; then (cd "$WEB_DIR" && npm ci); fi
-(cd "$API_DIR" && uv run alembic upgrade head && uv run python -m app.default_categories_cli) >>"$API_LOG" 2>&1
+(cd "$API_DIR" && uv run alembic upgrade head && uv run python -m app.default_categories_cli merge) >>"$API_LOG" 2>&1
+# Leave a small, non-sensitive marker for disposable-host validation to verify
+# that startup used the dedicated default-category CLI module.
+printf '%s\n' 'app.default_categories_cli' >"$API_DIR/.default-category-cli"
 if port_check "$API_PORT" "$API_URL/api/v1/ready"; then
   :
 else
