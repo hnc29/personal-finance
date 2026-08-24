@@ -57,10 +57,10 @@ export function canMoveCategory(id: number, parentId: number | null, categories:
   return [...subtree].every(nodeId => parentDepth + (getCategoryDepth(nodeId, categories) - getCategoryDepth(id, categories)) + 1 <= 3);
 }
 
-export function getParentOptions(categories: Category[], editingId?: number): { id: number; label: string }[] {
+export function getParentOptions(categories: Category[], editingId?: number, label: (name: string) => string = x => x): { id: number; label: string }[] {
   const byId = new Map(categories.map(c => [c.id, c]));
   return categories.filter(c => c.id !== editingId && (!editingId || !getDescendantIds(editingId, categories).has(c.id)) && getCategoryDepth(c.id, categories) < 3)
-    .map(c => { const names: string[] = []; let current: Category | undefined = c; const seen = new Set<number>(); while (current && !seen.has(current.id)) { seen.add(current.id); names.unshift(current.name); current = current.parent_id == null ? undefined : byId.get(current.parent_id); } return { id: c.id, label: names.join(" › ") }; });
+    .map(c => { const names: string[] = []; let current: Category | undefined = c; const seen = new Set<number>(); while (current && !seen.has(current.id)) { seen.add(current.id); names.unshift(label(current.name)); current = current.parent_id == null ? undefined : byId.get(current.parent_id); } return { id: c.id, label: names.join(" › ") }; });
 }
 
 export function toggleCategoryExpansion(expanded: Set<number>, id: number): Set<number> {
