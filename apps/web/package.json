@@ -8,7 +8,8 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "task026-ui-audit": "node scripts/task026-ui-audit.mjs",
-    "task027-ui-audit": "node scripts/task027-ui-audit.mjs"
+    "task027-ui-audit": "node scripts/task027-ui-audit.mjs",
+    "task029-ui-audit": "node scripts/task029-ui-audit.mjs"
   },
   "dependencies": {"@tanstack/react-query": "^5.66.8", "next": "^15.1.7", "react": "^19.0.0", "react-dom": "^19.0.0"},
   "devDependencies": {

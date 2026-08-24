@@ -1,5 +1,29 @@
 import type { Category, EventType } from "./api";
 
+export function normalizeCategorySearch(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase().trim();
+}
+
+export function filterCategoryTree(categories: Category[], query: string, label: (name: string) => string = x => x): Category[] {
+  const q = normalizeCategorySearch(query);
+  if (!q) return categories;
+  const keep = new Set<number>();
+  for (const c of categories) {
+    if (normalizeCategorySearch(`${c.name} ${label(c.name)}`).includes(q)) {
+      let current: Category | undefined = c;
+      while (current) { keep.add(current.id); current = current.parent_id == null ? undefined : categories.find(x => x.id === current!.parent_id); }
+    }
+  }
+  return categories.filter(c => keep.has(c.id));
+}
+
+export function toggleCategoryExpansion(expanded: Set<number>, id: number): Set<number> {
+  const next = new Set(expanded);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
 export function categoryRoot(category: Category, categories: Category[]): Category | undefined {
   let current: Category | undefined = category;
   const seen = new Set<number>();
