@@ -23,13 +23,36 @@ kill_tree() {
 
   kill "$pid" 2>/dev/null || true
 }
+kill_port_listeners() {
+  local port="$1"
+  local pid
 
+  while read -r pid; do
+    [[ -n "$pid" ]] && kill -TERM "$pid" 2>/dev/null || true
+  done < <(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+
+  for _ in {1..20}; do
+    if ! lsof -tiTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  while read -r pid; do
+    [[ -n "$pid" ]] && kill -KILL "$pid" 2>/dev/null || true
+  done < <(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+}
 cleanup() {
+  set +e
+
   kill_tree "$WEB_PID"
   kill_tree "$API_PID"
 
   [[ -n "$WEB_PID" ]] && wait "$WEB_PID" 2>/dev/null || true
   [[ -n "$API_PID" ]] && wait "$API_PID" 2>/dev/null || true
+
+  kill_port_listeners "$WEB_PORT"
+  kill_port_listeners "$API_PORT"
 
   rm -rf "$SMOKE_DIR"
 }
