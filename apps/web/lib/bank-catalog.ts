@@ -1,0 +1,10 @@
+export type BankCatalogEntry = { key: string; name: string; website: string; icon?: string; aliases: string[] };
+export const bankCatalog: BankCatalogEntry[] = [
+  ["vietcombank","Vietcombank","https://www.vietcombank.com.vn/","/banks/vietcombank.ico"],["bidv","BIDV","https://bidv.com.vn/","/banks/bidv.ico"],["vietinbank","VietinBank","https://www.vietinbank.vn/","/banks/vietinbank.ico"],["agribank","Agribank","https://www.agribank.com.vn/","/banks/agribank.ico"],["mb","MB","https://www.mbbank.com.vn/"],["techcombank","Techcombank","https://techcombank.com/","/banks/techcombank.ico"],["acb","ACB","https://acb.com.vn/","/banks/acb.webp"],["vpbank","VPBank","https://www.vpbank.com.vn/","/banks/vpbank.ico"],["tpbank","TPBank","https://tpb.vn/","/banks/tpbank.ico"],["vib","VIB","https://www.vib.com.vn/","/banks/vib.png"],["sacombank","Sacombank","https://www.sacombank.com.vn/","/banks/sacombank.png"],["hdbank","HDBank","https://hdbank.com.vn/","/banks/hdbank.ico"],["ocb","OCB","https://www.ocb.com.vn/","/banks/ocb.png"],["msb","MSB","https://www.msb.com.vn/","/banks/msb.png"],["shb","SHB","https://www.shb.com.vn/"],["seabank","SeABank","https://www.seabank.com.vn/","/banks/seabank.ico"],["lpbank","LPBank","https://lpbank.com.vn/","/banks/lpbank.ico"],["eximbank","Eximbank","https://eximbank.com.vn/","/banks/eximbank.ico"],["namabank","Nam A Bank","https://www.namabank.com.vn/","/banks/namabank.png"],["bacabank","Bac A Bank","https://www.baca-bank.vn/"]
+].map(([key,name,website,icon]) => ({key,name,website,icon,aliases:[name,key]} as BankCatalogEntry));
+bankCatalog.push({ key: "other", name: "Other / Custom", website: "", aliases: ["other", "custom"] });
+export const bankForName = (name: string) => {
+  const normalized = name.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const matches = bankCatalog.filter(b => b.key !== "other" && b.aliases.some(a => new RegExp(`(^| )${a.toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim()}($| )`).test(normalized)));
+  return matches.length === 1 ? matches[0] : undefined;
+};

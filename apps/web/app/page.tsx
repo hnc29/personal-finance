@@ -5,13 +5,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, Account, AccountType, Category, EventType } from "../lib/api";
 import { categoryLabel, copy, enumLabel, Language, transactionUiKeys, ui, useLanguage } from "../lib/i18n";
 import { categoriesForEventType, categoryDepth, categoryIcon, categoryIsValidForEventType } from "../lib/category-tree";
+import { bankCatalog, bankForName } from "../lib/bank-catalog";
 
 type View = "transactions" | "accounts" | "categories" | "review" | "portfolio" | "assets" | "data";
 type EntryDraft = { accountId: string; amount: string };
 const accountTypes: AccountType[] = ["CASH", "BANK", "CREDIT_CARD", "EWALLET"];
 const eventTypes: EventType[] = ["EXPENSE", "INCOME", "TRANSFER", "CREDIT_CARD_PAYMENT", "INTEREST", "SAVINGS_DEPOSIT", "SAVINGS_WITHDRAWAL", "ASSET_PURCHASE", "ASSET_SALE", "ADJUSTMENT"];
 const moneyPattern = "^-?\\d+(\\.\\d{1,4})?$";
-const bankTemplates = ["Vietcombank", "BIDV", "VietinBank", "Agribank", "MB", "Techcombank", "ACB", "VPBank", "TPBank", "VIB", "Sacombank", "HDBank", "OCB", "MSB", "SHB", "SeABank", "LPBank", "Eximbank", "Nam A Bank", "Bac A Bank", "Other / Custom bank"];
+const bankTemplates = [...bankCatalog.map(x => x.name), "Other / Custom bank"];
+function BankMark({ name }: { name: string }) { const bank = bankForName(name); return bank?.icon ? <img src={bank.icon} alt={`${bank.name} logo`} className="bank-mark" /> : <span className="bank-mark fallback" aria-hidden="true">{name.trim().slice(0, 2).toUpperCase()}</span>; }
 const LanguageContext = createContext<Language>("vi");
 function useI18n() {
   const language = useContext(LanguageContext);
