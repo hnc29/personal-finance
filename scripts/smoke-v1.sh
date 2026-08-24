@@ -55,6 +55,7 @@ cleanup() {
   kill_port_listeners "$API_PORT"
 
   rm -rf "$SMOKE_DIR"
+  rm -rf "$WEB_DIR/.next-smoke"
 }
 trap cleanup EXIT INT TERM
 
@@ -76,6 +77,7 @@ export PF_CORS_ORIGINS="[\"$WEB_URL\"]"
 (
   cd "$API_DIR"
   uv run alembic upgrade head
+  uv run python -m app.default_categories_cli merge
   uv run uvicorn app.main:app --host 127.0.0.1 --port "$API_PORT"
 ) >"$SMOKE_DIR/api.log" 2>&1 &
 API_PID="$!"
@@ -103,11 +105,15 @@ node -e 'const value=JSON.parse(process.argv[1]); if (value.enabled !== false ||
 
 cors_headers="$(curl --silent --show-error -D - -o /dev/null -H "Origin: $WEB_URL" "$API_URL/api/v1/health")"
 printf '%s' "$cors_headers" | tr -d '\r' | grep -F "access-control-allow-origin: $WEB_URL" >/dev/null
+categories_json="$(curl --fail --silent --show-error "$API_URL/api/v1/categories")"
+node -e 'const rows=JSON.parse(process.argv[1]); const names=new Set(rows.map(x=>x.name)); if(rows.length<20 || !["Expenses","Income","Food & Drinks","Salary"].every(x=>names.has(x))) process.exit(1)' "$categories_json"
+curl --fail --silent --show-error "$API_URL/api/v1/accounts" >/dev/null
+curl --fail --silent --show-error "$API_URL/api/v1/financial-events" >/dev/null
 
 (
   cd "$WEB_DIR"
-  NEXT_PUBLIC_API_URL="$API_URL" npm run build
-  NEXT_PUBLIC_API_URL="$API_URL" npm run start -- --hostname 127.0.0.1 --port "$WEB_PORT"
+  PF_NEXT_DIST_DIR=.next-smoke NEXT_PUBLIC_API_URL="$API_URL" npm run build
+  PF_NEXT_DIST_DIR=.next-smoke NEXT_PUBLIC_API_URL="$API_URL" npm run start -- --hostname 127.0.0.1 --port "$WEB_PORT"
 ) >"$SMOKE_DIR/web.log" 2>&1 &
 WEB_PID="$!"
 wait_for_url "$WEB_URL/" "$WEB_PID" || {

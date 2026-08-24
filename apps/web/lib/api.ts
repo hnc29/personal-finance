@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 export type AccountType = "CASH" | "BANK" | "CREDIT_CARD" | "EWALLET";
 export type EventType = "EXPENSE" | "INCOME" | "TRANSFER" | "CREDIT_CARD_PAYMENT" | "INTEREST" | "SAVINGS_DEPOSIT" | "SAVINGS_WITHDRAWAL" | "ASSET_PURCHASE" | "ASSET_SALE" | "ADJUSTMENT";
 export interface Account { id: number; name: string; account_type: AccountType; currency: string; is_active: boolean }
