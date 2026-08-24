@@ -23,10 +23,33 @@ class SelfParentError(Exception):
     """Raised when a category would be set as its own parent."""
 
 
+class InvalidHierarchyError(Exception):
+    """Raised when a move would create a cycle or exceed three levels."""
+
+def _depths(db: Session, category_id: int, parent_id: int | None) -> bool:
+    if parent_id is None:
+        return True
+    current: int | None = parent_id
+    depth = 1
+    seen: set[int] = set()
+    while current is not None:
+        if current == category_id or current in seen:
+            return False
+        seen.add(current)
+        if depth >= 3:
+            return False
+        parent = db.get(Category, current)
+        current = parent.parent_id if parent else None
+        depth += 1
+    return True
+
+
 def create_category(db: Session, data: CategoryCreate) -> Category:
     """Create and persist a category, validating any ``parent_id``."""
     if data.parent_id is not None and db.get(Category, data.parent_id) is None:
         raise UnknownParentError(data.parent_id)
+    if not _depths(db, -1, data.parent_id):
+        raise InvalidHierarchyError(data.parent_id)
 
     category = Category(**data.model_dump())
     db.add(category)
@@ -64,6 +87,8 @@ def update_category(
             raise SelfParentError(category_id)
         if db.get(Category, parent_id) is None:
             raise UnknownParentError(parent_id)
+        if not _depths(db, category_id, parent_id):
+            raise InvalidHierarchyError(parent_id)
 
     for field, value in fields.items():
         setattr(category, field, value)

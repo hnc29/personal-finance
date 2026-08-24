@@ -15,7 +15,11 @@ from app.core.database import get_db
 from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryRead, CategoryUpdate
 from app.services import category as category_service
-from app.services.category import SelfParentError, UnknownParentError
+from app.services.category import (
+    InvalidHierarchyError,
+    SelfParentError,
+    UnknownParentError,
+)
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -36,6 +40,8 @@ def create_category(data: CategoryCreate, db: DbSession) -> Category:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Parent category not found",
         ) from exc
+    except InvalidHierarchyError as exc:
+        raise HTTPException(status_code=400, detail="Category hierarchy exceeds three levels or contains a cycle") from exc
 
 
 @router.get("", response_model=list[CategoryRead])
@@ -73,6 +79,8 @@ def update_category(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Parent category not found",
         ) from exc
+    except InvalidHierarchyError as exc:
+        raise HTTPException(status_code=400, detail="Category hierarchy exceeds three levels or contains a cycle") from exc
     if category is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

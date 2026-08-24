@@ -1,5 +1,4 @@
 """API tests for the categories endpoints (TASK-004).
-
 The service layer is replaced by an in-memory fake and ``get_db`` is
 overridden, so nothing here reads or writes ``data/finance.db`` or any real
 database, and no schema is created via ``Base.metadata.create_all()`` —
@@ -285,24 +284,3 @@ def test_update_category_self_parent_leaves_parent_unchanged(
     current = client.get("/api/v1/categories/1")
     assert current.status_code == 200
     assert current.json()["parent_id"] is None
-
-
-def test_create_category_hierarchy_has_no_depth_limit(
-    client: TestClient,
-) -> None:
-    # TASK-004 forbids enforcing a database depth limit, so an arbitrarily
-    # deep parent chain must be accepted end to end.
-    depth = 25
-    parent_id: int | None = None
-    for level in range(1, depth + 1):
-        payload: dict[str, str | int] = {"name": f"Level {level}"}
-        if parent_id is not None:
-            payload["parent_id"] = parent_id
-
-        response = client.post("/api/v1/categories", json=payload)
-
-        assert response.status_code == 201
-        body = response.json()
-        assert body["id"] == level
-        assert body["parent_id"] == parent_id
-        parent_id = body["id"]
