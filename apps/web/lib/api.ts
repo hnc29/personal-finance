@@ -28,4 +28,5 @@ export const api = {
   portfolio: { overview: () => request<PortfolioOverview>("/portfolio/overview") },
   imports: { list: () => request<ImportBatch[]>("/import-batches") },
   reconciliation: { list: () => request<ReconciliationCandidate[]>("/reconciliation-candidates") },
+  assets: { savings: { list: () => request<unknown[]>("/assets/savings") }, metals: { list: () => request<unknown[]>("/assets/metals") }, crypto: { list: () => request<unknown[]>("/assets/crypto") } },
 };
