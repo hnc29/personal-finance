@@ -9,7 +9,7 @@ import { CategoryIcon, IconGlyph, ICON_GROUPS, iconLabel } from "../lib/category
 import { bankCatalog } from "../lib/bank-catalog";
 import { AccountLogo } from "../lib/account-logos";
 
-type View = "transactions" | "accounts" | "categories" | "review" | "portfolio" | "assets" | "data";
+type View = "transactions" | "accounts" | "categories" | "review" | "assets" | "data";
 type EntryDraft = { accountId: string; amount: string };
 const accountTypes: AccountType[] = ["CASH", "BANK", "CREDIT_CARD", "EWALLET"];
 // TASK-034: the composer only creates the four transaction types a person
@@ -52,7 +52,7 @@ export default function Home() {
   const [view, setView] = useState<View>("transactions");
   const [language, setLanguage] = useLanguage();
   const t = copy[language];
-  return <LanguageContext.Provider value={language}><main><header><div><p className="eyebrow">{t.eyebrow}</p><h1>{t.title}</h1></div><div className="header-tools"><div className="language" role="group" aria-label={t.language}><button type="button" aria-pressed={language === "vi"} className={language === "vi" ? "active" : ""} onClick={() => setLanguage("vi")}>🇻🇳 <span>Tiếng Việt</span></button><button type="button" aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>🇺🇸 <span>English</span></button></div><nav aria-label={ui(language, "Main navigation")}>{(["transactions", "accounts", "categories", "assets", "data", "review", "portfolio"] as View[]).map(item => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} onClick={() => setView(item)} key={item}>{t[item as keyof typeof t] ?? item}</button>)}</nav></div></header>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "review" ? <Review /> : view === "portfolio" ? <Portfolio /> : view === "assets" ? <Assets /> : view === "data" ? <DataPage /> : <Transactions />}</main></LanguageContext.Provider>;
+  return <LanguageContext.Provider value={language}><main><header><div><p className="eyebrow">{t.eyebrow}</p><h1>{t.title}</h1></div><div className="header-tools"><div className="language" role="group" aria-label={t.language}><button type="button" aria-pressed={language === "vi"} className={language === "vi" ? "active" : ""} onClick={() => setLanguage("vi")}>🇻🇳 <span>Tiếng Việt</span></button><button type="button" aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>🇺🇸 <span>English</span></button></div><div className="nav-scroll"><nav aria-label={ui(language, "Main navigation")}>{(["transactions", "accounts", "categories", "assets", "data", "review"] as View[]).map(item => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} onClick={() => setView(item)} key={item}>{t[item as keyof typeof t] ?? item}</button>)}</nav></div></div></header>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "review" ? <Review /> : view === "assets" ? <Assets /> : view === "data" ? <DataPage /> : <Transactions />}</main></LanguageContext.Provider>;
 }
 
 function Assets() {
@@ -80,7 +80,22 @@ function Assets() {
     metals: <form className="panel form asset-form" onSubmit={e => submit(e, "metal")}><h3>{tr("Precious metals")}</h3><select name="metal_type"><option value="GOLD">{tr("Gold")}</option><option value="SILVER">{tr("Silver")}</option></select><select name="brand" aria-label={tr("Product catalog")}>{(brands.data ?? []).map(b => <option value={b} key={b}>{label(b)}</option>)}</select><input name="product_type" placeholder={tr("Product")} required /><input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" required /><input name="purity" placeholder={tr("Purity")} required /><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" required /><input name="date" type="date" required /><button className="primary">+ {tr("Add")}</button></form>,
     crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><CoinPicker selected={coin} onSelect={setCoin} tr={tr} /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" required /><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" required /><input name="date" type="date" required /><button className="primary" disabled={!coin}>+ {tr("Add")}</button></form>,
   };
-  return <Section title="Assets" subtitle="Quản lý tài sản theo từng nhóm."><div className="asset-tabs" role="tablist">{([["savings","Savings"],["metals","Precious metals"],["crypto","Crypto"]] as const).map(([id,label])=><button type="button" role="tab" aria-selected={tab===id} className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{tr(label)}</button>)}</div>{tab === "savings" ? <SavingsPanel /> : <>{forms[tab]}<div className="asset-sections"><AssetSection title={tab === "metals" ? "Precious metals" : "Crypto"} rows={tab === "metals" ? q.data?.precious_metals ?? [] : q.data?.crypto ?? []}/></div></>}</Section>;
+  const p = q.data;
+  return <Section title="Assets" subtitle="Manage assets, investments, and net worth in one place.">
+    <Loading show={q.isPending} />
+    <Error error={q.error} />
+    {p && <>
+      <div className="portfolio-grid metrics-grid">
+        <article className="panel"><h3>{tr("Net worth")}</h3><p className="metric">{fmtMoney(p.net_worth) ?? tr("Valuation incomplete")}</p></article>
+        <article className="panel"><h3>{tr("Accounts in scope")}</h3><p className="metric">{p.account_count}</p></article>
+        <article className="panel"><h3>{tr("Invested assets")}</h3><p className="metric">{fmtMoney(p.invested_assets) ?? tr("Valuation incomplete")}</p></article>
+      </div>
+      {!p.valuation_complete && <p className="quote-notice" role="status">{tr("Valuation incomplete: one or more invested assets has no usable quote.")}</p>}
+    </>}
+    <div className="asset-tabs" role="tablist">{([["savings","Savings"],["metals","Precious metals"],["crypto","Crypto"]] as const).map(([id,label])=><button type="button" role="tab" aria-selected={tab===id} className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{tr(label)}</button>)}</div>
+    {tab === "savings" ? <SavingsPanel /> : <>{forms[tab]}<div className="asset-sections"><AssetSection title={tab === "metals" ? "Precious metals" : "Crypto"} rows={tab === "metals" ? p?.precious_metals ?? [] : p?.crypto ?? []}/></div></>}
+    {p && <div className="asset-sections asset-sections-secondary"><AssetSection title="Credit cards" rows={p.credit_cards}/></div>}
+  </Section>;
 }
 
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
@@ -514,12 +529,6 @@ function Review() {
     },
   });
   return <Section title="Import & reconciliation review" subtitle="Persisted import batches and reconciliation candidates."><div className="review-grid"><article className="panel"><h3>{tr("Import batches")}</h3><Loading show={imports.isPending}/><Error error={imports.error}/><Empty show={!imports.isPending && imports.data?.length === 0} text="No import batches yet."/>{imports.data?.map(x => <div className="review-row" key={x.id}><div><strong>{x.original_filename}</strong><small>{x.source} · {x.row_count} {tr("rows")} · {x.applied_row_count >= x.row_count ? tr("Applied") : `${x.applied_row_count}/${x.row_count} ${tr("applied")}`}</small>{applyStatus[x.id] && <small className="hint">{applyStatus[x.id]}</small>}</div><div className="review-row-actions"><small>{x.imported_at}</small><button type="button" className="secondary" disabled={apply.isPending && apply.variables === x.id} onClick={() => apply.mutate(x.id)}>{apply.isPending && apply.variables === x.id ? tr("Applying...") : x.applied_row_count >= x.row_count ? tr("Re-apply") : tr("Apply")}</button></div></div>)}</article><article className="panel"><h3>{tr("Reconciliation candidates")}</h3><Loading show={reconciliation.isPending}/><Error error={reconciliation.error}/><Empty show={!reconciliation.isPending && reconciliation.data?.length === 0} text="No reconciliation candidates yet."/>{reconciliation.data?.map(x => <div className="review-row" key={x.id}><div><strong>{tr("Raw row")} #{x.source_row_number}</strong><small>{x.transaction_date} · {label(x.event_type)} · {tr("Event")} #{x.financial_event_id}</small></div><span className="badge warning">{label(x.state)}</span></div>)}</article></div></Section>;
-}
-
-function Portfolio() {
-  const { tr } = useI18n();
-  const query = useQuery({ queryKey: ["portfolio"], queryFn: api.portfolio.overview }); const p = query.data;
-  return <Section title="Portfolio & net worth" subtitle="Current persisted balances and accepted valuations."><Loading show={query.isPending}/><Error error={query.error}/>{p && <><div className="portfolio-grid metrics-grid"><article className="panel"><h3>{tr("Net worth")}</h3><p className="metric">{fmtMoney(p.net_worth) ?? tr("Valuation incomplete")}</p></article><article className="panel"><h3>{tr("Accounts in scope")}</h3><p className="metric">{p.account_count}</p></article><article className="panel"><h3>{tr("Invested assets")}</h3><p className="metric">{fmtMoney(p.invested_assets) ?? tr("Valuation incomplete")}</p></article></div>{!p.valuation_complete && <p className="quote-notice" role="status">{tr("Valuation incomplete: one or more invested assets has no usable quote.")}</p>}<div className="asset-sections"><AssetSection title="Savings" rows={p.savings}/><AssetSection title="Credit cards" rows={p.credit_cards}/><AssetSection title="Precious metals" rows={p.precious_metals}/><AssetSection title="Crypto" rows={p.crypto}/></div></>}</Section>;
 }
 
 function AssetSection({ title, rows }: { title: string; rows: import("../lib/api").PortfolioRow[] }) { const { label, tr } = useI18n(); return <article className="panel asset-panel"><h3>{tr(title)}</h3><Empty show={rows.length === 0} text={`No ${title.toLowerCase()} yet.`}/><div className="asset-list">{rows.map(row => <div className="asset-row" key={row.id}><div><strong>{row.name}</strong><small>{fmtMoney(row.value) ?? tr("Valuation unavailable")}</small></div>{row.quote && <div><span className="provider">{row.quote.provider ?? tr("No provider")}</span><span className="quote-state">{label(row.quote.state)}</span><small>{row.quote.quoted_at ?? tr("No quote timestamp")}</small></div>}</div>)}</div></article>; }

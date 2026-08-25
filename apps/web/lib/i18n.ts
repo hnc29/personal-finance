@@ -30,6 +30,7 @@ const enUi = {
   , "Apply":"Apply", "Re-apply":"Re-apply", "Applying...":"Applying...", "Applied":"Applied", "applied":"applied", "rows with unmatched wallet":"rows with unmatched wallet", "invalid rows":"invalid rows"
   , "Choose an account":"Choose an account", "Enter an amount":"Enter an amount", "Choose a category":"Choose a category"
   , "Delete":"Delete", "Confirm delete":"Confirm delete", "Deleting...":"Deleting...", "Transaction details":"Transaction details", "Editing transaction":"Editing transaction", "This transaction type is managed on its own page and can't be edited or deleted here.":"This transaction type is managed on its own page and can't be edited or deleted here."
+  , "Assets":"Assets", "Manage assets, investments, and net worth in one place.":"Manage assets, investments, and net worth in one place."
 } as const;
 export type UiKey = keyof typeof enUi;
 export const transactionUiKeys = {
@@ -52,6 +53,7 @@ const viUi: Record<string, string> = {
   , "Apply":"Đưa vào giao dịch", "Re-apply":"Đưa lại vào giao dịch", "Applying...":"Đang xử lý...", "Applied":"Đã đưa vào giao dịch", "applied":"đã đưa vào giao dịch", "rows with unmatched wallet":"dòng chưa khớp ví", "invalid rows":"dòng lỗi"
   , "Choose an account":"Vui lòng chọn tài khoản", "Enter an amount":"Vui lòng nhập số tiền", "Choose a category":"Vui lòng chọn danh mục"
   , "Delete":"Xoá", "Confirm delete":"Xác nhận xoá", "Deleting...":"Đang xoá...", "Transaction details":"Chi tiết giao dịch", "Editing transaction":"Đang sửa giao dịch", "This transaction type is managed on its own page and can't be edited or deleted here.":"Loại giao dịch này được quản lý ở trang riêng (Tiết kiệm/Tài sản) và không thể sửa hoặc xoá tại đây."
+  , "Assets":"Tài sản", "Manage assets, investments, and net worth in one place.":"Quản lý tài sản, đầu tư và tài sản ròng tại một nơi."
 };
 export function ui(language: Language, text: string): string {
   const extra: Record<string, string> = { "Search category":"Tìm danh mục", "Collapse":"Thu gọn", "Expand":"Mở rộng", "All":"Tất cả", "Expenses":"Chi tiêu", "Income":"Thu nhập", "None":"Không có danh mục cha", "Add child category":"Thêm danh mục con", "Other / Unclassified":"Khác / Chưa phân loại", "No categories found.":"Không tìm thấy danh mục" };
