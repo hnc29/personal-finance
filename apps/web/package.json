@@ -7,10 +7,11 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
     "task026-ui-audit": "node scripts/task026-ui-audit.mjs",
     "task027-ui-audit": "node scripts/task027-ui-audit.mjs",
-    "task029-ui-audit": "node scripts/task029-ui-audit.mjs"
-    ,"task030-category-tree-audit": "node scripts/task030-category-tree-audit.mjs",
+    "task029-ui-audit": "node scripts/task029-ui-audit.mjs",
+    "task030-category-tree-audit": "node scripts/task030-category-tree-audit.mjs",
     "task031-ux-audit": "node scripts/task031-ux-audit.mjs",
     "task032-ux-audit": "node scripts/task032-ux-audit.mjs",
     "task033-savings-ux-audit": "node scripts/task033-savings-ux-audit.mjs",
@@ -24,9 +25,15 @@
     "task041-expense-data-required-audit": "node scripts/task041-expense-data-required-audit.mjs",
     "task042-transaction-detail-edit-delete-audit": "node scripts/task042-transaction-detail-edit-delete-audit.mjs"
   },
-  "dependencies": {"@tanstack/react-query": "^5.66.8", "next": "^15.1.7", "react": "^19.0.0", "react-dom": "^19.0.0"},
+  "dependencies": {
+    "@tanstack/react-query": "^5.66.8",
+    "next": "^15.1.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.13.4",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
