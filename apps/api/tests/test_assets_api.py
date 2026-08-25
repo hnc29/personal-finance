@@ -80,6 +80,34 @@ def test_create_metal_persists_selected_brand(client: TestClient) -> None:
     assert listed[0]["brand"] == "SJC"
 
 
+def test_create_metal_rejects_purity_outside_unit_range(client: TestClient) -> None:
+    """Regression test (found via E2E, see docs/qa/QA_STATE.md Batch #2):
+    purity is a (0, 1] fraction (the DB's ck_precious_holding_purity_range
+    CHECK enforces this too), but the API used to accept anything -- e.g.
+    the common Vietnamese "999" per-mille gold notation -- and let an
+    unhandled IntegrityError 500 out instead of a clean validation error.
+    """
+    base = {
+        "metal_type": "GOLD",
+        "brand": "SJC",
+        "product_type": "Nhẫn tròn trơn",
+        "quantity_grams": "3.75",
+        "purchase_date": "2026-08-01",
+        "purchase_price": "7500000",
+        "total_cost": "7500000",
+    }
+    too_high = client.post("/api/v1/assets/metals", json={**base, "purity": "999"})
+    assert too_high.status_code == 422
+
+    zero = client.post("/api/v1/assets/metals", json={**base, "purity": "0"})
+    assert zero.status_code == 422
+
+    negative = client.post("/api/v1/assets/metals", json={**base, "purity": "-0.5"})
+    assert negative.status_code == 422
+
+    assert client.get("/api/v1/assets/metals").json() == []
+
+
 def test_create_crypto_persists_arbitrary_coingecko_id_not_only_btc(
     client: TestClient,
 ) -> None:

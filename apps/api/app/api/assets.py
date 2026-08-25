@@ -55,6 +55,20 @@ class MetalCreate(BaseModel):
     total_cost: Decimal
     pricing_instrument: str | None = None
 
+    # BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): purity is
+    # stored as a (0, 1] fraction (PreciousMetalHolding.purity setter ->
+    # money_to_scaled, checked in the DB by ck_precious_holding_purity_range),
+    # but nothing rejected an out-of-range value before it hit that CHECK
+    # constraint -- e.g. a user typing the common Vietnamese "999" per-mille
+    # gold-purity notation instead of "0.999" crashed the request with an
+    # unhandled 500 IntegrityError instead of a clean validation error.
+    @field_validator("purity")
+    @classmethod
+    def purity_in_unit_range(cls, value: Decimal) -> Decimal:
+        if not (0 < value <= 1):
+            raise ValueError("purity must be a fraction between 0 (exclusive) and 1 (inclusive), e.g. 0.999 for 999/1000 gold")
+        return value
+
 
 class CryptoCreate(BaseModel):
     coingecko_id: str
