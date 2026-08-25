@@ -104,8 +104,3 @@ export function categoriesForEventType(type: EventType, categories: Category[]):
 export function categoryIsValidForEventType(type: EventType, categoryId: string, categories: Category[]): boolean {
   return categoryId !== "" && categoriesForEventType(type, categories).some(category => String(category.id) === categoryId);
 }
-
-export function categoryIcon(name: string): string {
-  const icons: Record<string, string> = { Expenses: "↘", Income: "↗", "Food & Drinks": "◉", Groceries: "▦", Salary: "₫", Interest: "%", Transportation: "→", Shopping: "□" };
-  return icons[name] ?? "•";
-}

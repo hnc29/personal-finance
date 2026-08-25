@@ -29,6 +29,7 @@ class AccountUpdate(BaseModel):
     account_type: AccountType | None = None
     currency: str | None = None
     is_active: bool | None = None
+    sort_order: int | None = None
 
 
 class AccountRead(AccountBase):
@@ -37,3 +38,4 @@ class AccountRead(AccountBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    sort_order: int

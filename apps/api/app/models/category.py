@@ -28,6 +28,16 @@ class Category(Base):
         default=True,
         server_default=text("1"),
     )
+    icon: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        default=None,
+    )
+    """Optional icon-registry key overriding the name-based default icon.
+
+    ``None`` means "use the client's name-based default" -- see migration
+    0017 for why this is never backfilled.
+    """
 
     parent: Mapped["Category | None"] = relationship(
         "Category",

@@ -21,9 +21,25 @@ DEFAULT_CATEGORIES: Sequence[CategoryNode] = (
         ("Education", (("Tuition", ()), ("Books", ()), ("Courses", ()))),
         ("Travel", (("Flights", ()), ("Accommodation", ()), ("Local Transport", ()), ("Activities", ()))),
         ("Gifts & Donations", (("Gifts", ()), ("Charity", ()))),
-        ("Insurance", ()), ("Taxes & Fees", ()), ("Other Expense", ()),
+        ("Insurance", ()), ("Taxes & Fees", ()),
+        # TASK-035: added while reconciling the seed taxonomy against a real
+        # Moneylover export -- these three showed up as materially large,
+        # recurring categories with no good existing fit (debt/loan cash
+        # flow, crypto investment outflow, and large pay-on-behalf transfers).
+        ("Debt Repayment", ()), ("Loans Given", ()),
+        ("Investments", (("Crypto", ()),)),
+        ("Paid on Behalf", ()),
+        ("Other Expense", ()),
     )),
-    ("Income", (("Salary", ()), ("Bonus", ()), ("Business Income", ()), ("Investment Income", ()), ("Interest", ()), ("Gifts Received", ()), ("Refunds", ()), ("Other Income", ()))),
+    ("Income", (
+        ("Salary", ()), ("Bonus", ()), ("Business Income", ()),
+        ("Investment Income", (("Crypto Gains", ()),)),
+        ("Interest", ()), ("Gifts Received", ()), ("Refunds", ()),
+        # TASK-035: income-side counterparts of the debt/loan and
+        # pay-on-behalf additions above.
+        ("Loans & Debt Collection", ()), ("Collected on Behalf", ()),
+        ("Other Income", ()),
+    )),
 )
 
 

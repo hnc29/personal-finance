@@ -14,6 +14,8 @@ class CategoryBase(BaseModel):
     name: str
     parent_id: int | None = None
     is_active: bool = True
+    icon: str | None = None
+    """Icon-registry key (opaque to the backend); ``None`` = client default."""
 
 
 class CategoryCreate(CategoryBase):
@@ -26,6 +28,7 @@ class CategoryUpdate(BaseModel):
     name: str | None = None
     parent_id: int | None = None
     is_active: bool | None = None
+    icon: str | None = None
 
 
 class CategoryRead(CategoryBase):

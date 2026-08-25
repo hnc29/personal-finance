@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     ollama_model: str = ""
     ollama_timeout_seconds: int = 10
 
+    coingecko_coins_url: str = "https://api.coingecko.com/api/v3/coins/list"
+    coingecko_timeout_seconds: float = 10.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> object:

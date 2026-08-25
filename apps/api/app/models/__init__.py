@@ -14,7 +14,6 @@ from app.models.credit_card import (
 )
 from app.models.crypto import (
     CRYPTO_QUANTITY_SCALE,
-    CryptoAsset,
     CryptoHolding,
     CryptoLot,
 )
@@ -62,6 +61,7 @@ from app.models.savings import (
     SavingsAccountStatus,
     SavingsProduct,
     SavingsTerm,
+    SavingsTermStatus,
 )
 
 __all__ = [
@@ -76,7 +76,6 @@ __all__ = [
     "CreditCardProfile",
     "CreditCardStatement",
     "CreditCardStatementStatus",
-    "CryptoAsset",
     "CryptoHolding",
     "CryptoLot",
     "DayCountConvention",
@@ -111,5 +110,6 @@ __all__ = [
     "SavingsAccountStatus",
     "SavingsProduct",
     "SavingsTerm",
+    "SavingsTermStatus",
     "quantity_to_grams",
 ]

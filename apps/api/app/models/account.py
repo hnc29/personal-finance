@@ -2,7 +2,7 @@
 
 import enum
 
-from sqlalchemy import Boolean, Enum, String, text
+from sqlalchemy import Boolean, Enum, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -43,4 +43,10 @@ class Account(Base):
         nullable=False,
         default=True,
         server_default=text("1"),
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
     )

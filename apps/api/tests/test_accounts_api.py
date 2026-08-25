@@ -29,11 +29,12 @@ class FakeAccountStore:
         account = Account(**data.model_dump())
         account.id = self._next_id
         self._next_id += 1
+        account.sort_order = max((row.sort_order for row in self._rows.values()), default=0) + 1
         self._rows[account.id] = account
         return account
 
     def list(self) -> list[Account]:
-        return [self._rows[key] for key in sorted(self._rows)]
+        return sorted(self._rows.values(), key=lambda row: (row.sort_order, row.id))
 
     def get(self, account_id: int) -> Account | None:
         return self._rows.get(account_id)
@@ -99,6 +100,7 @@ def test_create_account_defaults(client: TestClient) -> None:
         "account_type": "CASH",
         "currency": "VND",
         "is_active": True,
+        "sort_order": 1,
     }
 
 
@@ -160,6 +162,7 @@ def test_list_accounts_returns_full_representation(client: TestClient) -> None:
             "account_type": "CASH",
             "currency": "VND",
             "is_active": True,
+            "sort_order": 1,
         }
     ]
 
@@ -191,6 +194,7 @@ def test_get_account_returns_full_representation(client: TestClient) -> None:
         "account_type": "BANK",
         "currency": "USD",
         "is_active": True,
+        "sort_order": 1,
     }
 
 
@@ -255,3 +259,29 @@ def test_update_account_unknown_id_returns_404(client: TestClient) -> None:
     )
 
     assert response.status_code == 404
+
+
+def test_new_accounts_append_to_the_end_of_the_order(client: TestClient) -> None:
+    client.post("/api/v1/accounts", json={"name": "First", "account_type": "CASH"})
+    client.post("/api/v1/accounts", json={"name": "Second", "account_type": "EWALLET"})
+
+    response = client.get("/api/v1/accounts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["name"] for item in body] == ["First", "Second"]
+    assert [item["sort_order"] for item in body] == [1, 2]
+
+
+def test_sort_order_can_be_updated_to_reorder_the_list(client: TestClient) -> None:
+    client.post("/api/v1/accounts", json={"name": "First", "account_type": "CASH"})
+    client.post("/api/v1/accounts", json={"name": "Second", "account_type": "EWALLET"})
+
+    # Swap: move "Second" (id 2) ahead of "First" (id 1).
+    client.patch("/api/v1/accounts/2", json={"sort_order": 1})
+    client.patch("/api/v1/accounts/1", json={"sort_order": 2})
+
+    response = client.get("/api/v1/accounts")
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()] == ["Second", "First"]

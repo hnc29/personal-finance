@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.money import InvalidMoneyValue
 from app.models import Account, AccountType, FinancialEvent, FinancialEventType
-from app.models.crypto import CryptoAsset, CryptoHolding, CryptoLot
+from app.models.crypto import CryptoHolding, CryptoLot
 from app.services.crypto_pricing import (
     CoinGeckoPriceAdapter,
     UnconfiguredCryptoPriceProvider,
@@ -39,7 +39,11 @@ def session(tmp_path: Path) -> Session:
 
 def test_btc_holding_lot_tracks_basis_funding_instrument_and_event() -> None:
     holding = CryptoHolding(
-        asset=CryptoAsset.BTC, pricing_instrument="BTC_USD", is_net_worth=True
+        coingecko_id="bitcoin",
+        symbol="btc",
+        display_name="Bitcoin",
+        pricing_instrument="BTC_USD",
+        is_net_worth=True,
     )
     lot = CryptoLot(
         holding=holding,
@@ -85,7 +89,9 @@ def test_crypto_lot_persists_links_and_large_exact_basis(session: Session) -> No
         event_type=FinancialEventType.ASSET_PURCHASE,
         transaction_date=datetime.date(2026, 8, 1),
     )
-    holding = CryptoHolding(asset=CryptoAsset.BTC, pricing_instrument="BTC_USD")
+    holding = CryptoHolding(
+        coingecko_id="bitcoin", symbol="btc", pricing_instrument="BTC_USD"
+    )
     lot = CryptoLot(
         holding=holding,
         funding_account=account,
@@ -108,10 +114,30 @@ def test_crypto_lot_persists_links_and_large_exact_basis(session: Session) -> No
     assert persisted.financial_event_id == event.id
 
 
+def test_arbitrary_coingecko_coin_can_be_held_not_only_btc(session: Session) -> None:
+    """TASK-031 §11.2: identity is the CoinGecko id, so ETH etc. must persist."""
+    holding = CryptoHolding(
+        coingecko_id="ethereum", symbol="eth", display_name="Ethereum"
+    )
+    lot = CryptoLot(holding=holding, purchase_date=datetime.date(2026, 8, 1))
+    lot.set_quantity("3.5")
+    lot.purchase_price = "3500.00"
+    lot.total_cost = "12250.00"
+    session.add(lot)
+    session.commit()
+    session.expire_all()
+
+    persisted = session.get(CryptoHolding, holding.id)
+    assert persisted is not None
+    assert persisted.coingecko_id == "ethereum"
+    assert persisted.symbol == "eth"
+    assert persisted.display_name == "Ethereum"
+
+
 def test_crypto_database_constraints_reject_invalid_scaled_values(
     session: Session,
 ) -> None:
-    holding = CryptoHolding(asset=CryptoAsset.BTC)
+    holding = CryptoHolding(coingecko_id="bitcoin", symbol="btc")
     session.add(holding)
     session.flush()
     session.add(
@@ -130,7 +156,7 @@ def test_crypto_database_constraints_reject_invalid_scaled_values(
 def test_live_pricing_is_an_explicit_unconfigured_boundary() -> None:
     provider = UnconfiguredCryptoPriceProvider()
     with pytest.raises(NotImplementedError, match="no live crypto price provider"):
-        provider.get_price(CryptoAsset.BTC, "BTC_USD", datetime.date(2026, 8, 23))
+        provider.get_price("bitcoin", "BTC_USD", datetime.date(2026, 8, 23))
 
 
 def test_coingecko_adapter_uses_exact_mapping_and_decimal_json() -> None:

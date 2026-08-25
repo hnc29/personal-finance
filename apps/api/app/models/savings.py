@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -42,6 +43,19 @@ class MaturityAction(str, enum.Enum):
     CLOSE = "CLOSE"
     RENEW_PRINCIPAL = "RENEW_PRINCIPAL"
     RENEW_PRINCIPAL_AND_INTEREST = "RENEW_PRINCIPAL_AND_INTEREST"
+
+
+class SavingsTermStatus(str, enum.Enum):
+    """Per-term lifecycle state, independent of the parent account's status.
+
+    A rollover chain accumulates one CLOSED term per renewal plus a final
+    ACTIVE (or CLOSED/EARLY_CLOSED, once tất toán) term; the account itself
+    only tracks OPEN/CLOSED as a whole.
+    """
+
+    ACTIVE = "ACTIVE"
+    CLOSED = "CLOSED"
+    EARLY_CLOSED = "EARLY_CLOSED"
 
 
 class SavingsProduct(Base):
@@ -86,6 +100,10 @@ class SavingsAccount(Base):
         default=SavingsAccountStatus.OPEN,
         server_default="OPEN",
     )
+    funding_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounts.id"), nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     product: Mapped[SavingsProduct] = relationship(back_populates="accounts")
     terms: Mapped[list[SavingsTerm]] = relationship(
         back_populates="account",
@@ -149,6 +167,16 @@ class SavingsTerm(Base):
     maturity_action: Mapped[MaturityAction] = mapped_column(
         Enum(MaturityAction, native_enum=False), nullable=False
     )
+    status: Mapped[SavingsTermStatus] = mapped_column(
+        Enum(SavingsTermStatus, native_enum=False),
+        nullable=False,
+        default=SavingsTermStatus.ACTIVE,
+        server_default="ACTIVE",
+    )
+    actual_interest_scaled: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    closed_at: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     account: Mapped[SavingsAccount] = relationship(
         back_populates="terms", foreign_keys=[savings_account_id]
     )
@@ -163,6 +191,20 @@ class SavingsTerm(Base):
     @principal.setter
     def principal(self, value: Decimal | str | int) -> None:
         self.principal_scaled = money_to_scaled(value)
+
+    @property
+    def actual_interest(self) -> Decimal | None:
+        return (
+            None
+            if self.actual_interest_scaled is None
+            else scaled_to_money(self.actual_interest_scaled)
+        )
+
+    @actual_interest.setter
+    def actual_interest(self, value: Decimal | str | int | None) -> None:
+        self.actual_interest_scaled = (
+            None if value is None else money_to_scaled(value)
+        )
 
     @property
     def annual_rate(self) -> Decimal:

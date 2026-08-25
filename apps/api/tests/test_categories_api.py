@@ -111,6 +111,7 @@ def test_create_category_defaults(client: TestClient) -> None:
         "name": "Food",
         "parent_id": None,
         "is_active": True,
+        "icon": None,
     }
 
 
@@ -180,6 +181,7 @@ def test_get_category_returns_full_body(client: TestClient) -> None:
         "name": "Groceries",
         "parent_id": 1,
         "is_active": True,
+        "icon": None,
     }
 
 
@@ -267,6 +269,45 @@ def test_update_category_unknown_parent_returns_404(
     )
 
     assert response.status_code == 404
+
+
+def test_create_category_with_icon(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/categories",
+        json={"name": "Coffee", "icon": "Coffee"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["icon"] == "Coffee"
+
+
+def test_update_category_sets_icon(client: TestClient) -> None:
+    client.post("/api/v1/categories", json={"name": "Food"})
+
+    response = client.patch(
+        "/api/v1/categories/1",
+        json={"icon": "Pizza"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["icon"] == "Pizza"
+    # Unrelated fields are left unchanged.
+    assert body["name"] == "Food"
+
+
+def test_update_category_clears_icon_back_to_default(
+    client: TestClient,
+) -> None:
+    client.post("/api/v1/categories", json={"name": "Food", "icon": "Pizza"})
+
+    response = client.patch(
+        "/api/v1/categories/1",
+        json={"icon": None},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["icon"] is None
 
 
 def test_update_category_self_parent_leaves_parent_unchanged(

@@ -6,19 +6,18 @@ from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 from typing import Protocol
 
-from app.models.crypto import CryptoAsset
 from app.models.pricing import PriceQuote, PricingProvider, QuoteMatchLevel, QuoteState
 
 
 class CryptoPriceProvider(Protocol):
     def get_price(
-        self, asset: CryptoAsset, pricing_instrument: str, as_of: datetime.date
+        self, coingecko_id: str, pricing_instrument: str, as_of: datetime.date
     ) -> Decimal: ...
 
 
 class UnconfiguredCryptoPriceProvider:
     def get_price(
-        self, asset: CryptoAsset, pricing_instrument: str, as_of: datetime.date
+        self, coingecko_id: str, pricing_instrument: str, as_of: datetime.date
     ) -> Decimal:
         raise NotImplementedError("no live crypto price provider is configured")
 

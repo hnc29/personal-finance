@@ -8,6 +8,7 @@ from app.api.categories import router as categories_router
 from app.api.data import router as data_router
 from app.api.financial_events import router as financial_events_router
 from app.api.read_models import router as read_models_router
+from app.api.savings import router as savings_router
 from app.core.config import settings
 from app.core.database import check_database
 
@@ -30,6 +31,7 @@ app.add_middleware(
 
 app.include_router(accounts_router)
 app.include_router(assets_router)
+app.include_router(savings_router)
 app.include_router(categories_router)
 app.include_router(financial_events_router)
 app.include_router(read_models_router)

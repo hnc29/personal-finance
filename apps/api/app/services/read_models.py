@@ -92,7 +92,7 @@ def portfolio_overview(db: Session) -> PortfolioOverview:
                 components.append(PortfolioComponentValue(component_type=PortfolioComponentType.CRYPTO, source_key=f"crypto:{crypto_h.id}", value=crypto_value, quote_state=quote.state, quote_provider=quote.provider.code, quoted_at=quote.quoted_at))
         else:
             valuation_complete = False
-        crypto_rows.append(PortfolioRow(id=crypto_h.id, name=crypto_h.asset.value, value=money(crypto_value) if crypto_value is not None else None, quote=quote_meta(quote)))
+        crypto_rows.append(PortfolioRow(id=crypto_h.id, name=crypto_h.display_name or crypto_h.symbol.upper(), value=money(crypto_value) if crypto_value is not None else None, quote=quote_meta(quote)))
     invested = sum((c.value for c in components if c.component_type in {PortfolioComponentType.SAVINGS, PortfolioComponentType.PRECIOUS_METAL, PortfolioComponentType.CRYPTO}), Decimal(0))
     return PortfolioOverview(as_of=as_of, valuation_complete=valuation_complete, net_worth=money(calculate_net_worth(components)) if valuation_complete else None, invested_assets=money(invested) if valuation_complete else None, account_count=len(accounts), accounts=account_rows, savings=savings_rows, credit_cards=card_rows, precious_metals=metal_rows, crypto=crypto_rows)
 

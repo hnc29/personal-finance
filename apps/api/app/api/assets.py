@@ -2,44 +2,46 @@ import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.money import money_to_scaled
 from app.models.crypto import (
-    CryptoAsset,
     CryptoHolding,
     CryptoLot,
     crypto_quantity_to_scaled,
 )
 from app.models.precious_metal import (
+    SUPPORTED_PRECIOUS_METAL_BRANDS,
     PreciousMetalBrand,
     PreciousMetalHolding,
     PreciousMetalLot,
     PreciousMetalQuantityUnit,
     PreciousMetalType,
 )
-from app.models.savings import SavingsAccount, SavingsProduct
-from app.services.savings import open_savings
+from app.services.crypto_coin_catalog import (
+    CoinCatalogUnavailableError,
+    CoinGeckoCoinListProvider,
+)
+from app.services.http_client import UrllibHttpClient
 
 router = APIRouter(prefix="/api/v1/assets", tags=["assets"])
 DbSession = Annotated[Session, Depends(get_db)]
 
+_coin_catalog_provider = CoinGeckoCoinListProvider(
+    UrllibHttpClient(),
+    settings.coingecko_coins_url,
+    timeout=settings.coingecko_timeout_seconds,
+)
 
-class SavingsCreate(BaseModel):
-    name: str
-    institution: str
-    principal: Decimal
-    opened_date: datetime.date
 
-    @field_validator("principal")
-    @classmethod
-    def exact_money(cls, value: Decimal) -> Decimal:
-        money_to_scaled(value)
-        return value
+def get_coin_catalog() -> CoinGeckoCoinListProvider:
+    """A single process-lifetime instance; overridable via dependency_overrides in tests."""
+    return _coin_catalog_provider
 
 
 class MetalCreate(BaseModel):
@@ -55,50 +57,28 @@ class MetalCreate(BaseModel):
 
 
 class CryptoCreate(BaseModel):
+    coingecko_id: str
+    symbol: str
+    display_name: str | None = None
     quantity: Decimal
     purchase_date: datetime.date
     purchase_price: Decimal
     total_cost: Decimal
     pricing_instrument: str | None = None
 
-
-@router.get("/savings")
-def list_savings(db: DbSession):
-    return [
-        {
-            "id": row.id,
-            "name": row.name,
-            "principal": str(row.principal),
-            "institution": row.product.institution,
-        }
-        for row in db.scalars(
-            select(SavingsAccount)
-            .options(selectinload(SavingsAccount.product))
-            .order_by(SavingsAccount.id)
-        )
-    ]
+    @field_validator("coingecko_id", "symbol")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
 
 
-@router.post("/savings", status_code=201)
-def create_savings(data: SavingsCreate, db: DbSession):
-    product = SavingsProduct(
-        name=data.name, institution=data.institution, currency="VND"
-    )
-    db.add(product)
-    db.flush()
-    row = open_savings(
-        db,
-        product=product,
-        name=data.name,
-        principal=data.principal,
-        opened_date=data.opened_date,
-    )
-    return {
-        "id": row.id,
-        "name": row.name,
-        "principal": str(row.principal),
-        "institution": product.institution,
-    }
+@router.get("/metal-brands")
+def list_metal_brands() -> list[str]:
+    """Managed gold/silver product catalog (TASK-031 §10): stable brand codes."""
+    return [brand.value for brand in SUPPORTED_PRECIOUS_METAL_BRANDS]
 
 
 @router.get("/metals")
@@ -112,6 +92,7 @@ def list_metals(db: DbSession):
         {
             "id": row.id,
             "name": row.product_type,
+            "brand": row.brand.value,
             "metal_type": row.metal_type.value,
             "quantity_grams": str(
                 sum((lot.canonical_grams for lot in row.lots), Decimal(0))
@@ -145,9 +126,25 @@ def create_metal(data: MetalCreate, db: DbSession):
     return {
         "id": holding.id,
         "name": holding.product_type,
+        "brand": holding.brand.value,
         "metal_type": holding.metal_type.value,
         "quantity_grams": str(lot.canonical_grams),
     }
+
+
+@router.get("/crypto/coins")
+def search_coins(
+    catalog: Annotated[CoinGeckoCoinListProvider, Depends(get_coin_catalog)],
+    q: str = Query("", max_length=100),
+):
+    """TASK-031 §11.1: capped CoinGecko coin search, id/symbol/name, case-insensitive."""
+    try:
+        matches = catalog.search(q, limit=50)
+    except CoinCatalogUnavailableError as exc:
+        raise HTTPException(503, "Coin catalog is unavailable") from exc
+    return [
+        {"id": coin.id, "symbol": coin.symbol, "name": coin.name} for coin in matches
+    ]
 
 
 @router.get("/crypto")
@@ -160,7 +157,9 @@ def list_crypto(db: DbSession):
     return [
         {
             "id": row.id,
-            "asset": row.asset.value,
+            "coingecko_id": row.coingecko_id,
+            "symbol": row.symbol,
+            "display_name": row.display_name,
             "quantity": str(sum((lot.quantity for lot in row.lots), Decimal(0))),
         }
         for row in rows
@@ -177,7 +176,9 @@ def create_crypto(data: CryptoCreate, db: DbSession):
             total_cost_scaled=money_to_scaled(data.total_cost),
         )
         holding = CryptoHolding(
-            asset=CryptoAsset.BTC,
+            coingecko_id=data.coingecko_id.lower(),
+            symbol=data.symbol.lower(),
+            display_name=data.display_name,
             pricing_instrument=data.pricing_instrument,
             lots=[lot],
         )
@@ -189,6 +190,8 @@ def create_crypto(data: CryptoCreate, db: DbSession):
         raise HTTPException(400, str(exc)) from exc
     return {
         "id": holding.id,
-        "asset": holding.asset.value,
+        "coingecko_id": holding.coingecko_id,
+        "symbol": holding.symbol,
+        "display_name": holding.display_name,
         "quantity": str(lot.quantity),
     }

@@ -1,9 +1,13 @@
-"""Crypto holdings and purchase lots, initially supporting BTC."""
+"""Crypto holdings and purchase lots.
+
+Asset identity is the CoinGecko coin id (e.g. ``"bitcoin"``), not a closed
+enum, so any CoinGecko-listed coin can be held -- not only BTC. Symbols are
+not used as identity because they can collide across coins.
+"""
 
 from __future__ import annotations
 
 import datetime
-import enum
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import (
@@ -11,7 +15,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    Enum,
     ForeignKey,
     String,
     text,
@@ -22,10 +25,6 @@ from app.core.money import InvalidMoneyValue, money_to_scaled, scaled_to_money
 from app.models.base import Base
 
 CRYPTO_QUANTITY_SCALE = 100_000_000
-
-
-class CryptoAsset(str, enum.Enum):
-    BTC = "BTC"
 
 
 def crypto_quantity_to_scaled(value: Decimal | str | int) -> int:
@@ -46,9 +45,9 @@ def crypto_quantity_to_scaled(value: Decimal | str | int) -> int:
 class CryptoHolding(Base):
     __tablename__ = "crypto_holdings"
     id: Mapped[int] = mapped_column(primary_key=True)
-    asset: Mapped[CryptoAsset] = mapped_column(
-        Enum(CryptoAsset, native_enum=False), nullable=False
-    )
+    coingecko_id: Mapped[str] = mapped_column(String, nullable=False)
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String)
     pricing_instrument: Mapped[str | None] = mapped_column(String)
     is_net_worth: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("1")

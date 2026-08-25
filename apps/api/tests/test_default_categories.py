@@ -23,7 +23,7 @@ def db(tmp_path) -> Session:
 
 
 def test_empty_database_gets_expected_hierarchy(db: Session) -> None:
-    assert merge_default_categories(db)["inserted"] == 61
+    assert merge_default_categories(db)["inserted"] == 69
     rows = list(db.scalars(select(Category)))
     by_name = {row.name: row for row in rows}
     assert by_name["Groceries"].parent is by_name["Food & Drinks"]
@@ -34,14 +34,14 @@ def test_empty_database_gets_expected_hierarchy(db: Session) -> None:
 def test_second_seed_is_idempotent(db: Session) -> None:
     merge_default_categories(db)
     assert merge_default_categories(db)["inserted"] == 0
-    assert len(list(db.scalars(select(Category)))) == 61
+    assert len(list(db.scalars(select(Category)))) == 69
 
 
 def test_non_empty_database_preserves_custom_and_merges(db: Session) -> None:
     custom = Category(name="My category", is_active=False)
     db.add(custom)
     db.commit()
-    assert merge_default_categories(db)["inserted"] == 61
+    assert merge_default_categories(db)["inserted"] == 69
     db.refresh(custom)
     assert (custom.name, custom.parent_id, custom.is_active) == ("My category", None, False)
 
@@ -62,9 +62,9 @@ def test_partial_tree_is_completed_without_duplicates(db: Session) -> None:
     food = Category(name="Food & Drinks", parent=expenses)
     db.add_all([expenses, food])
     db.commit()
-    assert merge_default_categories(db)["inserted"] == 59
+    assert merge_default_categories(db)["inserted"] == 67
     assert merge_default_categories(db)["inserted"] == 0
-    assert len(list(db.scalars(select(Category)))) == 61
+    assert len(list(db.scalars(select(Category)))) == 69
 
 
 def test_conflict_is_preserved_and_reported(db: Session) -> None:

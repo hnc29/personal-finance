@@ -34,7 +34,7 @@ def create_account(data: AccountCreate, db: DbSession) -> Account:
 
 @router.get("", response_model=list[AccountRead])
 def list_accounts(db: DbSession) -> list[Account]:
-    """Return every account ordered by id."""
+    """Return every account ordered by its user-controlled sort_order."""
     return account_service.list_accounts(db)
 
 

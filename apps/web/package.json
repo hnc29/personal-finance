@@ -11,7 +11,12 @@
     "task027-ui-audit": "node scripts/task027-ui-audit.mjs",
     "task029-ui-audit": "node scripts/task029-ui-audit.mjs"
     ,"task030-category-tree-audit": "node scripts/task030-category-tree-audit.mjs",
-    "task031-ux-audit": "node scripts/task031-ux-audit.mjs"
+    "task031-ux-audit": "node scripts/task031-ux-audit.mjs",
+    "task032-ux-audit": "node scripts/task032-ux-audit.mjs",
+    "task033-savings-ux-audit": "node scripts/task033-savings-ux-audit.mjs",
+    "task034-transactions-accounts-audit": "node scripts/task034-transactions-accounts-audit.mjs",
+    "task035-category-i18n-audit": "node scripts/task035-category-i18n-audit.mjs",
+    "task036-moneylover-ui-audit": "node scripts/task036-moneylover-ui-audit.mjs"
   },
   "dependencies": {"@tanstack/react-query": "^5.66.8", "next": "^15.1.7", "react": "^19.0.0", "react-dom": "^19.0.0"},
   "devDependencies": {

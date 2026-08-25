@@ -12,16 +12,24 @@ __pycache__/
 # Environment
 .env
 
-# Database
+# Database (real production data must NEVER be committed -- covers the
+# live finance.db plus any timestamped/backup copy such as
+# finance.db.bak-<task>-<timestamp>, and SQLite's -shm/-wal side files)
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/*.db.bak-*
+data/*.bak*
 
 # Application data
 data/imports/
 data/exports/
 data/backups/
 data/attachments/
+
+# FUSE mount transient artifacts (Cowork/device-bridge temp files)
+.fuse_hidden*
+data/.fuse_hidden*
 
 # Node / Next.js
 node_modules/
@@ -33,3 +41,7 @@ node_modules/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Locally generated AI context dump (regenerable, ~4MB, duplicates
+# tracked source -- not meant to be version-controlled)
+project-context.md
