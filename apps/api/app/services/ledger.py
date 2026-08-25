@@ -102,6 +102,8 @@ def _build_and_validate_entries(
         _validate_balanced_pair(event_type, entries)
     if event_type is FinancialEventType.CREDIT_CARD_PAYMENT:
         _validate_credit_card_payment(session, entries)
+    if event_type in _SIGNED_EVENT_TYPES:
+        _validate_signed_amount(event_type, entries)
 
     return entries
 
@@ -280,6 +282,20 @@ _BALANCED_PAIR_EVENT_TYPES = frozenset(
     {FinancialEventType.TRANSFER, FinancialEventType.CREDIT_CARD_PAYMENT}
 )
 
+# QA (2026-08-25): single-entry event types whose sign carries semantic
+# meaning -- an EXPENSE must debit (negative) and an INCOME must credit
+# (positive) the account, matching the frontend composer's own convention
+# (apps/web/app/page.tsx submit(): `type === "EXPENSE" ? negateMoney(...) :
+# ...`). Nothing server-side enforced this invariant before; a data
+# reconciliation pass against the real database found one EXPENSE event
+# persisted with a positive amount, proving a client is not a trust
+# boundary here either (matches the reasoning already applied to
+# EDITABLE_EVENT_TYPES above). The bad row itself is left untouched --
+# real user data is never corrected automatically -- see docs/qa/BUG_FIX_REPORT.md.
+_SIGNED_EVENT_TYPES = frozenset(
+    {FinancialEventType.EXPENSE, FinancialEventType.INCOME}
+)
+
 
 class InvalidEventEntriesError(Exception):
     """Raised when a financial event's account entries violate an invariant."""
@@ -291,15 +307,18 @@ def validate_event_entries(
     """Validate the account entries for an event of ``event_type``.
 
     Every event requires at least one entry. TRANSFER and CREDIT_CARD_PAYMENT
-    additionally require a balanced two-account pair; other event types carry
-    no zero-sum rule. Raises :class:`InvalidEventEntriesError` on any
-    violation and returns ``None`` when the entries are valid.
+    additionally require a balanced two-account pair; EXPENSE and INCOME
+    require their single entry's sign to match the event type. Raises
+    :class:`InvalidEventEntriesError` on any violation and returns ``None``
+    when the entries are valid.
     """
     if not entries:
         raise InvalidEventEntriesError("an event requires at least one entry")
 
     if event_type in _BALANCED_PAIR_EVENT_TYPES:
         _validate_balanced_pair(event_type, entries)
+    if event_type in _SIGNED_EVENT_TYPES:
+        _validate_signed_amount(event_type, entries)
 
 
 def _validate_balanced_pair(
@@ -326,6 +345,27 @@ def _validate_balanced_pair(
         raise InvalidEventEntriesError(
             f"{event_type.value} entries must be exact opposites summing to zero"
         )
+
+
+def _validate_signed_amount(
+    event_type: FinancialEventType, entries: Sequence[AccountEntry]
+) -> None:
+    """Check EXPENSE debits and INCOME credits the single entry's account.
+
+    Applies to EXPENSE and INCOME: exactly one entry, whose scaled amount
+    must be negative for EXPENSE or positive for INCOME. Zero is rejected
+    for both -- a zero-amount event carries no ledger meaning.
+    """
+    if len(entries) != 1:
+        raise InvalidEventEntriesError(
+            f"{event_type.value} requires exactly one entry, got {len(entries)}"
+        )
+
+    (entry,) = entries
+    if event_type is FinancialEventType.EXPENSE and entry.amount_scaled >= 0:
+        raise InvalidEventEntriesError("EXPENSE amount must be negative")
+    if event_type is FinancialEventType.INCOME and entry.amount_scaled <= 0:
+        raise InvalidEventEntriesError("INCOME amount must be positive")
 
 
 def _validate_credit_card_payment(

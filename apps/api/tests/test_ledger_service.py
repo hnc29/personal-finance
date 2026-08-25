@@ -72,9 +72,34 @@ def test_creates_ordinary_expense_and_income_without_zero_sum_rule() -> None:
     assert len(session.events) == 2
 
 
+# QA (2026-08-25): a real-database reconciliation pass found one EXPENSE
+# event persisted with a positive amount -- nothing server-side enforced
+# the sign invariant the frontend composer relies on. This locks it in.
+def test_expense_and_income_reject_wrong_sign_and_zero() -> None:
+    session = FakeSession([account(1)])
+
+    for bad_amount in (Decimal(1), Decimal(0)):
+        with pytest.raises(InvalidEventEntriesError):
+            create_financial_event(
+                session, payload(FinancialEventType.EXPENSE, [AccountEntryCreate(account_id=1, amount=bad_amount)])
+            )
+    for bad_amount in (Decimal(-1), Decimal(0)):
+        with pytest.raises(InvalidEventEntriesError):
+            create_financial_event(
+                session, payload(FinancialEventType.INCOME, [AccountEntryCreate(account_id=1, amount=bad_amount)])
+            )
+    assert session.events == []
+
+    with pytest.raises(InvalidEventEntriesError):
+        create_financial_event(session, payload(FinancialEventType.EXPENSE, [
+            AccountEntryCreate(account_id=1, amount=Decimal(-1)),
+            AccountEntryCreate(account_id=1, amount=Decimal(-1)),
+        ]))
+
+
 def test_preserves_transaction_date_and_nullable_occurred_at() -> None:
     session = FakeSession([account(1)])
-    event = create_financial_event(session, payload(FinancialEventType.EXPENSE, [AccountEntryCreate(account_id=1, amount=Decimal(1))]))
+    event = create_financial_event(session, payload(FinancialEventType.EXPENSE, [AccountEntryCreate(account_id=1, amount=Decimal(-1))]))
     assert event.transaction_date == datetime.date(2026, 8, 22)
     assert event.occurred_at is None
 
