@@ -70,12 +70,41 @@ class FinancialEvent(Base):
     raw_import_row_id: Mapped[int | None] = mapped_column(
         ForeignKey("raw_import_rows.id"), nullable=True, unique=True
     )
+    # TASK-040: a Money Lover internal transfer between the user's own
+    # wallets is exported as TWO raw rows -- "Tiền chuyển đi" (outgoing) on
+    # the source wallet and "Tiền chuyển đến" (incoming) on the destination
+    # wallet. moneylover_apply.py pairs those into ONE balanced TRANSFER
+    # event instead of two separate EXPENSE/INCOME events (which would
+    # double-count the same money movement), so that single event needs to
+    # record both raw rows it was built from -- otherwise a re-run of
+    # auto-apply would see the second row as still unapplied and try to
+    # book it again as a standalone income/expense.
+    raw_import_row_id_secondary: Mapped[int | None] = mapped_column(
+        ForeignKey("raw_import_rows.id"), nullable=True, unique=True
+    )
 
+    # TASK-042: "all, delete-orphan" so deleting a FinancialEvent (or
+    # reassigning `.entries` to a new list, as update_financial_event does)
+    # removes its AccountEntry rows through the ORM's unit-of-work instead
+    # of leaving them to be deleted by hand. This matters concretely on
+    # SQLite: the app enables `PRAGMA foreign_keys=ON` on every connection
+    # (app/core/database.py), so `DELETE FROM financial_events` would fail
+    # the foreign-key check while an account_entries row still references
+    # it -- SQLAlchemy's cascade orders the child deletes first, satisfying
+    # that constraint automatically. Before this task nothing ever deleted
+    # or replaced an event's entries, so the plain (non-cascading) default
+    # was never exercised this way.
     entries: Mapped[list["AccountEntry"]] = relationship(
         "AccountEntry",
         back_populates="financial_event",
+        cascade="all, delete-orphan",
     )
-    raw_import_row: Mapped["RawImportRow | None"] = relationship("RawImportRow")
+    raw_import_row: Mapped["RawImportRow | None"] = relationship(
+        "RawImportRow", foreign_keys=[raw_import_row_id]
+    )
+    raw_import_row_secondary: Mapped["RawImportRow | None"] = relationship(
+        "RawImportRow", foreign_keys=[raw_import_row_id_secondary]
+    )
 
     __table_args__ = (
         Index("ix_financial_events_transaction_date", "transaction_date"),

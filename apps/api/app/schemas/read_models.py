@@ -36,6 +36,25 @@ class ImportBatchRead(BaseModel):
     original_filename: str
     imported_at: datetime
     row_count: int
+    # TASK-040: how many of this batch's raw rows already became a real
+    # financial_events row (via auto-apply). Lets the Review page show
+    # "already applied" vs. offer an Apply action, without a second call.
+    applied_row_count: int = 0
+
+class ImportApplyRead(BaseModel):
+    """Response for POST /imports/{batch_id}/apply -- see ApplyResult."""
+
+    batch_id: int
+    total_rows: int
+    already_applied_rows: int
+    transfer_pairs_applied: int
+    expense_income_rows_applied: int
+    applied_rows: int
+    categorized_rows: int
+    uncategorized_rows: int
+    invalid_rows: list[int]
+    unmatched_wallets: dict[str, int]
+    unmatched_row_count: int
 
 class ReconciliationRead(BaseModel):
     id: int

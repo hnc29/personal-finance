@@ -3,43 +3,55 @@ import React from "react";
 import type { AccountType } from "./api";
 
 /**
- * TASK-035: a small recognition badge shown next to each account.
+ * TASK-035/TASK-037: a small recognition badge shown next to each account.
  *
- * The user asked to "tìm kiếm và hiển thị logo của các ngân hàng" (search
- * for and show bank logos). We deliberately do NOT fetch/embed actual
- * bank/e-wallet logo artwork: those are trademarked assets and this app
- * has no logo licensing agreement with any of these institutions, so
- * redistributing scraped logo files would be a real (if low-stakes)
- * trademark/copyright risk for something that's easy to avoid. Instead
- * this renders a colored monogram keyed off the account name -- the same
- * "no persisted icon, pure client-side name lookup" pattern already used
- * for category icons (see category-icons.tsx). Colors below are chosen to
- * be visually distinct and loosely brand-evocative where we're confident
- * (e.g. Techcombank red, VPBank green, MoMo magenta, ZaloPay blue) -- they
- * are NOT verified official brand hex values. Swap in real logo image
- * assets later (e.g. via the account form) if exact fidelity matters.
+ * TASK-035 deliberately avoided embedding real bank/e-wallet logo artwork
+ * (trademark risk from scraping logo files with no licensing agreement) and
+ * rendered a colored initials monogram instead.
+ *
+ * TASK-037: the user explicitly asked to pull real bank logos from a named
+ * public logo directory (diadiembank.com/logo-ngan-hang-tai-viet-nam) and
+ * use them for the actual banks present in this user's own accounts (SHB,
+ * VPBank, BIDV, Techcombank, PVcomBank, SCB, Eximbank, VIB, Shinhan Bank).
+ * These are used purely for account identification -- the same nominative
+ * use every banking/finance app relies on to show "which bank is this
+ * account with" -- never restyled, edited, or presented as anything other
+ * than "this is account X's bank". The source JPGs (apps/web/public/
+ * bank-logos/*.png) had wildly inconsistent internal padding per bank; a
+ * one-off script (apps/web/scripts/process-bank-logos.py) trimmed each to
+ * its real content and re-padded every logo to the same margin ratio in a
+ * square canvas so they all carry the same visual weight next to each
+ * other and next to the (SVG) category icon set -- see the `size` docs on
+ * `AccountLogo` below for how that "same weight" is kept in sync with
+ * category icons at each call site.
+ *
+ * Institutions without a real logo asset (e-wallets, unmatched/unknown
+ * banks) still fall back to the original colored monogram -- colors below
+ * are loosely brand-evocative, not verified official brand hex values.
  */
 
 interface Brand {
   label: string;
   bg: string;
   fg: string;
+  /** Optional key into /public/bank-logos/<logo>.png -- real logo artwork. */
+  logo?: string;
 }
 
 /** Normalized (uppercase, alphanumeric-only) name prefix -> brand badge. */
 const BANKS: Record<string, Brand> = {
-  VPB: { label: "VPB", bg: "#0a7a3d", fg: "#ffffff" },
+  VPB: { label: "VPB", bg: "#0a7a3d", fg: "#ffffff", logo: "vpb" },
   VIETCOMBANK: { label: "VCB", bg: "#00713d", fg: "#ffffff" },
   VCB: { label: "VCB", bg: "#00713d", fg: "#ffffff" },
-  TECHCOMBANK: { label: "TCB", bg: "#e21f2b", fg: "#ffffff" },
-  TECH: { label: "TCB", bg: "#e21f2b", fg: "#ffffff" },
-  BIDV: { label: "BIDV", bg: "#00558c", fg: "#ffffff" },
-  SHINHAN: { label: "SHN", bg: "#0046d5", fg: "#ffffff" },
-  SHB: { label: "SHB", bg: "#7a1f2b", fg: "#ffffff" },
-  SCB: { label: "SCB", bg: "#004b8d", fg: "#ffffff" },
-  VIB: { label: "VIB", bg: "#0b3a82", fg: "#ffffff" },
-  EXIM: { label: "EIB", bg: "#f5a623", fg: "#1a1a1a" },
-  PVCOMBANK: { label: "PVCB", bg: "#f26522", fg: "#ffffff" },
+  TECHCOMBANK: { label: "TCB", bg: "#e21f2b", fg: "#ffffff", logo: "tech" },
+  TECH: { label: "TCB", bg: "#e21f2b", fg: "#ffffff", logo: "tech" },
+  BIDV: { label: "BIDV", bg: "#00558c", fg: "#ffffff", logo: "bidv" },
+  SHINHAN: { label: "SHN", bg: "#0046d5", fg: "#ffffff", logo: "shinhan" },
+  SHB: { label: "SHB", bg: "#7a1f2b", fg: "#ffffff", logo: "shb" },
+  SCB: { label: "SCB", bg: "#004b8d", fg: "#ffffff", logo: "scb" },
+  VIB: { label: "VIB", bg: "#0b3a82", fg: "#ffffff", logo: "vib" },
+  EXIM: { label: "EIB", bg: "#f5a623", fg: "#1a1a1a", logo: "exim" },
+  PVCOMBANK: { label: "PVCB", bg: "#f26522", fg: "#ffffff", logo: "pvcombank" },
   MOMO: { label: "MoMo", bg: "#a50064", fg: "#ffffff" },
   ZALOPAY: { label: "ZP", bg: "#0068ff", fg: "#ffffff" },
   VNPT: { label: "VNPT", bg: "#005baa", fg: "#ffffff" },
@@ -85,6 +97,14 @@ const TYPE_FALLBACK: Record<AccountType, { bg: string; fg: string; glyph: string
 
 export function AccountLogo({ name, accountType, size = 28 }: { name: string; accountType: AccountType; size?: number }) {
   const brand = matchBank(name);
+  if (brand?.logo) {
+    return (
+      <span className="account-logo account-logo-image" style={{ width: size, height: size }} title={name}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- tiny (<7KB) pre-optimized static PNGs from /public rendered at 26-32px; next/image's runtime resize pipeline (sharp, remote-loader config) buys nothing at this scale for a single-file app with no other images. */}
+        <img src={`/bank-logos/${brand.logo}.png`} alt={name} width={size} height={size} />
+      </span>
+    );
+  }
   const fallback = TYPE_FALLBACK[accountType];
   const bg = brand?.bg ?? (accountType === "CASH" ? fallback.bg : hashColor(name));
   const fg = brand?.fg ?? fallback.fg;

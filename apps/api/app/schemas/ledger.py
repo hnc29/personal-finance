@@ -46,6 +46,33 @@ class FinancialEventCreate(BaseModel):
     entries: list[AccountEntryCreate] = Field(min_length=1)
 
 
+class FinancialEventUpdate(BaseModel):
+    """Full-replace payload for editing a financial event (TASK-042).
+
+    Deliberately the same shape as :class:`FinancialEventCreate` -- editing
+    always replaces an event's entries wholesale rather than patching
+    individual entries (see ``update_financial_event``), matching how the
+    Transactions composer re-submits the whole form when editing instead of
+    diffing it against the original.
+    """
+
+    event_type: FinancialEventType
+    transaction_date: datetime.date
+    occurred_at: datetime.datetime | None = None
+    category_id: int | None = None
+    payee_text: str | None = None
+    trip_event_text: str | None = None
+    note: str | None = None
+    entries: list[AccountEntryCreate] = Field(min_length=1)
+
+
+class DeletedEventRead(BaseModel):
+    """Acknowledgement returned after deleting a financial event (TASK-042)."""
+
+    id: int
+    deleted: bool = True
+
+
 class AccountEntryRead(BaseModel):
     """An account entry as returned by the API, amount in application money."""
 

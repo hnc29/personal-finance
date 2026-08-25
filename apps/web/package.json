@@ -16,7 +16,13 @@
     "task033-savings-ux-audit": "node scripts/task033-savings-ux-audit.mjs",
     "task034-transactions-accounts-audit": "node scripts/task034-transactions-accounts-audit.mjs",
     "task035-category-i18n-audit": "node scripts/task035-category-i18n-audit.mjs",
-    "task036-moneylover-ui-audit": "node scripts/task036-moneylover-ui-audit.mjs"
+    "task036-moneylover-ui-audit": "node scripts/task036-moneylover-ui-audit.mjs",
+    "task037-bank-logo-audit": "node scripts/task037-bank-logo-audit.mjs",
+    "task038-upload-resilience-audit": "node scripts/task038-upload-resilience-audit.mjs",
+    "task039-expense-sign-and-money-format-audit": "node scripts/task039-expense-sign-and-money-format-audit.mjs",
+    "task040-moneylover-apply-audit": "node scripts/task040-moneylover-apply-audit.mjs",
+    "task041-expense-data-required-audit": "node scripts/task041-expense-data-required-audit.mjs",
+    "task042-transaction-detail-edit-delete-audit": "node scripts/task042-transaction-detail-edit-delete-audit.mjs"
   },
   "dependencies": {"@tanstack/react-query": "^5.66.8", "next": "^15.1.7", "react": "^19.0.0", "react-dom": "^19.0.0"},
   "devDependencies": {

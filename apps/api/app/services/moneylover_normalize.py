@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -17,10 +17,33 @@ from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
 class NormalizationError(ValueError):
     pass
 
+
+def parse_moneylover_date(value: object) -> date:
+    """Parse a raw row's "Ngày" field, real-data shape included.
+
+    A real Money Lover export's date cell is always a full-day Excel
+    timestamp (midnight); openpyxl round-trips that as a
+    ``datetime.datetime``, and ``app.importers.moneylover``'s raw-payload
+    JSON serialization calls ``.isoformat()`` on it -- producing
+    "YYYY-MM-DDTHH:MM:SS" rather than a bare date. ``date.fromisoformat``
+    rejects that shape (it only accepts a date, never a datetime), even
+    though it is what every real row's already-persisted (immutable) raw
+    payload actually contains -- confirmed against the user's real staged
+    export file. Falling back to ``datetime.fromisoformat(...).date()``
+    handles that real shape as well as a plain "YYYY-MM-DD" string, without
+    needing to touch any already-stored raw payload.
+    """
+    text = str(value)
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return datetime.fromisoformat(text).date()
+
+
 def normalize_moneylover_row(row: RawImportRow, account: Account, category_id: int | None = None) -> FinancialEvent:
     payload = json.loads(row.raw_payload)
     try:
-        tx_date = date.fromisoformat(str(payload["Ngày"]))
+        tx_date = parse_moneylover_date(payload["Ngày"])
         amount = Decimal(str(payload["Số tiền"]))
     except (KeyError, TypeError, ValueError) as exc:
         raise NormalizationError(f"invalid raw Money Lover row {row.id}") from exc

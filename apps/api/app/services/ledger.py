@@ -31,36 +31,62 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.money import money_to_scaled, scaled_to_money
 from app.models.account import Account, AccountType
 from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
-from app.schemas.ledger import FinancialEventCreate
+from app.schemas.ledger import (
+    AccountEntryCreate,
+    FinancialEventCreate,
+    FinancialEventUpdate,
+)
 
 
 class UnknownAccountError(Exception):
     """Raised when a referenced ``account_id`` does not exist."""
 
 
-def create_financial_event(
-    session: Session, payload: FinancialEventCreate
-) -> FinancialEvent:
-    """Build and persist one :class:`FinancialEvent` and its entries.
+# TASK-042: the four event types a person can create AND now edit/delete
+# through the Transactions composer/API -- exactly `composerEventTypes` in
+# apps/web/app/page.tsx. ADJUSTMENT, INTEREST, SAVINGS_DEPOSIT/WITHDRAWAL,
+# and ASSET_PURCHASE/ASSET_SALE are produced by their own dedicated domain
+# flows (Accounts' balance-adjust action, the Savings module) and, in the
+# savings case, denormalized onto other records (e.g.
+# SavingsTerm.actual_interest_scaled) alongside the ledger event -- editing
+# or deleting one of those generically here, without going through the flow
+# that produced it, would desync that domain's own records from the ledger.
+# This boundary is enforced here (server-side), not only by the frontend
+# hiding the buttons, since a client is not a trust boundary.
+EDITABLE_EVENT_TYPES = frozenset(
+    {
+        FinancialEventType.EXPENSE,
+        FinancialEventType.INCOME,
+        FinancialEventType.TRANSFER,
+        FinancialEventType.CREDIT_CARD_PAYMENT,
+    }
+)
 
-    An event requires at least one entry; an empty ``entries`` list raises
-    :class:`InvalidEventEntriesError`. Every account referenced by an entry must
-    already exist; an :class:`UnknownAccountError` is raised for the first that
-    does not, before any event is added. Sets the event-level fields (type,
-    ``transaction_date``, the optional and separate ``occurred_at``, category
-    and free-text fields), builds one ordinary :class:`AccountEntry` per payload
-    entry — converting each Decimal ``amount`` to its scaled-integer form only
-    through ``money_to_scaled`` — then commits, so the one event and all its
-    entries persist atomically in a single transaction with ids and foreign
-    keys assigned; a failed commit is rolled back, leaving neither the event nor
-    any entry persisted, and the error propagates. TRANSFER and
-    CREDIT_CARD_PAYMENT events are also validated for the balanced two-account
-    pair invariant before persistence.
+
+class ProtectedEventTypeError(Exception):
+    """Raised when update/delete targets a type outside EDITABLE_EVENT_TYPES."""
+
+
+def _build_and_validate_entries(
+    session: Session,
+    event_type: FinancialEventType,
+    entry_payloads: Sequence[AccountEntryCreate],
+) -> list[AccountEntry]:
+    """Build and validate the :class:`AccountEntry` rows for one event.
+
+    Shared by :func:`create_financial_event` and :func:`update_financial_event`.
+    An event requires at least one entry; an empty list raises
+    :class:`InvalidEventEntriesError`. Every referenced account must already
+    exist, or the first that does not raises :class:`UnknownAccountError`
+    before any entry is built. TRANSFER and CREDIT_CARD_PAYMENT are further
+    validated for the balanced two-account pair invariant (and, for
+    CREDIT_CARD_PAYMENT, payment direction) before being returned -- callers
+    persist the result, never partially.
     """
-    if not payload.entries:
+    if not entry_payloads:
         raise InvalidEventEntriesError("an event requires at least one entry")
 
-    for entry in payload.entries:
+    for entry in entry_payloads:
         if session.get(Account, entry.account_id) is None:
             raise UnknownAccountError(entry.account_id)
 
@@ -69,13 +95,31 @@ def create_financial_event(
             account_id=entry.account_id,
             amount_scaled=money_to_scaled(entry.amount),
         )
-        for entry in payload.entries
+        for entry in entry_payloads
     ]
 
-    if payload.event_type in _BALANCED_PAIR_EVENT_TYPES:
-        _validate_balanced_pair(payload.event_type, entries)
-    if payload.event_type is FinancialEventType.CREDIT_CARD_PAYMENT:
+    if event_type in _BALANCED_PAIR_EVENT_TYPES:
+        _validate_balanced_pair(event_type, entries)
+    if event_type is FinancialEventType.CREDIT_CARD_PAYMENT:
         _validate_credit_card_payment(session, entries)
+
+    return entries
+
+
+def create_financial_event(
+    session: Session, payload: FinancialEventCreate
+) -> FinancialEvent:
+    """Build and persist one :class:`FinancialEvent` and its entries.
+
+    Sets the event-level fields (type, ``transaction_date``, the optional and
+    separate ``occurred_at``, category and free-text fields), builds its
+    :class:`AccountEntry` rows via :func:`_build_and_validate_entries`, then
+    commits, so the one event and all its entries persist atomically in a
+    single transaction with ids and foreign keys assigned; a failed commit is
+    rolled back, leaving neither the event nor any entry persisted, and the
+    error propagates.
+    """
+    entries = _build_and_validate_entries(session, payload.event_type, payload.entries)
 
     event = FinancialEvent(
         event_type=payload.event_type,
@@ -95,6 +139,75 @@ def create_financial_event(
         raise
     session.refresh(event)
     return event
+
+
+def update_financial_event(
+    session: Session, event_id: int, payload: FinancialEventUpdate
+) -> FinancialEvent | None:
+    """Replace one event's fields and entries wholesale, or ``None`` if absent.
+
+    A full replace, mirroring :func:`create_financial_event`: every entry in
+    ``payload.entries`` replaces the event's existing entries outright. The
+    old :class:`AccountEntry` rows are removed through the ``entries``
+    relationship's ``delete-orphan`` cascade when the new list is assigned --
+    never left orphaned, and never double-booked alongside the new ones.
+    Only :data:`EDITABLE_EVENT_TYPES` may be updated (checked against both
+    the event's current type and the payload's requested type, so this can't
+    be used to move an event into or out of a domain-owned type either);
+    anything else raises :class:`ProtectedEventTypeError`.
+    """
+    event = session.get(FinancialEvent, event_id)
+    if event is None:
+        return None
+    if event.event_type not in EDITABLE_EVENT_TYPES or payload.event_type not in EDITABLE_EVENT_TYPES:
+        raise ProtectedEventTypeError(event.event_type)
+
+    entries = _build_and_validate_entries(session, payload.event_type, payload.entries)
+
+    event.event_type = payload.event_type
+    event.transaction_date = payload.transaction_date
+    event.occurred_at = payload.occurred_at
+    event.category_id = payload.category_id
+    event.payee_text = payload.payee_text
+    event.trip_event_text = payload.trip_event_text
+    event.note = payload.note
+    event.entries = entries
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    session.refresh(event)
+    return event
+
+
+def delete_financial_event(session: Session, event_id: int) -> bool:
+    """Delete one event and its entries, or return ``False`` if absent.
+
+    The ``entries`` relationship's ``delete-orphan`` cascade removes every
+    :class:`AccountEntry` row belonging to the event as part of the same
+    ``session.delete(event)`` -- necessary because this app enables
+    ``PRAGMA foreign_keys=ON`` on every connection (see
+    ``app/core/database.py``), so deleting a ``financial_events`` row while
+    an ``account_entries`` row still references it would otherwise fail the
+    foreign-key check; SQLAlchemy's unit-of-work deletes the cascaded
+    children first, satisfying that constraint. Only
+    :data:`EDITABLE_EVENT_TYPES` may be deleted; anything else raises
+    :class:`ProtectedEventTypeError`.
+    """
+    event = session.get(FinancialEvent, event_id)
+    if event is None:
+        return False
+    if event.event_type not in EDITABLE_EVENT_TYPES:
+        raise ProtectedEventTypeError(event.event_type)
+
+    session.delete(event)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    return True
 
 
 def list_financial_events(session: Session) -> list[FinancialEvent]:

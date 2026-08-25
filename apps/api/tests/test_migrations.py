@@ -38,12 +38,13 @@ def test_exactly_expected_revisions() -> None:
         "0015_savings_lifecycle",
         "0016_account_sort_order",
         "0017_category_icon",
+        "0018_transfer_pair_import",
     }
 
 
 def test_exactly_one_head() -> None:
     script = _script_directory()
-    assert script.get_heads() == ["0017_category_icon"]
+    assert script.get_heads() == ["0018_transfer_pair_import"]
 
 
 def test_migration_chain_order() -> None:
@@ -66,6 +67,7 @@ def test_migration_chain_order() -> None:
     savings_lifecycle = script.get_revision("0015_savings_lifecycle")
     account_sort_order = script.get_revision("0016_account_sort_order")
     category_icon = script.get_revision("0017_category_icon")
+    transfer_pair_import = script.get_revision("0018_transfer_pair_import")
 
     assert core.down_revision is None
     assert ledger.down_revision == "0001_core"
@@ -84,10 +86,12 @@ def test_migration_chain_order() -> None:
     assert savings_lifecycle.down_revision == "0014_crypto_coin_identity"
     assert account_sort_order.down_revision == "0015_savings_lifecycle"
     assert category_icon.down_revision == "0016_account_sort_order"
+    assert transfer_pair_import.down_revision == "0017_category_icon"
 
     # walk_revisions is heads-first over the whole tree.
     chain = [revision.revision for revision in script.walk_revisions()]
     assert chain == [
+        "0018_transfer_pair_import",
         "0017_category_icon",
         "0016_account_sort_order",
         "0015_savings_lifecycle",

@@ -2,14 +2,14 @@ import datetime
 import re
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.money import InvalidMoneyValue, money_to_scaled, scaled_to_money
 from app.models.account import Account, AccountType
 from app.models.crypto import CryptoHolding
-from app.models.import_batch import ImportBatch
-from app.models.ledger import AccountEntry
+from app.models.import_batch import ImportBatch, RawImportRow
+from app.models.ledger import AccountEntry, FinancialEvent
 from app.models.portfolio import PortfolioComponentType
 from app.models.precious_metal import PreciousMetalHolding
 from app.models.pricing import PriceQuote
@@ -98,6 +98,23 @@ def portfolio_overview(db: Session) -> PortfolioOverview:
 
 def list_import_batches(db: Session):
     rows = db.scalars(select(ImportBatch).order_by(ImportBatch.id))
+    # TASK-040: a raw row counts as "applied" once some financial_events row
+    # points back to it, via either provenance FK (a transfer pair links two
+    # raw rows to one event: one via raw_import_row_id, the other via
+    # raw_import_row_id_secondary -- both must count here).
+    applied_counts: dict[int, int] = dict(
+        db.execute(
+            select(RawImportRow.import_batch_id, func.count(RawImportRow.id))
+            .join(
+                FinancialEvent,
+                or_(
+                    FinancialEvent.raw_import_row_id == RawImportRow.id,
+                    FinancialEvent.raw_import_row_id_secondary == RawImportRow.id,
+                ),
+            )
+            .group_by(RawImportRow.import_batch_id)
+        ).all()  # type: ignore[arg-type]
+    )
     return [
         {
             "id": row.id,
@@ -105,6 +122,7 @@ def list_import_batches(db: Session):
             "original_filename": re.split(r"[/\\]", row.original_filename)[-1],
             "imported_at": row.imported_at,
             "row_count": row.row_count,
+            "applied_row_count": applied_counts.get(row.id, 0),
         }
         for row in rows
     ]

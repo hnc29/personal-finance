@@ -104,3 +104,24 @@ export function categoriesForEventType(type: EventType, categories: Category[]):
 export function categoryIsValidForEventType(type: EventType, categoryId: string, categories: Category[]): boolean {
   return categoryId !== "" && categoriesForEventType(type, categories).some(category => String(category.id) === categoryId);
 }
+
+/** TASK-042: "chi tiết giao dịch sẽ hiển thị theo đúng danh mục chi tiêu ở
+ * level nhỏ nhất ví dụ ăn sáng (trong level ăn uống)" -- the leaf category
+ * a transaction is filed under (e.g. "Eating Out") is already exactly what
+ * `category_id` stores, but showing it bare loses the parent context the
+ * request asks for. This builds the full root-to-leaf breadcrumb (e.g.
+ * "Food & Drinks › Eating Out") the same way `getParentOptions` already
+ * does for the category-parent picker, extracted here so the Transaction
+ * details view can reuse it without duplicating the traversal. */
+export function categoryPath(category: Category, categories: Category[], label: (name: string) => string = x => x): string {
+  const byId = new Map(categories.map(c => [c.id, c]));
+  const names: string[] = [];
+  let current: Category | undefined = category;
+  const seen = new Set<number>();
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    names.unshift(label(current.name));
+    current = current.parent_id == null ? undefined : byId.get(current.parent_id);
+  }
+  return names.join(" › ");
+}

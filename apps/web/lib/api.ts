@@ -11,10 +11,14 @@ export interface CategoryInput { name: string; parent_id?: number | null; is_act
 export type AccountUpdate = Partial<AccountInput>;
 export type CategoryUpdate = Partial<CategoryInput>;
 export interface EventInput { event_type: EventType; transaction_date: string; occurred_at?: string | null; category_id?: number | null; payee_text?: string; trip_event_text?: string; note?: string; entries: { account_id: number; amount: string }[] }
+// TASK-042: editing a transaction always replaces it wholesale (same shape
+// as EventInput), matching how the composer re-submits the whole form.
+export type EventUpdate = EventInput;
 export interface QuoteMeta { state: "LIVE" | "STALE" | "MANUAL" | "UNAVAILABLE"; provider: string | null; quoted_at: string | null; observed_at: string | null; valuation_price: string | null }
 export interface PortfolioRow { id: number; name: string; value: string | null; quantity?: string | null; quote?: QuoteMeta | null }
 export interface PortfolioOverview { as_of: string; valuation_complete: boolean; net_worth: string | null; invested_assets: string | null; account_count: number; accounts: PortfolioRow[]; savings: PortfolioRow[]; credit_cards: PortfolioRow[]; precious_metals: PortfolioRow[]; crypto: PortfolioRow[] }
-export interface ImportBatch { id: number; source: string; original_filename: string; imported_at: string; row_count: number }
+export interface ImportBatch { id: number; source: string; original_filename: string; imported_at: string; row_count: number; applied_row_count: number }
+export interface ImportApplyResult { batch_id: number; total_rows: number; already_applied_rows: number; transfer_pairs_applied: number; expense_income_rows_applied: number; applied_rows: number; categorized_rows: number; uncategorized_rows: number; invalid_rows: number[]; unmatched_wallets: Record<string, number>; unmatched_row_count: number }
 export interface ReconciliationCandidate { id: number; state: string; raw_row_id: number; source_row_number: number; source_row_id: string | null; financial_event_id: number; transaction_date: string; event_type: string }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -56,9 +60,19 @@ export interface CoinSummary { id: string; symbol: string; name: string }
 export const api = {
   accounts: { list: () => request<Account[]>("/accounts"), balance: (id: number) => request<AccountBalance>(`/accounts/${id}/balance`), create: (input: AccountInput) => request<Account>("/accounts", { method: "POST", body: JSON.stringify(input) }), update: (id: number, input: AccountUpdate) => request<Account>(`/accounts/${id}`, { method: "PATCH", body: JSON.stringify(input) }) },
   categories: { list: () => request<Category[]>("/categories"), create: (input: CategoryInput) => request<Category>("/categories", { method: "POST", body: JSON.stringify(input) }), update: (id: number, input: CategoryUpdate) => request<Category>(`/categories/${id}`, { method: "PATCH", body: JSON.stringify(input) }) },
-  events: { list: () => request<FinancialEvent[]>("/financial-events"), create: (input: EventInput) => request<FinancialEvent>("/financial-events", { method: "POST", body: JSON.stringify(input) }) },
+  events: {
+    list: () => request<FinancialEvent[]>("/financial-events"),
+    create: (input: EventInput) => request<FinancialEvent>("/financial-events", { method: "POST", body: JSON.stringify(input) }),
+    // TASK-042: view/edit/delete a transaction. `remove` returns a small
+    // JSON ack ({id, deleted}) rather than a bare 204 -- `request()`
+    // above always calls response.json(), which would throw on an empty
+    // 204 body, so the backend deliberately answers DELETE with 200 + a
+    // body instead of touching that shared helper for one endpoint.
+    update: (id: number, input: EventUpdate) => request<FinancialEvent>(`/financial-events/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+    remove: (id: number) => request<{ id: number; deleted: boolean }>(`/financial-events/${id}`, { method: "DELETE" }),
+  },
   portfolio: { overview: () => request<PortfolioOverview>("/portfolio/overview") },
-  imports: { list: () => request<ImportBatch[]>("/import-batches") },
+  imports: { list: () => request<ImportBatch[]>("/import-batches"), apply: (id: number) => request<ImportApplyResult>(`/imports/${id}/apply`, { method: "POST" }) },
   reconciliation: { list: () => request<ReconciliationCandidate[]>("/reconciliation-candidates") },
   assets: {
     savings: {

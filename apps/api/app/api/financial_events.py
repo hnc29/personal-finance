@@ -12,9 +12,18 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.ledger import FinancialEvent
-from app.schemas.ledger import FinancialEventCreate, FinancialEventRead
+from app.schemas.ledger import (
+    DeletedEventRead,
+    FinancialEventCreate,
+    FinancialEventRead,
+    FinancialEventUpdate,
+)
 from app.services import ledger as ledger_service
-from app.services.ledger import InvalidEventEntriesError, UnknownAccountError
+from app.services.ledger import (
+    InvalidEventEntriesError,
+    ProtectedEventTypeError,
+    UnknownAccountError,
+)
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -60,3 +69,63 @@ def create_financial_event(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+@router.patch("/{event_id}", response_model=FinancialEventRead)
+def update_financial_event(
+    event_id: int, data: FinancialEventUpdate, db: DbSession
+) -> FinancialEvent:
+    """Replace an event's fields and entries wholesale (TASK-042).
+
+    A full replace, mirroring how the Transactions composer re-submits the
+    whole form when editing. 404 for an unknown event or account, 400 for
+    entries that violate an event's invariants, 409 for an event type
+    (ADJUSTMENT, INTEREST, SAVINGS_*, ASSET_*) that is owned by another
+    domain flow and cannot be edited here.
+    """
+    try:
+        event = ledger_service.update_financial_event(db, event_id, data)
+    except UnknownAccountError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found",
+        ) from exc
+    except InvalidEventEntriesError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except ProtectedEventTypeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{exc.args[0].value} events are managed elsewhere and cannot be edited here",
+        ) from exc
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Financial event not found",
+        )
+    return event
+
+
+@router.delete("/{event_id}", response_model=DeletedEventRead)
+def delete_financial_event(event_id: int, db: DbSession) -> DeletedEventRead:
+    """Delete an event and its entries (TASK-042).
+
+    404 for an unknown event, 409 for an event type (ADJUSTMENT, INTEREST,
+    SAVINGS_*, ASSET_*) that is owned by another domain flow and cannot be
+    deleted here.
+    """
+    try:
+        deleted = ledger_service.delete_financial_event(db, event_id)
+    except ProtectedEventTypeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{exc.args[0].value} events are managed elsewhere and cannot be deleted here",
+        ) from exc
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Financial event not found",
+        )
+    return DeletedEventRead(id=event_id)
