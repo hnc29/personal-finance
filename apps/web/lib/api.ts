@@ -57,6 +57,10 @@ export interface SavingsRenewInput { start_date: string; actual_interest?: strin
 export interface MetalInput { metal_type: "GOLD" | "SILVER"; brand: string; product_type: string; purity: string; quantity_grams: string; purchase_date: string; purchase_price: string; total_cost: string; pricing_instrument?: string }
 export interface CryptoInput { coingecko_id: string; symbol: string; display_name?: string; quantity: string; purchase_date: string; purchase_price: string; total_cost: string; pricing_instrument?: string }
 export interface CoinSummary { id: string; symbol: string; name: string }
+// User report, 2026-08-26: crypto purchase price can be entered in USD, and
+// must auto-convert to VND (the app's one storage currency) using a rate
+// that "tự động cập nhật" (auto-updates) -- see app/api/fx.py.
+export interface FxRate { rate: string; as_of: string; source: string }
 export const api = {
   accounts: { list: () => request<Account[]>("/accounts"), balance: (id: number) => request<AccountBalance>(`/accounts/${id}/balance`), create: (input: AccountInput) => request<Account>("/accounts", { method: "POST", body: JSON.stringify(input) }), update: (id: number, input: AccountUpdate) => request<Account>(`/accounts/${id}`, { method: "PATCH", body: JSON.stringify(input) }) },
   categories: { list: () => request<Category[]>("/categories"), create: (input: CategoryInput) => request<Category>("/categories", { method: "POST", body: JSON.stringify(input) }), update: (id: number, input: CategoryUpdate) => request<Category>(`/categories/${id}`, { method: "PATCH", body: JSON.stringify(input) }) },
@@ -88,4 +92,5 @@ export const api = {
     metals: { list: () => request<unknown[]>("/assets/metals"), create: (input: MetalInput) => request<unknown>("/assets/metals", { method: "POST", body: JSON.stringify(input) }) },
     crypto: { list: () => request<unknown[]>("/assets/crypto"), create: (input: CryptoInput) => request<unknown>("/assets/crypto", { method: "POST", body: JSON.stringify(input) }), searchCoins: (q: string) => request<CoinSummary[]>(`/assets/crypto/coins?q=${encodeURIComponent(q)}`) },
   },
+  fx: { usdVnd: () => request<FxRate>("/fx/usd-vnd") },
 };

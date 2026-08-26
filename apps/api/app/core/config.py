@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     coingecko_coins_url: str = "https://api.coingecko.com/api/v3/coins/list"
     coingecko_timeout_seconds: float = 10.0
 
+    # USD/VND exchange rate for the crypto "purchased in USD" form field
+    # (user report, 2026-08-26: "nếu mua bằng usd thì sẽ tự động nhân và
+    # chuyển sang vnd, tỷ giá sẽ tự động cập nhật"). open.er-api.com is a
+    # free, no-API-key JSON endpoint; overridable via env for anyone who
+    # wants a different source without a code change (same pattern as the
+    # CoinGecko URL above).
+    fx_rate_url: str = "https://open.er-api.com/v6/latest/USD"
+    fx_rate_timeout_seconds: float = 10.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> object:

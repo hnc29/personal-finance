@@ -64,8 +64,16 @@ function Assets() {
   const { tr, label } = useI18n(); const qc = useQueryClient(); const q = useQuery({ queryKey: ["portfolio"], queryFn: api.portfolio.overview }); const [tab, setTab] = useState<"savings" | "metals" | "crypto">("savings");
   const brands = useQuery({ queryKey: ["metal-brands"], queryFn: api.assets.metalBrands });
   const [coin, setCoin] = useState<CoinSummary | null>(null);
+  // User report, 2026-08-26: purchase price/quantity need to be controlled
+  // (rather than read from FormData like the rest of this uncontrolled
+  // form) so the computed VND total can be shown live as the user types,
+  // and so the currency toggle can gate a live FX-rate fetch.
+  const [cryptoCurrency, setCryptoCurrency] = useState<"VND" | "USD">("VND");
+  const [cryptoQty, setCryptoQty] = useState("");
+  const [cryptoPrice, setCryptoPrice] = useState("");
+  const fx = useQuery({ queryKey: ["fx", "usd-vnd"], queryFn: api.fx.usdVnd, enabled: cryptoCurrency === "USD", staleTime: 5 * 60 * 1000 });
   const metal = useMutation({ mutationFn: api.assets.metals.create, onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }) });
-  const crypto = useMutation({ mutationFn: api.assets.crypto.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["portfolio"] }); setCoin(null); } });
+  const crypto = useMutation({ mutationFn: api.assets.crypto.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["portfolio"] }); setCoin(null); setCryptoQty(""); setCryptoPrice(""); } });
   // BUGFIX (user report, 2026-08-26: "Vàng ... Chức năng chưa hoạt động,
   // nhấn thêm không phản hồi"): reproduced with Playwright -- typing a
   // Vietnamese-style decimal comma into Quantity or Purity (e.g. "1,5" or
@@ -114,7 +122,15 @@ function Assets() {
       return;
     }
     if (!coin) return;
-    crypto.mutate({ coingecko_id: coin.id, symbol: coin.symbol, display_name: coin.name, quantity: vd("quantity"), purchase_date: v("date"), purchase_price: vd("price"), total_cost: vd("total") });
+    // BUGFIX guard (user report, 2026-08-26): buying in USD needs the live
+    // FX rate to convert -- if it hasn't loaded yet (still fetching, or the
+    // source is down), there is nothing correct to submit. Rather than
+    // silently sending an unconverted USD number as if it were VND, this
+    // blocks the submit; cryptoTotals()/the disabled Add button below give
+    // the visible reason why.
+    const totals = cryptoPurchaseTotals(vd("quantity"), vd("price"), cryptoCurrency, fx.data?.rate);
+    if (!totals) return;
+    crypto.mutate({ coingecko_id: coin.id, symbol: coin.symbol, display_name: coin.name, quantity: vd("quantity"), purchase_date: v("date"), purchase_price: totals.unitPriceVnd, total_cost: totals.totalVnd });
   }
   // BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): neither form
   // below rendered its mutation's error at all, so a rejected submit (e.g.
@@ -123,6 +139,7 @@ function Assets() {
   // indication anything went wrong.
   const decimalPattern = "^\\d+([.,]\\d{1,4})?$";
   const productTypes = ["RING", "BAR", "JEWELRY"] as const;
+  const cryptoTotalsPreview = cryptoPurchaseTotals(normDecimal(cryptoQty), normDecimal(cryptoPrice), cryptoCurrency, fx.data?.rate);
   const forms = {
     metals: <form className="panel form asset-form" onSubmit={e => submit(e, "metal")}><h3>{tr("Precious metals")}</h3><Error error={metal.error} /><select name="metal_type"><option value="GOLD">{tr("Gold")}</option><option value="SILVER">{tr("Silver")}</option></select><select name="brand" aria-label={tr("Product catalog")}>{(brands.data ?? []).map(b => <option value={b} key={b}>{label(b)}</option>)}</select>{/* BUGFIX: the option *value* (not just its label) is what gets sent as
     product_type and later shown verbatim as the holding's name in
@@ -133,7 +150,14 @@ function Assets() {
     as the value itself stores the human-readable text the user actually
     picked, in whichever language was active at the time. */}
     <select name="product_type" aria-label={tr("Product")} required defaultValue=""><option value="" disabled>{tr("Product")}</option>{productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}</select><input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" pattern={decimalPattern} required /><div className="amount-row purity-row"><input name="purity" placeholder="99.99" title={tr("Leave blank to use 99.99%")} aria-label={tr("Purity")} inputMode="decimal" pattern={decimalPattern} /><span className="currency-badge">%</span></div><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" pattern={decimalPattern} required /><input name="date" type="date" required /><button className="primary">+ {tr("Add")}</button></form>,
-    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><CoinPicker selected={coin} onSelect={setCoin} tr={tr} /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required /><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" pattern={decimalPattern} required /><input name="date" type="date" required /><button className="primary" disabled={!coin}>+ {tr("Add")}</button></form>,
+    // User report, 2026-08-26: coin stays free-search-then-select (already
+    // correct, see the "Không sửa" note in docs/qa/QA_STATE.md); quantity
+    // and price are user-typed as before, but price now has a VND/USD
+    // toggle, and Total cost is no longer typed by hand -- it's always
+    // price * quantity (converting a USD price to VND first via the live
+    // rate), computed by cryptoPurchaseTotals() above and shown read-only
+    // so it can never drift from that formula.
+    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><CoinPicker selected={coin} onSelect={setCoin} tr={tr} /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required value={cryptoQty} onChange={e => setCryptoQty(e.target.value)} /><div className="amount-row crypto-price-row"><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required value={cryptoPrice} onChange={e => setCryptoPrice(e.target.value)} /><select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select></div>{cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoney(fx.data.rate)} VND`}</p>}<input name="total" aria-label={tr("Total cost")} placeholder={tr("Total cost")} value={cryptoTotalsPreview ? fmtMoney(cryptoTotalsPreview.totalVnd) ?? "" : ""} readOnly disabled /><input name="date" type="date" required /><button className="primary" disabled={!coin || !cryptoTotalsPreview}>+ {tr("Add")}</button></form>,
   };
   const p = q.data;
   return <Section title="Assets" subtitle="Manage assets, investments, and net worth in one place.">
@@ -172,6 +196,59 @@ function sumMoney(values: (string | null | undefined)[]): string {
   const whole = magnitude / BigInt(10000);
   const fraction = (magnitude % BigInt(10000)).toString().padStart(4, "0").replace(/0+$/, "");
   return `${negative ? "-" : ""}${whole}${fraction ? "." + fraction : ""}`;
+}
+
+// User report, 2026-08-26 ("tổng chi phí sẽ tính bằng giá mua nhân với số
+// lượng, nếu mua bằng usd thì sẽ tự động nhân và chuyển sang vnd"): the
+// crypto form needs exact decimal multiplication (price * quantity, and
+// price * fx rate for a USD purchase) -- like every other money arithmetic
+// helper in this file, this is BigInt digit-shifting, never
+// Number()/float, so it can't introduce rounding error. Unlike sumMoney
+// (which assumes a fixed 4-decimal money scale on every input), this
+// multiplies two decimal strings of ANY precision (a quantity can have up
+// to 8 decimals, an FX rate can have 2-6) by shifting each operand to an
+// integer by its own decimal-place count, multiplying as BigInt, then
+// placing the decimal point back at the sum of both shifts.
+function mulDecimal(a: string, b: string): string {
+  const parse = (raw: string) => {
+    const trimmed = raw.trim();
+    const negative = trimmed.startsWith("-");
+    const [whole, frac = ""] = trimmed.replace(/^-/, "").split(".");
+    const digits = (whole || "0") + frac;
+    return { negative, digits: BigInt(digits.replace(/^0+(?=\d)/, "") || "0"), scale: frac.length };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  const product = pa.digits * pb.digits;
+  const scale = pa.scale + pb.scale;
+  const negative = (pa.negative !== pb.negative) && product !== BigInt(0);
+  const str = product.toString().padStart(scale + 1, "0");
+  const whole = str.slice(0, str.length - scale) || "0";
+  const frac = scale > 0 ? str.slice(str.length - scale) : "";
+  return `${negative ? "-" : ""}${whole}${frac ? "." + frac : ""}`;
+}
+
+// User report, 2026-08-26: the crypto purchase price can be entered in
+// either VND or USD; total cost is always price * quantity, and a USD
+// price is additionally converted to VND first using the live rate from
+// GET /api/v1/fx/usd-vnd (see app/api/fx.py). Everything the app stores is
+// VND (no currency field anywhere else in the schema -- see the "VND cố
+// định" decision in the account-currency work above), so this returns the
+// VND-converted per-unit price and total the API actually expects; the
+// USD amount the user typed is never sent anywhere.
+function cryptoPurchaseTotals(
+  quantity: string,
+  price: string,
+  currency: "VND" | "USD",
+  fxRateToVnd: string | undefined,
+): { unitPriceVnd: string; totalVnd: string } | null {
+  if (!quantity || !price || isZeroMoney(quantity)) return null;
+  if (currency === "VND") {
+    return { unitPriceVnd: sumMoney([price]), totalVnd: sumMoney([mulDecimal(price, quantity)]) };
+  }
+  if (!fxRateToVnd) return null;
+  const unitPriceVnd = sumMoney([mulDecimal(price, fxRateToVnd)]);
+  return { unitPriceVnd, totalVnd: sumMoney([mulDecimal(unitPriceVnd, quantity)]) };
 }
 
 function negateMoney(value: string): string {

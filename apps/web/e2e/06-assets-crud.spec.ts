@@ -106,3 +106,102 @@ test.describe.serial("assets: add metal, add + edit savings account", () => {
     await expect(page.getByText("E2E Savings Renamed", { exact: true })).toBeVisible();
   });
 });
+
+// Regression coverage for the user report (2026-08-26): "với giá mua sẽ
+// cho lựa chọn mua bằng USD hoặc VND. Tổng chi phí sẽ tính bằng giá mua
+// nhân với số lượng, nếu mua bằng usd thì sẽ tự động nhân và chuyển sang
+// vnd (tỷ giá sẽ tự động cập nhật)". Coin search and the live FX rate are
+// both mocked -- the real CoinGecko/open.er-api.com endpoints aren't
+// reachable from this sandbox (see docs/qa/QA_STATE.md), and a test
+// shouldn't depend on a live external rate anyway. This exercises the
+// actual app code path (CoinPicker -> GET .../crypto/coins, the currency
+// toggle -> GET .../fx/usd-vnd), not a hand-rolled stand-in for it.
+test.describe.serial("crypto: purchase price in VND or USD auto-computes the total", () => {
+  test("VND: total cost is computed (price * quantity), no longer typed by hand", async ({ page, request }) => {
+    await page.route("**/api/v1/assets/crypto/coins**", route =>
+      route.fulfill({ json: [{ id: "bitcoin", symbol: "btc", name: "Bitcoin" }] })
+    );
+    const before = await (await request.get(`${API}/assets/crypto`)).json();
+
+    await page.goto("/");
+    await goToTab(page, "Tài sản");
+    await page.getByRole("tab", { name: VI.cryptoTab }).click();
+    await page.getByRole("button", { name: "Chọn coin" }).click();
+    await page.getByRole("textbox", { name: "Tìm coin" }).fill("bit");
+    await page.getByRole("option", { name: /Bitcoin/ }).click();
+    await page.locator('input[name="quantity"]').fill("2");
+    await page.locator('input[name="price"]').fill("50000000");
+    // Total cost is now a read-only field driven by cryptoPurchaseTotals(),
+    // not user input -- 2 * 50,000,000 = 100,000,000.
+    await expect(page.locator('input[name="total"]')).toHaveValue("100000000");
+    await page.locator('input[name="date"]').fill("2026-08-20");
+    await page.locator(".asset-form button.primary").click();
+
+    await expect(page.locator(".asset-list").getByText("Bitcoin", { exact: true }).first()).toBeVisible();
+    const after = await (await request.get(`${API}/assets/crypto`)).json();
+    expect(after.length).toBe(before.length + 1);
+  });
+
+  test("USD: total cost converts to VND using the live rate, shown to the user before submit", async ({ page, request }) => {
+    await page.route("**/api/v1/assets/crypto/coins**", route =>
+      route.fulfill({ json: [{ id: "ethereum", symbol: "eth", name: "Ethereum" }] })
+    );
+    await page.route("**/api/v1/fx/usd-vnd", route =>
+      route.fulfill({ json: { rate: "26000", as_of: "2026-08-26T00:00:00Z", source: "test" } })
+    );
+    const before = await (await request.get(`${API}/assets/crypto`)).json();
+
+    await page.goto("/");
+    await goToTab(page, "Tài sản");
+    await page.getByRole("tab", { name: VI.cryptoTab }).click();
+    await page.getByRole("button", { name: "Chọn coin" }).click();
+    await page.getByRole("textbox", { name: "Tìm coin" }).fill("eth");
+    await page.getByRole("option", { name: /Ethereum/ }).click();
+    await page.locator('input[name="quantity"]').fill("1");
+    await page.locator('input[name="price"]').fill("100");
+    await page.locator('select[name="purchase_currency"]').selectOption("USD");
+
+    // The live rate is shown so the conversion isn't a black box.
+    await expect(page.getByText("1 USD ≈ 26000 VND")).toBeVisible();
+    // 100 USD/unit * 26000 = 2,600,000 VND/unit; total = 2,600,000 * 1.
+    await expect(page.locator('input[name="total"]')).toHaveValue("2600000");
+
+    await page.locator('input[name="date"]').fill("2026-08-20");
+    await page.locator(".asset-form button.primary").click();
+
+    await expect(page.locator(".asset-list").getByText("Ethereum", { exact: true }).first()).toBeVisible();
+    const after = await (await request.get(`${API}/assets/crypto`)).json();
+    expect(after.length).toBe(before.length + 1);
+  });
+
+  test("USD: Add is disabled until the exchange rate has loaded", async ({ page }) => {
+    await page.route("**/api/v1/assets/crypto/coins**", route =>
+      route.fulfill({ json: [{ id: "solana", symbol: "sol", name: "Solana" }] })
+    );
+    // Hold the FX response so the loading state is observable rather than
+    // racing past it.
+    let releaseFx: () => void = () => {};
+    const fxGate = new Promise<void>(resolve => { releaseFx = resolve; });
+    await page.route("**/api/v1/fx/usd-vnd", async route => {
+      await fxGate;
+      await route.fulfill({ json: { rate: "26000", as_of: "2026-08-26T00:00:00Z", source: "test" } });
+    });
+
+    await page.goto("/");
+    await goToTab(page, "Tài sản");
+    await page.getByRole("tab", { name: VI.cryptoTab }).click();
+    await page.getByRole("button", { name: "Chọn coin" }).click();
+    await page.getByRole("textbox", { name: "Tìm coin" }).fill("sol");
+    await page.getByRole("option", { name: /Solana/ }).click();
+    await page.locator('input[name="quantity"]').fill("1");
+    await page.locator('input[name="price"]').fill("100");
+    await page.locator('select[name="purchase_currency"]').selectOption("USD");
+
+    await expect(page.getByText("Đang tải tỷ giá…")).toBeVisible();
+    await expect(page.locator(".asset-form button.primary")).toBeDisabled();
+
+    releaseFx();
+    await expect(page.getByText("1 USD ≈ 26000 VND")).toBeVisible();
+    await expect(page.locator(".asset-form button.primary")).toBeEnabled();
+  });
+});

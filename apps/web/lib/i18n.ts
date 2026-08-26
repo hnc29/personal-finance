@@ -32,6 +32,7 @@ const enUi = {
   , "Delete":"Delete", "Confirm delete":"Confirm delete", "Deleting...":"Deleting...", "Transaction details":"Transaction details", "Editing transaction":"Editing transaction", "This transaction type is managed on its own page and can't be edited or deleted here.":"This transaction type is managed on its own page and can't be edited or deleted here."
   , "Assets":"Assets", "Manage assets, investments, and net worth in one place.":"Manage assets, investments, and net worth in one place."
   , "Choose bank":"Choose bank", "Nickname (optional)":"Nickname (optional)", "Initial balance":"Initial balance", "Leave blank to use 99.99%":"Leave blank to use 99.99%", "Start date":"Start date", "End date":"End date", "All accounts":"All accounts", "Export filters":"Export filters"
+  , "Exchange rate":"Exchange rate", "Exchange rate unavailable":"Exchange rate unavailable", "Loading exchange rate…":"Loading exchange rate…"
 } as const;
 export type UiKey = keyof typeof enUi;
 export const transactionUiKeys = {
@@ -56,6 +57,7 @@ const viUi: Record<string, string> = {
   , "Delete":"Xoá", "Confirm delete":"Xác nhận xoá", "Deleting...":"Đang xoá...", "Transaction details":"Chi tiết giao dịch", "Editing transaction":"Đang sửa giao dịch", "This transaction type is managed on its own page and can't be edited or deleted here.":"Loại giao dịch này được quản lý ở trang riêng (Tiết kiệm/Tài sản) và không thể sửa hoặc xoá tại đây."
   , "Assets":"Tài sản", "Manage assets, investments, and net worth in one place.":"Quản lý tài sản, đầu tư và tài sản ròng tại một nơi."
   , "Choose bank":"Chọn ngân hàng", "Nickname (optional)":"Tên gợi nhớ (không bắt buộc)", "Initial balance":"Số dư ban đầu", "Leave blank to use 99.99%":"Để trống sẽ dùng 99,99%", "Start date":"Từ ngày", "End date":"Đến ngày", "All accounts":"Tất cả tài khoản", "Export filters":"Bộ lọc xuất dữ liệu"
+  , "Exchange rate":"Tỷ giá", "Exchange rate unavailable":"Không lấy được tỷ giá", "Loading exchange rate…":"Đang tải tỷ giá…"
 };
 export function ui(language: Language, text: string): string {
   const extra: Record<string, string> = { "Search category":"Tìm danh mục", "Collapse":"Thu gọn", "Expand":"Mở rộng", "All":"Tất cả", "Expenses":"Chi tiêu", "Income":"Thu nhập", "None":"Không có danh mục cha", "Add child category":"Thêm danh mục con", "Other / Unclassified":"Khác / Chưa phân loại", "No categories found.":"Không tìm thấy danh mục" };
