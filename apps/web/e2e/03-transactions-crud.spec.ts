@@ -1,5 +1,5 @@
 import { test, expect, APIRequestContext } from "@playwright/test";
-import { goToTab, VI } from "./helpers";
+import { goToTab, VI, chooseAccount } from "./helpers";
 
 const API = "http://127.0.0.1:8010/api/v1";
 
@@ -20,8 +20,7 @@ test.describe.serial("transactions: add / edit / delete / persistence", () => {
     await page.goto("/");
     await goToTab(page, "Giao dịch");
     await page.getByRole("group", { name: VI.type }).getByRole("button", { name: VI.income }).click();
-    await page.getByRole("button", { name: VI.selectAccount }).click();
-    await page.getByRole("option", { name: "E2E Bank" }).click();
+    await chooseAccount(page, "E2E Bank");
     await page.locator(".amount-row .amount-input").fill("500000");
     await page.getByRole("button", { name: /Chọn danh mục/ }).click();
     await page.getByLabel("Tìm danh mục").fill("Lương");
@@ -40,8 +39,7 @@ test.describe.serial("transactions: add / edit / delete / persistence", () => {
     await page.goto("/");
     await goToTab(page, "Giao dịch");
     // EXPENSE is the composer's default type; no need to click it.
-    await page.getByRole("button", { name: VI.selectAccount }).click();
-    await page.getByRole("option", { name: "E2E Cash" }).click();
+    await chooseAccount(page, "E2E Cash");
     await page.locator(".amount-row .amount-input").fill("45000");
     await page.getByRole("button", { name: /Chọn danh mục/ }).click();
     await page.getByLabel("Tìm danh mục").fill("Cà phê");

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { goToTab, VI, errorAlert } from "./helpers";
+import { goToTab, VI, errorAlert, chooseAccount } from "./helpers";
 
 // E2E flow #12 (empty-data state) + #13 (validation). Runs before any
 // transaction CRUD spec creates rows, relying on finance.test.db starting
@@ -31,8 +31,7 @@ test.describe.serial("transactions: empty state and validation", () => {
     const before = await (await request.get("http://127.0.0.1:8010/api/v1/financial-events")).json();
     await page.goto("/");
     await goToTab(page, "Giao dịch");
-    await page.getByRole("button", { name: VI.selectAccount }).click();
-    await page.getByRole("option", { name: "E2E Cash" }).click();
+    await chooseAccount(page, "E2E Cash");
     await page.locator(".event-form.composer button.primary").click();
     await page.waitForTimeout(300);
     const after = await (await request.get("http://127.0.0.1:8010/api/v1/financial-events")).json();

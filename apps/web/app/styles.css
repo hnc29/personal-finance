@@ -1,4 +1,4 @@
-:root { color-scheme:light; --ink:#14211b; --muted:#66736c; --paper:#f5f6f1; --card:#ffffff; --accent:#0b6b4f; --accent-soft:#dcebe3; --secondary:#17324d; --positive:#15835e; --negative:#c4483e; --warning:#c9821e; --line:#dde4df; --danger:#c4483e; font-family:"Be Vietnam Pro",ui-sans-serif,system-ui,sans-serif }
+:root { color-scheme:light; --ink:#14211b; --muted:#66736c; --paper:#f5f6f1; --card:#ffffff; --accent:#0b6b4f; --accent-soft:#dcebe3; --secondary:#17324d; --positive:#15835e; --negative:#c4483e; --warning:#c9821e; --line:#dde4df; --danger:#c4483e; --sidebar-active:#2563eb; font-family:"Be Vietnam Pro",ui-sans-serif,system-ui,sans-serif }
 * { box-sizing:border-box } body { margin:0; color:var(--ink); background:var(--paper) } button,input,select { font:inherit } button { cursor:pointer } button:disabled { cursor:not-allowed; opacity:.55 } main { max-width:1180px; margin:auto; padding:32px 24px 64px }
 [hidden] { display:none!important }
 .composer { max-width:760px; margin-inline:auto; background:#fbfdfb; box-shadow:0 14px 40px #183b2614; border-radius:24px; padding:24px }
@@ -80,6 +80,17 @@ fieldset { margin:0; min-width:0 } legend { padding:0 5px }.hint { color:var(--m
 .row-option{display:flex;align-items:center;gap:10px;text-align:left;border:1px solid transparent;border-radius:10px;background:transparent;padding:9px 10px;min-height:auto}
 .row-option:hover{background:#f0f4f0}
 .row-option.selected{border-color:#238b57;background:#eaf7ef}
+.row-balance{flex:0 0 auto;color:var(--muted);font-size:.82rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.row-option .row-balance{margin-left:auto}
+
+/* User request, 2026-08-26: "ở khung lựa chọn danh mục khi nhập giao dịch
+   hãy cho hiện khung với kích thước dài hơn để ít phải cuộn tìm" -- only
+   the transaction composer's CategoryPicker (always rendered inside a
+   `.row-picker` wrapper) gets a taller popover; the Categories admin
+   page's ParentPicker reuses the same `.category-popover` class but isn't
+   wrapped in `.row-picker`, so it keeps the original, more compact height
+   there. min(...) keeps it from overflowing a short/mobile viewport. */
+.row-picker .category-popover{max-height:min(65vh,560px)}
 .amount-row{display:flex;align-items:center;gap:12px;min-height:70px;padding:10px 16px;border-bottom:1px solid var(--line)}
 .currency-badge{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 10px;border-radius:6px;background:#eceee8;color:var(--muted);font-weight:700;font-size:.82rem}
 .amount-input{flex:1;min-height:auto;border:0;background:transparent;padding:0;font-size:1.9rem;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}
@@ -115,12 +126,18 @@ fieldset { margin:0; min-width:0 } legend { padding:0 5px }.hint { color:var(--m
    longer renders `.nav-scroll`, but left in place -- harmless) so this
    sidebar doesn't inherit their horizontal-pill styling. */
 .app-shell{display:flex;align-items:stretch;min-height:100vh}
-.sidebar{flex:0 0 232px;display:flex;flex-direction:column;gap:4px;padding:22px 14px;background:#0f2a20}
-.sidebar-brand{display:flex;align-items:center;gap:10px;padding:6px 10px 22px;color:#fff;font-family:Georgia,serif;font-size:1.15rem;font-weight:600}
+/* User request, 2026-08-26: "chuyển side bar sang nền trắng chữ đen, tô
+   xanh khi đang lựa chọn" -- switched from the dark-green fill to a white
+   sidebar with black text and a blue active state (--sidebar-active, kept
+   distinct from the app's own green --accent used everywhere else, since
+   the user asked for blue specifically here). A right border replaces the
+   contrast the dark fill used to provide against the page background. */
+.sidebar{flex:0 0 232px;display:flex;flex-direction:column;gap:4px;padding:22px 14px;background:#ffffff;border-right:1px solid var(--line)}
+.sidebar-brand{display:flex;align-items:center;gap:10px;padding:6px 10px 22px;color:#0a0a0a;font-family:Georgia,serif;font-size:1.15rem;font-weight:600}
 .sidebar nav{display:flex;flex-direction:column;gap:2px;background:transparent;padding:0;border-radius:0;overflow:visible}
-.sidebar nav button{display:flex;align-items:center;gap:12px;justify-content:flex-start;text-align:left;padding:11px 12px;border-radius:10px;color:#cbdccf;text-transform:none;white-space:normal;font-size:.92rem}
-.sidebar nav button:hover{background:#173c2c}
-.sidebar nav button.active{background:var(--accent);color:#fff}
+.sidebar nav button{display:flex;align-items:center;gap:12px;justify-content:flex-start;text-align:left;padding:11px 12px;border-radius:10px;color:#0a0a0a;text-transform:none;white-space:normal;font-size:.92rem}
+.sidebar nav button:hover{background:#eef2f7}
+.sidebar nav button.active{background:var(--sidebar-active);color:#fff}
 .nav-icon{flex:0 0 auto;display:inline-flex}
 .app-content{flex:1;min-width:0;display:flex;flex-direction:column}
 .topbar{border-bottom:0;padding:14px 28px 0;justify-content:flex-end}

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { goToTab, VI, errorAlert } from "./helpers";
+import { goToTab, VI, errorAlert, chooseAccount } from "./helpers";
 
 // E2E flow #14: API error / offline handling. Simulates a backend failure
 // by aborting the relevant fetch and checks the app surfaces the generic
@@ -31,8 +31,7 @@ test("submit is disabled while the mutation is pending (slow network)", async ({
     }
     await route.continue();
   });
-  await page.getByRole("button", { name: VI.selectAccount }).click();
-  await page.getByRole("option", { name: "E2E Cash" }).click();
+  await chooseAccount(page, "E2E Cash");
   await page.locator(".amount-row .amount-input").fill("1000");
   await page.getByRole("button", { name: /Chọn danh mục/ }).click();
   await page.getByLabel("Tìm danh mục").fill("Cà phê");

@@ -1019,6 +1019,22 @@ function IconPicker({ value, onChange, language }: { value: string | null; onCha
   </div>;
 }
 
+// User request, 2026-08-26: "hãy hiện 1 tài khoản mặc định là tài khoản lần
+// cuối ghi giao dịch" -- derives the default account for a new transaction
+// from whichever account the most-recently-recorded event actually used,
+// rather than persisting a separate "last used" value in client storage.
+// Sorting by transaction_date then id (not created-at, which the API
+// doesn't expose) means this reflects the last *entered* transaction, which
+// naturally "carries forward" after each submit since resetComposer() clears
+// the composer and the mutation invalidates ["events"], refetching this
+// list with the just-submitted transaction now included.
+function lastUsedAccountId(events: FinancialEvent[] | undefined): string {
+  if (!events || events.length === 0) return "";
+  const last = [...events].sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id)[0];
+  const entry = last.entries[0];
+  return entry ? String(entry.account_id) : "";
+}
+
 function Transactions() {
   const { label, language, tr } = useI18n();
   const qc = useQueryClient();
@@ -1045,6 +1061,18 @@ function Transactions() {
   const events = useQuery({ queryKey: ["events"], queryFn: api.events.list });
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
+  const { balances } = useAccountBalances(accounts.data);
+  // User request, 2026-08-26: default the Select-account row to the last
+  // account actually used, without ever overwriting a choice the user is
+  // already in the middle of making (guarded on the field still being
+  // empty) or an in-progress edit of an existing transaction.
+  const firstEntryAccountId = entries[0]?.accountId;
+  useEffect(() => {
+    if (editingEvent) return;
+    if (firstEntryAccountId) return;
+    const defaultId = lastUsedAccountId(events.data);
+    if (defaultId) setEntries(current => current.map((entry, i) => i === 0 ? { ...entry, accountId: defaultId } : entry));
+  }, [events.data, editingEvent, firstEntryAccountId]);
   function resetComposer() {
     setEntries([{ accountId: "", amount: "" }]);
     setTransferFrom(""); setTransferTo(""); setTransferAmount("");
@@ -1184,19 +1212,19 @@ function Transactions() {
           <div className="type-row"><div className="segmented" role="group" aria-label={tr("Type")}>{composerEventTypes.map(x => <button type="button" className={type === x ? "active" : ""} onClick={() => changeType(x)} key={x}>{label(x)}</button>)}</div></div>
           <div className="txn-card">
             {type === "TRANSFER" ? <>
-              <AccountRow label="From account" accounts={activeAccounts} value={transferFrom} onChange={setTransferFrom} />
-              <AccountRow label="To account" accounts={activeAccounts} value={transferTo} onChange={setTransferTo} />
+              <AccountRow label="From account" accounts={activeAccounts} value={transferFrom} onChange={setTransferFrom} balances={balances} />
+              <AccountRow label="To account" accounts={activeAccounts} value={transferTo} onChange={setTransferTo} balances={balances} />
               <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={transferAmount} onChange={e => setTransferAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
               {formError && <p className="error" role="alert">{formError}</p>}
             </> : type === "CREDIT_CARD_PAYMENT" ? <>
               {creditCardAccounts.length === 0 ? <p className="hint">{tr("No credit card accounts available. Create one first.")}</p> : fundingAccounts.length === 0 ? <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p> : <>
-                <AccountRow label="Credit card" accounts={creditCardAccounts} value={cardAccountId} onChange={setCardAccountId} />
-                <AccountRow label="From account" accounts={fundingAccounts} value={fundingAccountId} onChange={setFundingAccountId} />
+                <AccountRow label="Credit card" accounts={creditCardAccounts} value={cardAccountId} onChange={setCardAccountId} balances={balances} />
+                <AccountRow label="From account" accounts={fundingAccounts} value={fundingAccountId} onChange={setFundingAccountId} balances={balances} />
                 <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
               </>}
               {formError && <p className="error" role="alert">{formError}</p>}
             </> : <>
-              <AccountRow label="Select account" accounts={activeAccounts} value={entries[0]?.accountId ?? ""} onChange={v => updateEntry(0, "accountId", v)} />
+              <AccountRow label="Select account" accounts={activeAccounts} value={entries[0]?.accountId ?? ""} onChange={v => updateEntry(0, "accountId", v)} balances={balances} />
               <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={entries[0]?.amount ?? ""} onChange={e => updateEntry(0, "amount", e.target.value)} inputMode="decimal" pattern={moneyPattern} placeholder="0" required /></div>
               {formError && <p className="error" role="alert">{formError}</p>}
             </>}
@@ -1639,7 +1667,14 @@ function Ledger() {
 /** TASK-036: a tappable row (icon + name + chevron) that opens a popover
  * list of accounts -- the same interaction shape Moneylover uses for its
  * account/category rows -- instead of a plain <select>. */
-function AccountRow({ label: labelText, accounts, value, onChange }: { label: string; accounts: Account[]; value: string; onChange: (value: string) => void }) {
+// User request, 2026-08-26: "hiển thị số dư của tài khoản bên cạnh luôn" --
+// balances is an optional account_id -> balance map (from
+// useAccountBalances); when supplied, the chosen account's balance is shown
+// next to its name in the trigger, and each popover option shows its own
+// account's balance too, so the balance is visible both collapsed and while
+// picking. Optional (not required) because Ledger()'s own account-switcher
+// AccountRow already renders balance separately via .ledger-balance.
+function AccountRow({ label: labelText, accounts, value, onChange, balances }: { label: string; accounts: Account[]; value: string; onChange: (value: string) => void; balances?: Map<number, string> }) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -1651,16 +1686,19 @@ function AccountRow({ label: labelText, accounts, value, onChange }: { label: st
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [open]);
   const chosen = accounts.find(a => String(a.id) === value);
+  const chosenBalance = chosen ? balances?.get(chosen.id) : undefined;
   return <div className="row-picker" ref={root}>
     <button type="button" className="row-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(x => !x)}>
       <span className="row-icon" aria-hidden="true">{chosen ? <AccountLogo name={chosen.name} accountType={chosen.account_type} size={26} /> : <IconGlyph iconKey="Wallet" size={26} />}</span>
       <span className="row-label">{chosen ? chosen.name : tr(labelText)}</span>
+      {chosenBalance != null && <span className="row-balance">{fmtMoneyDisplay(chosenBalance)}</span>}
       <span className="row-chevron" aria-hidden="true">›</span>
     </button>
     {open && <div className="row-popover" role="listbox">
       {accounts.length === 0 && <p className="hint">{tr("No accounts yet.")}</p>}
       {accounts.map(a => <button type="button" key={a.id} role="option" aria-selected={String(a.id) === value} className={`row-option${String(a.id) === value ? " selected" : ""}`} onClick={() => { onChange(String(a.id)); setOpen(false); }}>
         <AccountLogo name={a.name} accountType={a.account_type} size={26} /> <span>{a.name}</span>
+        {balances?.get(a.id) != null && <span className="row-balance">{fmtMoneyDisplay(balances.get(a.id)!)}</span>}
       </button>)}
     </div>}
   </div>;

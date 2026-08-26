@@ -70,6 +70,21 @@ export const VI = {
   currentBalance: "Số dư hiện tại",
 } as const;
 
+// User request, 2026-08-26: the single-account picker in the
+// Expense/Income composer (Transactions()'s "Select account" AccountRow)
+// now defaults to the account used in the last recorded transaction (see
+// lastUsedAccountId() in page.tsx), so once any transaction exists its
+// trigger button's accessible name is that account's name -- not the
+// VI.selectAccount ("Chọn tài khoản") placeholder -- making a name-based
+// lookup for the placeholder unreliable. Select structurally instead: the
+// account picker is always the first `.row-picker` inside `.txn-card`
+// (CategoryPicker's own `.row-picker` renders after it), regardless of
+// what the trigger currently shows.
+export async function chooseAccount(page: Page, accountName: string) {
+  await page.locator(".txn-card > .row-picker").first().locator(".row-trigger").click();
+  await page.getByRole("option", { name: accountName }).click();
+}
+
 export async function expectNoConsoleErrors(page: Page, errors: string[]) {
   // Filter out the one known-benign 404 (see docs/qa/QA_STATE.md) so real
   // regressions still fail the test instead of being lost in noise.
