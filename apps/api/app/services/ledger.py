@@ -131,6 +131,7 @@ def create_financial_event(
         payee_text=payload.payee_text,
         trip_event_text=payload.trip_event_text,
         note=payload.note,
+        excluded_from_reports=payload.excluded_from_reports,
         entries=entries,
     )
     session.add(event)
@@ -173,6 +174,7 @@ def update_financial_event(
     event.payee_text = payload.payee_text
     event.trip_event_text = payload.trip_event_text
     event.note = payload.note
+    event.excluded_from_reports = payload.excluded_from_reports
     event.entries = entries
     try:
         session.commit()

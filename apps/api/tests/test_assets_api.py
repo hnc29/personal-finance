@@ -184,3 +184,145 @@ def test_search_coins_endpoint_uses_injected_catalog(client: TestClient) -> None
     assert response.status_code == 200
     assert response.json() == [{"id": "bitcoin", "symbol": "btc", "name": "Bitcoin"}]
     fake_catalog.search.assert_called_once_with("bit", limit=50)
+
+
+# User request, 2026-08-26: "không tính vào báo cáo" also applies to newly
+# added assets, and must be editable afterwards via the asset-edit menu.
+
+
+def test_create_metal_defaults_excluded_from_reports_false_and_persists_true(
+    client: TestClient,
+) -> None:
+    default_resp = client.post(
+        "/api/v1/assets/metals",
+        json={
+            "metal_type": "GOLD",
+            "brand": "SJC",
+            "product_type": "Vàng miếng SJC 1 lượng",
+            "quantity_grams": "3.75",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "7500000",
+            "total_cost": "7500000",
+        },
+    )
+    assert default_resp.status_code == 201
+    assert default_resp.json()["excluded_from_reports"] is False
+
+    excluded_resp = client.post(
+        "/api/v1/assets/metals",
+        json={
+            "metal_type": "GOLD",
+            "brand": "SJC",
+            "product_type": "Nhẫn trơn",
+            "quantity_grams": "3.75",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "7500000",
+            "total_cost": "7500000",
+            "excluded_from_reports": True,
+        },
+    )
+    assert excluded_resp.status_code == 201
+    assert excluded_resp.json()["excluded_from_reports"] is True
+
+    listed = client.get("/api/v1/assets/metals").json()
+    by_id = {row["id"]: row for row in listed}
+    assert by_id[default_resp.json()["id"]]["excluded_from_reports"] is False
+    assert by_id[excluded_resp.json()["id"]]["excluded_from_reports"] is True
+
+
+def test_patch_metal_toggles_excluded_from_reports(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/assets/metals",
+        json={
+            "metal_type": "GOLD",
+            "brand": "SJC",
+            "product_type": "Vàng miếng SJC 1 lượng",
+            "quantity_grams": "3.75",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "7500000",
+            "total_cost": "7500000",
+        },
+    ).json()
+    assert created["excluded_from_reports"] is False
+
+    patched = client.patch(
+        f"/api/v1/assets/metals/{created['id']}",
+        json={"excluded_from_reports": True},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["excluded_from_reports"] is True
+
+    listed = client.get("/api/v1/assets/metals").json()
+    assert listed[0]["excluded_from_reports"] is True
+
+
+def test_patch_metal_unknown_id_returns_404(client: TestClient) -> None:
+    response = client.patch(
+        "/api/v1/assets/metals/999999", json={"excluded_from_reports": True}
+    )
+    assert response.status_code == 404
+
+
+def test_create_crypto_defaults_excluded_from_reports_false_and_persists_true(
+    client: TestClient,
+) -> None:
+    default_resp = client.post(
+        "/api/v1/assets/crypto",
+        json={
+            "coingecko_id": "bitcoin",
+            "symbol": "btc",
+            "quantity": "0.5",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "60000",
+            "total_cost": "30000",
+        },
+    )
+    assert default_resp.status_code == 201
+    assert default_resp.json()["excluded_from_reports"] is False
+
+    excluded_resp = client.post(
+        "/api/v1/assets/crypto",
+        json={
+            "coingecko_id": "ethereum",
+            "symbol": "eth",
+            "quantity": "1",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "3500",
+            "total_cost": "3500",
+            "excluded_from_reports": True,
+        },
+    )
+    assert excluded_resp.status_code == 201
+    assert excluded_resp.json()["excluded_from_reports"] is True
+
+
+def test_patch_crypto_toggles_excluded_from_reports(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/assets/crypto",
+        json={
+            "coingecko_id": "bitcoin",
+            "symbol": "btc",
+            "quantity": "0.5",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "60000",
+            "total_cost": "30000",
+        },
+    ).json()
+    assert created["excluded_from_reports"] is False
+
+    patched = client.patch(
+        f"/api/v1/assets/crypto/{created['id']}",
+        json={"excluded_from_reports": True},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["excluded_from_reports"] is True
+
+    listed = client.get("/api/v1/assets/crypto").json()
+    assert listed[0]["excluded_from_reports"] is True
+
+
+def test_patch_crypto_unknown_id_returns_404(client: TestClient) -> None:
+    response = client.patch(
+        "/api/v1/assets/crypto/999999", json={"excluded_from_reports": True}
+    )
+    assert response.status_code == 404

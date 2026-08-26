@@ -16,6 +16,11 @@ class PortfolioRow(BaseModel):
     value: str | None = None
     quantity: str | None = None
     quote: QuoteMeta | None = None
+    # User request, 2026-08-26: "không tính vào báo cáo" -- surfaced on
+    # savings/precious-metal/crypto rows so the Assets tab can show and
+    # toggle it; defaults False (unset) for rows that don't carry the field
+    # (accounts, credit cards).
+    excluded_from_reports: bool = False
 
 class PortfolioOverview(BaseModel):
     as_of: datetime

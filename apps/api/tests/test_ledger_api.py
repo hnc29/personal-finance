@@ -23,6 +23,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         id=1,
         event_type=FinancialEventType.EXPENSE,
         transaction_date=datetime.date(2026, 8, 22),
+        excluded_from_reports=False,
         entries=[AccountEntry(id=1, account_id=7, amount_scaled=-123456)],
     )
     monkeypatch.setattr(ledger_service, "list_financial_events", lambda db: [event])
@@ -48,6 +49,7 @@ def test_update_event_success(client: TestClient, monkeypatch: pytest.MonkeyPatc
         id=1,
         event_type=FinancialEventType.EXPENSE,
         transaction_date=datetime.date(2026, 8, 22),
+        excluded_from_reports=False,
         entries=[AccountEntry(id=2, account_id=7, amount_scaled=-123456)],
     )
     monkeypatch.setattr(ledger_service, "update_financial_event", lambda db, event_id, payload: event if event_id == 1 else None)

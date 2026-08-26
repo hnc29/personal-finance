@@ -207,6 +207,69 @@ def test_patch_savings_rejected_after_history_exists(client: TestClient) -> None
     assert response.status_code == 400
 
 
+# User request, 2026-08-26: "không tính vào báo cáo" also applies to newly
+# added assets, and must be editable afterwards via the asset-edit menu.
+
+
+def test_create_savings_defaults_excluded_from_reports_false(
+    client: TestClient,
+) -> None:
+    bank_id = _make_bank_account(client)
+    account = _open_savings(client, funding_account_id=bank_id)
+    assert account["excluded_from_reports"] is False
+
+
+def test_patch_savings_can_set_excluded_from_reports_while_editable(
+    client: TestClient,
+) -> None:
+    bank_id = _make_bank_account(client)
+    account = _open_savings(client, funding_account_id=bank_id)
+
+    response = client.patch(
+        f"/api/v1/assets/savings/{account['id']}",
+        json={"excluded_from_reports": True},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["excluded_from_reports"] is True
+
+
+def test_patch_savings_can_set_excluded_from_reports_after_history_exists(
+    client: TestClient,
+) -> None:
+    """Unlike every other patchable field, excluded_from_reports is pure
+    reporting metadata -- editable regardless of lifecycle history, so this
+    must NOT hit the "Cannot edit ... once it has lifecycle history" gate
+    that a bare 'notes' patch does (see the rejected-after-history test
+    above)."""
+    bank_id = _make_bank_account(client)
+    account = _open_savings(
+        client,
+        funding_account_id=bank_id,
+        term_months=1,
+        maturity_action="RENEW_PRINCIPAL",
+        opened_date="2026-01-01",
+    )
+    renewed = client.post(
+        f"/api/v1/assets/savings/{account['id']}/renew",
+        json={"start_date": "2026-02-01", "actual_interest": "0"},
+    )
+    assert renewed.status_code == 200, renewed.text
+
+    response = client.patch(
+        f"/api/v1/assets/savings/{account['id']}",
+        json={"excluded_from_reports": True},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["excluded_from_reports"] is True
+
+    # A mixed patch (history-affecting field + this one) still hits the gate.
+    mixed = client.patch(
+        f"/api/v1/assets/savings/{account['id']}",
+        json={"excluded_from_reports": False, "notes": "should be rejected"},
+    )
+    assert mixed.status_code == 400
+
+
 def test_close_at_maturity_splits_principal_and_interest(client: TestClient) -> None:
     bank_id = _make_bank_account(client)
     account = _open_savings(

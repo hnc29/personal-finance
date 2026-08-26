@@ -90,6 +90,9 @@ class SavingsAccountCreate(BaseModel):
         "CLOSE", "RENEW_PRINCIPAL", "RENEW_PRINCIPAL_AND_INTEREST"
     ] = "CLOSE"
     notes: str | None = None
+    # User request, 2026-08-26: "không tính vào báo cáo" also applies to
+    # newly-added assets -- opt-in, defaults False.
+    excluded_from_reports: bool = False
 
     @field_validator("institution", "name", "product_name")
     @classmethod
@@ -122,6 +125,11 @@ class SavingsAccountPatch(BaseModel):
         Literal["CLOSE", "RENEW_PRINCIPAL", "RENEW_PRINCIPAL_AND_INTEREST"] | None
     ) = None
     notes: str | None = None
+    # User request, 2026-08-26: unlike every other field on this schema,
+    # editing this one is NOT gated by "editable" below -- it's pure
+    # reporting metadata, not financial history, so it stays editable even
+    # after a savings account has renewals/tất toán history.
+    excluded_from_reports: bool | None = None
 
 
 class SavingsCloseRequest(BaseModel):
@@ -204,6 +212,7 @@ def _account_json(
         "closed_date": account.closed_date.isoformat() if account.closed_date else None,
         "funding_account_id": account.funding_account_id,
         "notes": account.notes,
+        "excluded_from_reports": account.excluded_from_reports,
         "editable": editable,
         "current_term": _term_json(current, as_of=as_of) if current else None,
     }
@@ -273,6 +282,7 @@ def create_savings(data: SavingsAccountCreate, db: DbSession) -> dict[str, objec
             maturity_action=MaturityAction(data.maturity_action),
             funding_account_id=data.funding_account_id,
             notes=data.notes,
+            excluded_from_reports=data.excluded_from_reports,
         )
     except SavingsActionError as exc:
         db.rollback()
@@ -298,14 +308,28 @@ def update_savings(
     account_id: int, data: SavingsAccountPatch, db: DbSession
 ) -> dict[str, object]:
     account = _get_account(db, account_id)
-    if len(account.terms) != 1 or account.terms[0].status is not SavingsTermStatus.ACTIVE:
+    fields = data.model_dump(exclude_unset=True)
+    # excluded_from_reports is pure reporting metadata, not financial
+    # history -- editable regardless of lifecycle state, so it's applied
+    # and popped before the edit-before-history gate below (which only
+    # protects the remaining, history-affecting fields).
+    if "excluded_from_reports" in fields:
+        value = fields.pop("excluded_from_reports")
+        if value is not None:
+            account.excluded_from_reports = value
+    if fields and (
+        len(account.terms) != 1 or account.terms[0].status is not SavingsTermStatus.ACTIVE
+    ):
         raise HTTPException(
             400,
             "Cannot edit a savings account once it has lifecycle history "
             "(tất toán/tái tục); use those actions instead",
         )
-    term = account.terms[0]
-    fields = data.model_dump(exclude_unset=True)
+    # The gate above guarantees that whenever `fields` is still non-empty
+    # here, the account has exactly one ACTIVE term -- so `term` is safe to
+    # dereference in every branch below (all of which are themselves gated
+    # on some key being present in `fields`).
+    term = account.terms[0] if fields else None
     if "name" in fields:
         account.name = _not_blank(fields["name"])
     if "institution" in fields or "product_name" in fields:
@@ -319,23 +343,29 @@ def update_savings(
     if "term_months" in fields and fields["term_months"] <= 0:
         raise HTTPException(400, "term_months must be positive")
     if "opened_date" in fields:
+        assert term is not None
         account.opened_date = fields["opened_date"]
         term.start_date = fields["opened_date"]
     if "term_months" in fields:
+        assert term is not None
         term.term_months = fields["term_months"]
     if "opened_date" in fields or "term_months" in fields:
+        assert term is not None
         term.maturity_date = add_months(term.start_date, term.term_months)
     if "annual_rate" in fields:
+        assert term is not None
         try:
             term.annual_rate = fields["annual_rate"]
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
     if "non_term_rate" in fields:
+        assert term is not None
         try:
             term.non_term_rate = fields["non_term_rate"]
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
     if "maturity_action" in fields:
+        assert term is not None
         term.maturity_action = MaturityAction(fields["maturity_action"])
     db.commit()
     db.refresh(account)

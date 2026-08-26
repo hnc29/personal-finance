@@ -121,6 +121,7 @@ def open_savings(
     maturity_action: MaturityAction = MaturityAction.CLOSE,
     funding_account_id: int | None = None,
     notes: str | None = None,
+    excluded_from_reports: bool = False,
 ) -> SavingsAccount:
     """Open a new savings book, optionally funded from a wallet account.
 
@@ -143,6 +144,7 @@ def open_savings(
         opened_date=opened_date,
         funding_account_id=funding_account_id,
         notes=notes,
+        excluded_from_reports=excluded_from_reports,
     )
     if term_months is not None:
         if term_months <= 0 or principal_scaled <= 0:

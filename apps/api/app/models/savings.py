@@ -7,6 +7,7 @@ import enum
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     Enum,
@@ -15,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -102,6 +104,12 @@ class SavingsAccount(Base):
     )
     funding_account_id: Mapped[int | None] = mapped_column(
         ForeignKey("accounts.id"), nullable=True
+    )
+    # User request, 2026-08-26: "không tính vào báo cáo" also applies to
+    # newly-added assets -- this savings account still counts toward Net
+    # Worth; it's just left out of income/expense summary reports.
+    excluded_from_reports: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     product: Mapped[SavingsProduct] = relationship(back_populates="accounts")

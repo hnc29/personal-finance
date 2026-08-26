@@ -125,6 +125,64 @@ def test_update_expense_replaces_amount_account_and_category(
     assert session.get(AccountEntry, old_entry_id) is None
 
 
+def test_excluded_from_reports_defaults_false_and_is_editable(
+    session: Session, accounts: dict[str, Account], categories: dict[str, Category]
+) -> None:
+    """User request, 2026-08-26: "không tính vào báo cáo đối với giao dịch
+    nhập mới ... Cho phép chỉnh sửa giá trị này ở các menu chỉnh sửa giao
+    dịch" -- opt-in at creation, editable afterwards via the transaction-edit
+    flow (update_financial_event), independent of every other field."""
+    event = create_financial_event(
+        session,
+        FinancialEventCreate(
+            event_type=FinancialEventType.EXPENSE,
+            transaction_date=date(2026, 8, 20),
+            category_id=categories["food"].id,
+            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-50000))],
+        ),
+    )
+    assert event.excluded_from_reports is False
+
+    excluded_event = create_financial_event(
+        session,
+        FinancialEventCreate(
+            event_type=FinancialEventType.EXPENSE,
+            transaction_date=date(2026, 8, 20),
+            category_id=categories["food"].id,
+            excluded_from_reports=True,
+            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-10000))],
+        ),
+    )
+    assert excluded_event.excluded_from_reports is True
+
+    updated = update_financial_event(
+        session,
+        event.id,
+        FinancialEventUpdate(
+            event_type=FinancialEventType.EXPENSE,
+            transaction_date=date(2026, 8, 20),
+            category_id=categories["food"].id,
+            excluded_from_reports=True,
+            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-50000))],
+        ),
+    )
+    assert updated is not None
+    assert updated.excluded_from_reports is True
+
+    unset_again = update_financial_event(
+        session,
+        event.id,
+        FinancialEventUpdate(
+            event_type=FinancialEventType.EXPENSE,
+            transaction_date=date(2026, 8, 20),
+            category_id=categories["food"].id,
+            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-50000))],
+        ),
+    )
+    assert unset_again is not None
+    assert unset_again.excluded_from_reports is False
+
+
 def test_update_transfer_replaces_both_entries_with_no_leftover_rows(
     session: Session, accounts: dict[str, Account]
 ) -> None:

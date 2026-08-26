@@ -59,6 +59,9 @@ class MetalCreate(BaseModel):
     purchase_price: Decimal
     total_cost: Decimal
     pricing_instrument: str | None = None
+    # User request, 2026-08-26: "không tính vào báo cáo" also applies to
+    # newly-added assets -- opt-in, defaults False.
+    excluded_from_reports: bool = False
 
     # BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): purity is
     # stored as a (0, 1] fraction (PreciousMetalHolding.purity setter ->
@@ -84,6 +87,7 @@ class CryptoCreate(BaseModel):
     purchase_price: Decimal
     total_cost: Decimal
     pricing_instrument: str | None = None
+    excluded_from_reports: bool = False
 
     @field_validator("coingecko_id", "symbol")
     @classmethod
@@ -92,6 +96,17 @@ class CryptoCreate(BaseModel):
         if not stripped:
             raise ValueError("must not be blank")
         return stripped
+
+
+class MetalPatch(BaseModel):
+    """Minimal patch payload -- currently only this one metadata field is
+    editable for metals/crypto holdings (no other edit endpoint exists yet)."""
+
+    excluded_from_reports: bool
+
+
+class CryptoPatch(BaseModel):
+    excluded_from_reports: bool
 
 
 @router.get("/metal-brands")
@@ -116,6 +131,7 @@ def list_metals(db: DbSession):
             "quantity_grams": str(
                 sum((lot.canonical_grams for lot in row.lots), Decimal(0))
             ),
+            "excluded_from_reports": row.excluded_from_reports,
         }
         for row in rows
     ]
@@ -129,6 +145,7 @@ def create_metal(data: MetalCreate, db: DbSession):
             brand=data.brand,
             product_type=data.product_type,
             pricing_instrument=data.pricing_instrument,
+            excluded_from_reports=data.excluded_from_reports,
         )
         holding.purity = data.purity
         lot = PreciousMetalLot(purchase_date=data.purchase_date)
@@ -148,7 +165,22 @@ def create_metal(data: MetalCreate, db: DbSession):
         "brand": holding.brand.value,
         "metal_type": holding.metal_type.value,
         "quantity_grams": str(lot.canonical_grams),
+        "excluded_from_reports": holding.excluded_from_reports,
     }
+
+
+@router.patch("/metals/{holding_id}")
+def update_metal(holding_id: int, data: MetalPatch, db: DbSession):
+    """Minimal edit endpoint -- only ``excluded_from_reports`` is patchable
+    for metal holdings today (user request, 2026-08-26: allow editing the
+    "không tính vào báo cáo" flag from the asset-edit menu)."""
+    holding = db.get(PreciousMetalHolding, holding_id)
+    if holding is None:
+        raise HTTPException(404, "Metal holding not found")
+    holding.excluded_from_reports = data.excluded_from_reports
+    db.commit()
+    db.refresh(holding)
+    return {"id": holding.id, "excluded_from_reports": holding.excluded_from_reports}
 
 
 @router.get("/crypto/coins")
@@ -180,6 +212,7 @@ def list_crypto(db: DbSession):
             "symbol": row.symbol,
             "display_name": row.display_name,
             "quantity": str(sum((lot.quantity for lot in row.lots), Decimal(0))),
+            "excluded_from_reports": row.excluded_from_reports,
         }
         for row in rows
     ]
@@ -199,6 +232,7 @@ def create_crypto(data: CryptoCreate, db: DbSession):
             symbol=data.symbol.lower(),
             display_name=data.display_name,
             pricing_instrument=data.pricing_instrument,
+            excluded_from_reports=data.excluded_from_reports,
             lots=[lot],
         )
         db.add(holding)
@@ -213,4 +247,18 @@ def create_crypto(data: CryptoCreate, db: DbSession):
         "symbol": holding.symbol,
         "display_name": holding.display_name,
         "quantity": str(lot.quantity),
+        "excluded_from_reports": holding.excluded_from_reports,
     }
+
+
+@router.patch("/crypto/{holding_id}")
+def update_crypto(holding_id: int, data: CryptoPatch, db: DbSession):
+    """Minimal edit endpoint -- only ``excluded_from_reports`` is patchable
+    for crypto holdings today (user request, 2026-08-26)."""
+    holding = db.get(CryptoHolding, holding_id)
+    if holding is None:
+        raise HTTPException(404, "Crypto holding not found")
+    holding.excluded_from_reports = data.excluded_from_reports
+    db.commit()
+    db.refresh(holding)
+    return {"id": holding.id, "excluded_from_reports": holding.excluded_from_reports}

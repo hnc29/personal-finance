@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     DateTime,
     Enum,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -81,6 +83,15 @@ class FinancialEvent(Base):
     # book it again as a standalone income/expense.
     raw_import_row_id_secondary: Mapped[int | None] = mapped_column(
         ForeignKey("raw_import_rows.id"), nullable=True, unique=True
+    )
+    # User request, 2026-08-26: "không tính vào báo cáo đối với giao dịch
+    # nhập mới" -- an opt-in per-event flag so a transaction still books
+    # normally (account balances, entries -- everything ledger-side is
+    # unaffected) but can be marked to be left out of income/expense
+    # summary reports. Defaults False so every existing and newly-created
+    # event keeps counting unless explicitly excluded.
+    excluded_from_reports: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
     )
 
     # TASK-042: "all, delete-orphan" so deleting a FinancialEvent (or

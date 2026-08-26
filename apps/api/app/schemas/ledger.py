@@ -43,6 +43,10 @@ class FinancialEventCreate(BaseModel):
     payee_text: str | None = None
     trip_event_text: str | None = None
     note: str | None = None
+    # User request, 2026-08-26: "không tính vào báo cáo đối với giao dịch
+    # nhập mới" -- opt-in, defaults False so every existing call site that
+    # doesn't send this field keeps behaving exactly as before.
+    excluded_from_reports: bool = False
     entries: list[AccountEntryCreate] = Field(min_length=1)
 
 
@@ -63,6 +67,7 @@ class FinancialEventUpdate(BaseModel):
     payee_text: str | None = None
     trip_event_text: str | None = None
     note: str | None = None
+    excluded_from_reports: bool = False
     entries: list[AccountEntryCreate] = Field(min_length=1)
 
 
@@ -96,6 +101,7 @@ class FinancialEventRead(BaseModel):
     payee_text: str | None
     trip_event_text: str | None
     note: str | None
+    excluded_from_reports: bool
     entries: list[AccountEntryRead]
 
 

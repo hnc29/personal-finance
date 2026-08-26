@@ -97,6 +97,13 @@ class PreciousMetalHolding(Base):
     is_net_worth: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("1")
     )
+    # User request, 2026-08-26: "không tính vào báo cáo" also applies to
+    # newly-added assets -- independent of is_net_worth above (this holding
+    # still counts toward Net Worth; it's just left out of income/expense
+    # summary reports), so it's its own column rather than reusing that one.
+    excluded_from_reports: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
     note: Mapped[str | None] = mapped_column(String)
     image_uri: Mapped[str | None] = mapped_column(String)
     lots: Mapped[list[PreciousMetalLot]] = relationship(

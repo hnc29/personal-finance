@@ -149,7 +149,7 @@ function Assets() {
       const scaledChi = BigInt(whole || "0") * BigInt("10000") + BigInt((fraction + "0000").slice(0, 4));
       const scaledGrams = scaledChi * BigInt("375") / BigInt("100");
       const grams = `${scaledGrams / BigInt("10000")}.${String(scaledGrams % BigInt("10000")).padStart(4, "0")}`.replace(/\.?0+$/, "");
-      metal.mutate({ metal_type: v("metal_type") as "GOLD" | "SILVER", brand: v("brand"), product_type: v("product_type"), purity: percentToFraction(v("purity")), quantity_grams: grams, purchase_date: v("date"), purchase_price: vd("price"), total_cost: vd("total") });
+      metal.mutate({ metal_type: v("metal_type") as "GOLD" | "SILVER", brand: v("brand"), product_type: v("product_type"), purity: percentToFraction(v("purity")), quantity_grams: grams, purchase_date: v("date"), purchase_price: vd("price"), total_cost: vd("total"), excluded_from_reports: f.get("excluded_from_reports") === "on" });
       return;
     }
     const code = v("symbol").trim();
@@ -171,7 +171,7 @@ function Assets() {
     // the purchase itself, so any failure or no-match just falls back to
     // the typed code verbatim.
     const identity = await resolveCryptoIdentity(code);
-    crypto.mutate({ coingecko_id: identity.coingecko_id, symbol: identity.symbol, display_name: identity.display_name, quantity: vd("quantity"), purchase_date: v("date"), purchase_price: totals.unitPriceVnd, total_cost: totals.totalVnd });
+    crypto.mutate({ coingecko_id: identity.coingecko_id, symbol: identity.symbol, display_name: identity.display_name, quantity: vd("quantity"), purchase_date: v("date"), purchase_price: totals.unitPriceVnd, total_cost: totals.totalVnd, excluded_from_reports: f.get("excluded_from_reports") === "on" });
   }
   // BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): neither form
   // below rendered its mutation's error at all, so a rejected submit (e.g.
@@ -190,7 +190,10 @@ function Assets() {
     in the asset list forever instead of "Nhẫn" / "Ring" -- using label(x)
     as the value itself stores the human-readable text the user actually
     picked, in whichever language was active at the time. */}
-    <select name="product_type" aria-label={tr("Product")} required defaultValue=""><option value="" disabled>{tr("Product")}</option>{productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}</select><input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" pattern={decimalPattern} required /><div className="amount-row purity-row"><input name="purity" placeholder="99.99" title={tr("Leave blank to use 99.99%")} aria-label={tr("Purity")} inputMode="decimal" pattern={decimalPattern} /><span className="currency-badge">%</span></div><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" pattern={decimalPattern} required /><input name="date" type="date" required /><button className="primary">+ {tr("Add")}</button></form>,
+    <select name="product_type" aria-label={tr("Product")} required defaultValue=""><option value="" disabled>{tr("Product")}</option>{productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}</select><input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" pattern={decimalPattern} required /><div className="amount-row purity-row"><input name="purity" placeholder="99.99" title={tr("Leave blank to use 99.99%")} aria-label={tr("Purity")} inputMode="decimal" pattern={decimalPattern} /><span className="currency-badge">%</span></div><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" pattern={decimalPattern} required /><input name="date" type="date" required />
+    {/* User request, 2026-08-26: "không tính vào báo cáo" also applies to newly-added assets. */}
+    <label className="checkbox-row"><input type="checkbox" name="excluded_from_reports" /><span>{tr("Exclude from reports")}</span></label>
+    <button className="primary">+ {tr("Add")}</button></form>,
     // User correction, 2026-08-26 ("sai rồi, tôi muốn được tự nhập mã của
     // coin. chỉ tham chiếu giá của coin khi tính giá trị tài sản"): the coin
     // is now a free-typed code, not a search-then-select popover -- the
@@ -201,7 +204,9 @@ function Assets() {
     // always price * quantity (converting a USD price to VND first via the
     // live rate), computed by cryptoPurchaseTotals() above and shown
     // read-only so it can never drift from that formula.
-    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><input name="symbol" placeholder={tr("Coin code")} aria-label={tr("Coin code")} autoCapitalize="characters" required /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required value={cryptoQty} onChange={e => setCryptoQty(e.target.value)} /><div className="amount-row crypto-price-row"><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required value={cryptoPrice} onChange={e => setCryptoPrice(e.target.value)} /><select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select></div>{cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoneyDisplay(fx.data.rate)} VND`}</p>}<input name="total" aria-label={tr("Total cost")} placeholder={tr("Total cost")} value={cryptoTotalsPreview ? fmtMoneyDisplay(cryptoTotalsPreview.totalVnd) ?? "" : ""} readOnly disabled /><input name="date" type="date" required /><button className="primary" disabled={!cryptoTotalsPreview}>+ {tr("Add")}</button></form>,
+    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><input name="symbol" placeholder={tr("Coin code")} aria-label={tr("Coin code")} autoCapitalize="characters" required /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required value={cryptoQty} onChange={e => setCryptoQty(e.target.value)} /><div className="amount-row crypto-price-row"><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required value={cryptoPrice} onChange={e => setCryptoPrice(e.target.value)} /><select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select></div>{cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoneyDisplay(fx.data.rate)} VND`}</p>}<input name="total" aria-label={tr("Total cost")} placeholder={tr("Total cost")} value={cryptoTotalsPreview ? fmtMoneyDisplay(cryptoTotalsPreview.totalVnd) ?? "" : ""} readOnly disabled /><input name="date" type="date" required />
+    <label className="checkbox-row"><input type="checkbox" name="excluded_from_reports" /><span>{tr("Exclude from reports")}</span></label>
+    <button className="primary" disabled={!cryptoTotalsPreview}>+ {tr("Add")}</button></form>,
   };
   const p = q.data;
   return <Section title="Assets" subtitle="Manage assets, investments, and net worth in one place.">
@@ -216,7 +221,7 @@ function Assets() {
       {!p.valuation_complete && <p className="quote-notice" role="status">{tr("Valuation incomplete: one or more invested assets has no usable quote.")}</p>}
     </>}
     <div className="asset-tabs" role="tablist">{([["savings","Savings"],["metals","Precious metals"],["crypto","Crypto"]] as const).map(([id,label])=><button type="button" role="tab" aria-selected={tab===id} className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{tr(label)}</button>)}</div>
-    {tab === "savings" ? <SavingsPanel /> : <>{forms[tab]}<div className="asset-sections"><AssetSection title={tab === "metals" ? "Precious metals" : "Crypto"} rows={tab === "metals" ? p?.precious_metals ?? [] : p?.crypto ?? []}/></div></>}
+    {tab === "savings" ? <SavingsPanel /> : <>{forms[tab]}<div className="asset-sections"><AssetSection title={tab === "metals" ? "Precious metals" : "Crypto"} rows={tab === "metals" ? p?.precious_metals ?? [] : p?.crypto ?? []} kind={tab}/></div></>}
     {p && <div className="asset-sections asset-sections-secondary"><AssetSection title="Credit cards" rows={p.credit_cards}/></div>}
   </Section>;
 }
@@ -474,6 +479,7 @@ function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccount
       interest_payment_method: v("interest_payment_method") as SavingsCreateInput["interest_payment_method"],
       maturity_action: v("maturity_action") as SavingsCreateInput["maturity_action"],
       notes: v("notes") || null,
+      excluded_from_reports: f.get("excluded_from_reports") === "on",
     });
   }
   const previewMaturity = addMonthsLocal(openedDate, Number(termMonths));
@@ -502,7 +508,10 @@ function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccount
       <Field label="Maturity date"><input value={previewMaturity} disabled readOnly /></Field>
       <Field label="On maturity"><select name="maturity_action" defaultValue="CLOSE">{(["CLOSE", "RENEW_PRINCIPAL", "RENEW_PRINCIPAL_AND_INTEREST"] as const).map(x => <option value={x} key={x}>{label(x)}</option>)}</select></Field>
     </fieldset>
-    <fieldset><legend>{tr("Notes")}</legend><Field label="Notes"><input name="notes" /></Field></fieldset>
+    <fieldset><legend>{tr("Notes")}</legend><Field label="Notes"><input name="notes" /></Field>
+      <label className="checkbox-row"><input type="checkbox" name="excluded_from_reports" /><span>{tr("Exclude from reports")}</span></label>
+      <p className="hint">{tr("This asset won't be counted in income/expense summary reports.")}</p>
+    </fieldset>
     <div className="form-actions"><Submit pending={create.isPending} text="Save savings account" /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
   </form>;
 }
@@ -513,6 +522,27 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
   const detail = useQuery({ queryKey: ["savings", id], queryFn: () => api.assets.savings.get(id) });
   const qc = useQueryClient();
   function afterAction() { setAction(null); qc.invalidateQueries({ queryKey: ["savings", id] }); onChanged(); }
+  // User request, 2026-08-26: "không tính vào báo cáo" must be editable
+  // from the asset-edit menu -- unlike every other savings field, this one
+  // is pure reporting metadata, not financial history (see the backend's
+  // update_savings, which deliberately lets this field bypass the
+  // "editable" / edit-before-history gate), so it's toggled here directly
+  // rather than only inside SavingsEditForm (which only ever renders while
+  // row.editable is true).
+  // Optimistic cache update -- see the identical rationale on AssetSection's
+  // `toggle` mutation above: without this, the checkbox only reflects the
+  // click after the PATCH round-trips and ["savings", id] refetches.
+  const excludeToggle = useMutation({
+    mutationFn: (excluded: boolean) => api.assets.savings.update(id, { excluded_from_reports: excluded }),
+    onMutate: async (excluded: boolean) => {
+      await qc.cancelQueries({ queryKey: ["savings", id] });
+      const previous = qc.getQueryData<SavingsAccount>(["savings", id]);
+      if (previous) qc.setQueryData(["savings", id], { ...previous, excluded_from_reports: excluded });
+      return { previous };
+    },
+    onError: (_err, _vars, context) => { if (context?.previous) qc.setQueryData(["savings", id], context.previous); },
+    onSettled: afterAction,
+  });
   const row = detail.data;
   const term = row?.current_term;
   const canCloseNormal = !!term && term.status === "ACTIVE" && term.days_to_maturity != null && term.days_to_maturity <= 0;
@@ -536,6 +566,16 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
         <div><dt>{tr("On maturity")}</dt><dd>{term ? label(term.maturity_action) : "—"}</dd></div>
         <div><dt>{tr("Notes")}</dt><dd>{row.notes || "—"}</dd></div>
       </dl>
+      <Error error={excludeToggle.error} />
+      <label className="checkbox-row">
+        <input
+          type="checkbox"
+          checked={row.excluded_from_reports}
+          disabled={excludeToggle.isPending}
+          onChange={e => excludeToggle.mutate(e.target.checked)}
+        />
+        <span>{tr("Exclude from reports")}</span>
+      </label>
       <div className="form-actions">
         {row.editable && <button type="button" className="secondary" onClick={() => setAction("edit")}>{tr("Edit")}</button>}
         {canCloseNormal && <button type="button" className="primary" onClick={() => setAction("close")}>{tr("Settle")}</button>}
@@ -759,7 +799,60 @@ function Review() {
   return <Section title="Import & reconciliation review" subtitle="Persisted import batches and reconciliation candidates."><div className="review-grid"><article className="panel"><h3>{tr("Import batches")}</h3><Loading show={imports.isPending}/><Error error={imports.error}/><Empty show={!imports.isPending && imports.data?.length === 0} text="No import batches yet."/>{imports.data?.map(x => <div className="review-row" key={x.id}><div><strong>{x.original_filename}</strong><small>{x.source} · {x.row_count} {tr("rows")} · {x.applied_row_count >= x.row_count ? tr("Applied") : `${x.applied_row_count}/${x.row_count} ${tr("applied")}`}</small>{applyStatus[x.id] && <small className="hint">{applyStatus[x.id]}</small>}</div><div className="review-row-actions"><small>{x.imported_at}</small><button type="button" className="secondary" disabled={apply.isPending && apply.variables === x.id} onClick={() => apply.mutate(x.id)}>{apply.isPending && apply.variables === x.id ? tr("Applying...") : x.applied_row_count >= x.row_count ? tr("Re-apply") : tr("Apply")}</button></div></div>)}</article><article className="panel"><h3>{tr("Reconciliation candidates")}</h3><Loading show={reconciliation.isPending}/><Error error={reconciliation.error}/><Empty show={!reconciliation.isPending && reconciliation.data?.length === 0} text="No reconciliation candidates yet."/>{reconciliation.data?.map(x => <div className="review-row" key={x.id}><div><strong>{tr("Raw row")} #{x.source_row_number}</strong><small>{x.transaction_date} · {label(x.event_type)} · {tr("Event")} #{x.financial_event_id}</small></div><span className="badge warning">{label(x.state)}</span></div>)}</article></div></Section>;
 }
 
-function AssetSection({ title, rows }: { title: string; rows: import("../lib/api").PortfolioRow[] }) { const { label, tr } = useI18n(); return <article className="panel asset-panel"><h3>{tr(title)}</h3><Empty show={rows.length === 0} text={`No ${title.toLowerCase()} yet.`}/><div className="asset-list">{rows.map(row => <div className="asset-row" key={row.id}><div><strong>{row.name}</strong><small>{fmtMoneyDisplay(row.value) ?? tr("Valuation unavailable")}</small></div>{row.quote && <div><span className="provider">{row.quote.provider ?? tr("No provider")}</span><span className="quote-state">{label(row.quote.state)}</span><small>{row.quote.quoted_at ?? tr("No quote timestamp")}</small></div>}</div>)}</div></article>; }
+// User request, 2026-08-26: "không tính vào báo cáo" also applies to newly
+// added assets, and must be editable afterwards via the asset-edit menu --
+// precious metals and crypto have no other edit UI at all today (see
+// app/api/assets.py: no PATCH endpoint existed for either before this
+// feature), so this inline checkbox is the only place to toggle it for
+// those two asset kinds. `kind` is optional and left unset for rows that
+// don't carry the field at all (credit cards), which simply render without
+// the toggle, matching today's behavior exactly.
+function AssetSection({ title, rows, kind }: { title: string; rows: import("../lib/api").PortfolioRow[]; kind?: "metals" | "crypto" }) {
+  const { label, tr } = useI18n();
+  const qc = useQueryClient();
+  // Optimistic cache update: the checkbox is controlled by react-query's
+  // ["portfolio"] cache (row.excluded_from_reports), which otherwise only
+  // reflects the toggle after the PATCH round-trips and the query
+  // refetches -- a visible one-beat flicker (and, under Playwright, a flaky
+  // "clicking the checkbox did not change its state" failure) between the
+  // native click and that refetch. Writing the new value into the cache in
+  // onMutate makes the checkbox reflect the click immediately; onError
+  // rolls it back if the PATCH actually fails, and onSettled reconciles
+  // with the server regardless of outcome.
+  const toggle = useMutation({
+    mutationFn: ({ id, excluded }: { id: number; excluded: boolean }) =>
+      kind === "metals" ? api.assets.metals.update(id, { excluded_from_reports: excluded }) : api.assets.crypto.update(id, { excluded_from_reports: excluded }),
+    onMutate: async ({ id, excluded }) => {
+      await qc.cancelQueries({ queryKey: ["portfolio"] });
+      const previous = qc.getQueryData<import("../lib/api").PortfolioOverview>(["portfolio"]);
+      if (previous && kind) {
+        const listKey = kind === "metals" ? "precious_metals" : "crypto";
+        qc.setQueryData(["portfolio"], { ...previous, [listKey]: previous[listKey].map(r => r.id === id ? { ...r, excluded_from_reports: excluded } : r) });
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => { if (context?.previous) qc.setQueryData(["portfolio"], context.previous); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["portfolio"] }),
+  });
+  return <article className="panel asset-panel">
+    <h3>{tr(title)}</h3>
+    <Empty show={rows.length === 0} text={`No ${title.toLowerCase()} yet.`}/>
+    <Error error={toggle.error} />
+    <div className="asset-list">{rows.map(row => <div className="asset-row" key={row.id}>
+      <div><strong>{row.name}</strong><small>{fmtMoneyDisplay(row.value) ?? tr("Valuation unavailable")}</small></div>
+      {row.quote && <div><span className="provider">{row.quote.provider ?? tr("No provider")}</span><span className="quote-state">{label(row.quote.state)}</span><small>{row.quote.quoted_at ?? tr("No quote timestamp")}</small></div>}
+      {kind && <label className="checkbox-row asset-row-toggle">
+        <input
+          type="checkbox"
+          checked={row.excluded_from_reports ?? false}
+          disabled={toggle.isPending}
+          onChange={e => toggle.mutate({ id: row.id, excluded: e.target.checked })}
+        />
+        <span>{tr("Exclude from reports")}</span>
+      </label>}
+    </div>)}</div>
+  </article>;
+}
 
 function Accounts() {
   const { label, tr } = useI18n();
@@ -1050,6 +1143,11 @@ function Transactions() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [formError, setFormError] = useState("");
+  // User request, 2026-08-26: "không tính vào báo cáo đối với giao dịch
+  // nhập mới ... Cho phép chỉnh sửa giá trị này ở các menu chỉnh sửa giao
+  // dịch" -- opt-in per transaction, defaults false for a new one and is
+  // populated from the event being edited by startEdit() below.
+  const [excludedFromReports, setExcludedFromReports] = useState(false);
   // TASK-042: "thiết kế thêm tính năng xem chi tiết, chỉnh sửa, xoá giao
   // dịch" -- editingEvent tracks which transaction (if any) the composer
   // below is editing rather than creating; detailEvent tracks which
@@ -1078,6 +1176,7 @@ function Transactions() {
     setTransferFrom(""); setTransferTo(""); setTransferAmount("");
     setCardAccountId(""); setFundingAccountId(""); setPaymentAmount("");
     setDate(todayIso());
+    setExcludedFromReports(false);
   }
   const mutation = useMutation({
     mutationFn: (input: EventInput) => editingEvent ? api.events.update(editingEvent.id, input) : api.events.create(input),
@@ -1108,6 +1207,7 @@ function Transactions() {
     setDate(event.transaction_date);
     setCategoryId(event.category_id != null ? String(event.category_id) : "");
     setDetailsOpen(Boolean(event.payee_text || event.trip_event_text));
+    setExcludedFromReports(event.excluded_from_reports);
     if (event.event_type === "TRANSFER" || event.event_type === "CREDIT_CARD_PAYMENT") {
       const negEntry = event.entries.find(e => e.amount.trim().startsWith("-")) ?? event.entries[0];
       const posEntry = event.entries.find(e => e.id !== negEntry.id) ?? event.entries[1];
@@ -1167,7 +1267,7 @@ function Transactions() {
           const magnitude = entry.amount.trim().replace(/^-/, "");
           return { account_id: Number(entry.accountId), amount: type === "EXPENSE" ? negateMoney(magnitude) : magnitude };
         });
-    mutation.mutate({ event_type: type, transaction_date: date, category_id: categoryIsValidForEventType(type, categoryId, categories.data ?? []) ? Number(categoryId) : null, payee_text: String(f.get("payee") ?? "").trim() || undefined, trip_event_text: String(f.get("trip") ?? "").trim() || undefined, note: String(f.get("note") ?? "").trim() || undefined, entries: submittedEntries });
+    mutation.mutate({ event_type: type, transaction_date: date, category_id: categoryIsValidForEventType(type, categoryId, categories.data ?? []) ? Number(categoryId) : null, payee_text: String(f.get("payee") ?? "").trim() || undefined, trip_event_text: String(f.get("trip") ?? "").trim() || undefined, note: String(f.get("note") ?? "").trim() || undefined, excluded_from_reports: excludedFromReports, entries: submittedEntries });
   }
   const amountCurrency = (type === "TRANSFER" ? activeAccounts.find(a => String(a.id) === transferFrom)
     : type === "CREDIT_CARD_PAYMENT" ? activeAccounts.find(a => String(a.id) === fundingAccountId)
@@ -1241,7 +1341,15 @@ function Transactions() {
             {dateRow}
           </div>
           <button type="button" className="secondary details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => !open)}>{detailsOpen ? tr("Hide details") : `+ ${tr("Add details")}`}</button>
-          {detailsOpen && <div className="form event-details"><Field label="Payee"><input name="payee" defaultValue={editingEvent?.payee_text ?? ""} /></Field><Field label="Trip / event"><input name="trip" defaultValue={editingEvent?.trip_event_text ?? ""} /></Field></div>}
+          {detailsOpen && <div className="form event-details">
+            <Field label="Payee"><input name="payee" defaultValue={editingEvent?.payee_text ?? ""} /></Field>
+            <Field label="Trip / event"><input name="trip" defaultValue={editingEvent?.trip_event_text ?? ""} /></Field>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={excludedFromReports} onChange={e => setExcludedFromReports(e.target.checked)} />
+              <span>{tr("Exclude from reports")}</span>
+            </label>
+            <p className="hint">{tr("This transaction won't be counted in income/expense summary reports.")}</p>
+          </div>}
           <div className="form-actions"><Submit pending={mutation.isPending} text={editingEvent ? "Save changes" : "Record transaction"} />{editingEvent && <button type="button" className="secondary" onClick={cancelEdit}>{tr("Cancel")}</button>}</div>
         </form>
         <Error error={events.error ?? accounts.error ?? categories.error ?? mutation.error} />
@@ -1255,7 +1363,7 @@ function Transactions() {
               table, just in a compact recency-ranked list instead of every
               row -- tabIndex + onKeyDown keep it keyboard-reachable. */}
           <div className="recent-list">{recentEvents.map(x => <div className="recent-row" tabIndex={0} key={x.id} onClick={() => setDetailEvent(x)} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailEvent(x); } }}>
-            <div className="recent-row-main"><span className="event-type">{label(x.event_type)}{x.category_id && <small> · {categoryNames.get(x.category_id) ?? `${tr("Category")} #${x.category_id}`}</small>}</span><small>{x.transaction_date}</small></div>
+            <div className="recent-row-main"><span className="event-type">{label(x.event_type)}{x.category_id && <small> · {categoryNames.get(x.category_id) ?? `${tr("Category")} #${x.category_id}`}</small>}{x.excluded_from_reports && <span className="badge muted" title={tr("This transaction won't be counted in income/expense summary reports.")}>{tr("Excluded from reports")}</span>}</span><small>{x.transaction_date}</small></div>
             <div className="recent-row-detail"><small>{x.payee_text ?? x.trip_event_text ?? x.note ?? tr("None")}</small></div>
             <div className="recent-row-entries">{x.entries.map(e => <span className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</span>)}</div>
           </div>)}</div>
@@ -1303,6 +1411,7 @@ function TransactionDetailModal({ event, accounts, categories, language, onClose
         {event.payee_text && <div><dt>{tr("Payee")}</dt><dd>{event.payee_text}</dd></div>}
         {event.trip_event_text && <div><dt>{tr("Trip / event")}</dt><dd>{event.trip_event_text}</dd></div>}
         {event.note && <div><dt>{tr("Note")}</dt><dd>{event.note}</dd></div>}
+        {event.excluded_from_reports && <div><dt>{tr("Exclude from reports")}</dt><dd>{tr("Excluded from reports")}</dd></div>}
       </dl>
       <div className="detail-entries">{event.entries.map(e => <div className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</div>)}</div>
       <Error error={remove.error} />
@@ -1371,6 +1480,7 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, duplicateF
   const [paymentAmount, setPaymentAmount] = useState(initial?.event_type === "CREDIT_CARD_PAYMENT" && initialTransfer ? fmtMoney(initialTransfer.posEntry.amount.replace(/^-/, "")) ?? "" : "");
   const [detailsOpen, setDetailsOpen] = useState(Boolean(initial?.payee_text || initial?.trip_event_text));
   const [formError, setFormError] = useState("");
+  const [excludedFromReports, setExcludedFromReports] = useState(initial?.excluded_from_reports ?? false);
   const mutation = useMutation({ mutationFn: (input: EventInput) => api.events.create(input), onSuccess: onSaved });
 
   function updateEntry(index: number, field: keyof EntryDraft, value: string) { setEntries(current => current.map((entry, i) => i === index ? { ...entry, [field]: value } : entry)); }
@@ -1398,7 +1508,7 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, duplicateF
           const magnitude = entry.amount.trim().replace(/^-/, "");
           return { account_id: Number(entry.accountId), amount: type === "EXPENSE" ? negateMoney(magnitude) : magnitude };
         });
-    mutation.mutate({ event_type: type, transaction_date: date, category_id: categoryIsValidForEventType(type, categoryId, categories) ? Number(categoryId) : null, payee_text: String(f.get("payee") ?? "").trim() || undefined, trip_event_text: String(f.get("trip") ?? "").trim() || undefined, note: String(f.get("note") ?? "").trim() || undefined, entries: submittedEntries });
+    mutation.mutate({ event_type: type, transaction_date: date, category_id: categoryIsValidForEventType(type, categoryId, categories) ? Number(categoryId) : null, payee_text: String(f.get("payee") ?? "").trim() || undefined, trip_event_text: String(f.get("trip") ?? "").trim() || undefined, note: String(f.get("note") ?? "").trim() || undefined, excluded_from_reports: excludedFromReports, entries: submittedEntries });
   }
 
   const amountCurrency = (type === "TRANSFER" ? accounts.find(a => String(a.id) === transferFrom)
@@ -1439,7 +1549,15 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, duplicateF
       {dateRow}
     </div>
     <button type="button" className="secondary details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => !open)}>{detailsOpen ? tr("Hide details") : `+ ${tr("Add details")}`}</button>
-    {detailsOpen && <div className="form event-details"><Field label="Payee"><input name="payee" defaultValue={initial?.payee_text ?? ""} /></Field><Field label="Trip / event"><input name="trip" defaultValue={initial?.trip_event_text ?? ""} /></Field></div>}
+    {detailsOpen && <div className="form event-details">
+      <Field label="Payee"><input name="payee" defaultValue={initial?.payee_text ?? ""} /></Field>
+      <Field label="Trip / event"><input name="trip" defaultValue={initial?.trip_event_text ?? ""} /></Field>
+      <label className="checkbox-row">
+        <input type="checkbox" checked={excludedFromReports} onChange={e => setExcludedFromReports(e.target.checked)} />
+        <span>{tr("Exclude from reports")}</span>
+      </label>
+      <p className="hint">{tr("This transaction won't be counted in income/expense summary reports.")}</p>
+    </div>}
     <Error error={mutation.error} />
     <div className="form-actions"><Submit pending={mutation.isPending} text="Record transaction" /><button type="button" className="secondary" onClick={onClose}>{tr("Cancel")}</button></div>
   </form>;
@@ -1472,6 +1590,7 @@ function LedgerDetailPanel({ event, accountNames, categories, language, onDuplic
       {event.payee_text && <div><dt>{tr("Payee")}</dt><dd>{event.payee_text}</dd></div>}
       {event.trip_event_text && <div><dt>{tr("Trip / event")}</dt><dd>{event.trip_event_text}</dd></div>}
       {event.note && <div><dt>{tr("Note")}</dt><dd>{event.note}</dd></div>}
+      {event.excluded_from_reports && <div><dt>{tr("Exclude from reports")}</dt><dd>{tr("Excluded from reports")}</dd></div>}
     </dl>
     <div className="detail-entries">{event.entries.map(e => <div className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</div>)}</div>
     <Error error={remove.error} />
