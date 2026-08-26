@@ -110,12 +110,15 @@ test.describe.serial("assets: add metal, add + edit savings account", () => {
 // Regression coverage for the user report (2026-08-26): "với giá mua sẽ
 // cho lựa chọn mua bằng USD hoặc VND. Tổng chi phí sẽ tính bằng giá mua
 // nhân với số lượng, nếu mua bằng usd thì sẽ tự động nhân và chuyển sang
-// vnd (tỷ giá sẽ tự động cập nhật)". Coin search and the live FX rate are
-// both mocked -- the real CoinGecko/open.er-api.com endpoints aren't
-// reachable from this sandbox (see docs/qa/QA_STATE.md), and a test
-// shouldn't depend on a live external rate anyway. This exercises the
-// actual app code path (CoinPicker -> GET .../crypto/coins, the currency
-// toggle -> GET .../fx/usd-vnd), not a hand-rolled stand-in for it.
+// vnd (tỷ giá sẽ tự động cập nhật)", corrected (2026-08-26): "sai rồi, tôi
+// muốn được tự nhập mã của coin. chỉ tham chiếu giá của coin khi tính giá
+// trị tài sản" -- the coin code is now typed by hand into a plain input,
+// not picked from a search popover; the coin-catalog endpoint is only
+// consulted in the background (see resolveCryptoIdentity() in page.tsx).
+// Coin search and the live FX rate are both mocked -- the real
+// CoinGecko/open.er-api.com endpoints aren't reachable from this sandbox
+// (see docs/qa/QA_STATE.md), and a test shouldn't depend on a live
+// external rate anyway.
 test.describe.serial("crypto: purchase price in VND or USD auto-computes the total", () => {
   test("VND: total cost is computed (price * quantity), no longer typed by hand", async ({ page, request }) => {
     await page.route("**/api/v1/assets/crypto/coins**", route =>
@@ -126,9 +129,7 @@ test.describe.serial("crypto: purchase price in VND or USD auto-computes the tot
     await page.goto("/");
     await goToTab(page, "Tài sản");
     await page.getByRole("tab", { name: VI.cryptoTab }).click();
-    await page.getByRole("button", { name: "Chọn coin" }).click();
-    await page.getByRole("textbox", { name: "Tìm coin" }).fill("bit");
-    await page.getByRole("option", { name: /Bitcoin/ }).click();
+    await page.locator('input[name="symbol"]').fill("BTC");
     await page.locator('input[name="quantity"]').fill("2");
     await page.locator('input[name="price"]').fill("50000000");
     // Total cost is now a read-only field driven by cryptoPurchaseTotals(),
@@ -154,9 +155,7 @@ test.describe.serial("crypto: purchase price in VND or USD auto-computes the tot
     await page.goto("/");
     await goToTab(page, "Tài sản");
     await page.getByRole("tab", { name: VI.cryptoTab }).click();
-    await page.getByRole("button", { name: "Chọn coin" }).click();
-    await page.getByRole("textbox", { name: "Tìm coin" }).fill("eth");
-    await page.getByRole("option", { name: /Ethereum/ }).click();
+    await page.locator('input[name="symbol"]').fill("ETH");
     await page.locator('input[name="quantity"]').fill("1");
     await page.locator('input[name="price"]').fill("100");
     await page.locator('select[name="purchase_currency"]').selectOption("USD");
@@ -190,9 +189,7 @@ test.describe.serial("crypto: purchase price in VND or USD auto-computes the tot
     await page.goto("/");
     await goToTab(page, "Tài sản");
     await page.getByRole("tab", { name: VI.cryptoTab }).click();
-    await page.getByRole("button", { name: "Chọn coin" }).click();
-    await page.getByRole("textbox", { name: "Tìm coin" }).fill("sol");
-    await page.getByRole("option", { name: /Solana/ }).click();
+    await page.locator('input[name="symbol"]').fill("SOL");
     await page.locator('input[name="quantity"]').fill("1");
     await page.locator('input[name="price"]').fill("100");
     await page.locator('select[name="purchase_currency"]').selectOption("USD");

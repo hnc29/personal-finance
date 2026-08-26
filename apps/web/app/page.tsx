@@ -2,7 +2,7 @@
 
 import { createContext, FormEvent, useContext, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, Account, AccountBalance, AccountType, Category, CoinSummary, EventInput, EventType, FinancialEvent, ImportApplyResult, SavingsAccount, SavingsCreateInput, SavingsPatchInput } from "../lib/api";
+import { api, Account, AccountBalance, AccountType, Category, EventInput, EventType, FinancialEvent, ImportApplyResult, SavingsAccount, SavingsCreateInput, SavingsPatchInput } from "../lib/api";
 import { categoryLabel, copy, enumLabel, Language, transactionUiKeys, ui, useLanguage } from "../lib/i18n";
 import { buildCategoryTree, categoriesForEventType, categoryDepth, categoryIsValidForEventType, categoryPath, filterCategoryTree, toggleCategoryExpansion, canMoveCategory, categoryRoot, getCategoryDepth } from "../lib/category-tree";
 import { CategoryIcon, IconGlyph, ICON_GROUPS, iconLabel } from "../lib/category-icons";
@@ -63,7 +63,6 @@ export default function Home() {
 function Assets() {
   const { tr, label } = useI18n(); const qc = useQueryClient(); const q = useQuery({ queryKey: ["portfolio"], queryFn: api.portfolio.overview }); const [tab, setTab] = useState<"savings" | "metals" | "crypto">("savings");
   const brands = useQuery({ queryKey: ["metal-brands"], queryFn: api.assets.metalBrands });
-  const [coin, setCoin] = useState<CoinSummary | null>(null);
   // User report, 2026-08-26: purchase price/quantity need to be controlled
   // (rather than read from FormData like the rest of this uncontrolled
   // form) so the computed VND total can be shown live as the user types,
@@ -73,7 +72,7 @@ function Assets() {
   const [cryptoPrice, setCryptoPrice] = useState("");
   const fx = useQuery({ queryKey: ["fx", "usd-vnd"], queryFn: api.fx.usdVnd, enabled: cryptoCurrency === "USD", staleTime: 5 * 60 * 1000 });
   const metal = useMutation({ mutationFn: api.assets.metals.create, onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }) });
-  const crypto = useMutation({ mutationFn: api.assets.crypto.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["portfolio"] }); setCoin(null); setCryptoQty(""); setCryptoPrice(""); } });
+  const crypto = useMutation({ mutationFn: api.assets.crypto.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["portfolio"] }); setCryptoQty(""); setCryptoPrice(""); } });
   // BUGFIX (user report, 2026-08-26: "Vàng ... Chức năng chưa hoạt động,
   // nhấn thêm không phản hồi"): reproduced with Playwright -- typing a
   // Vietnamese-style decimal comma into Quantity or Purity (e.g. "1,5" or
@@ -108,7 +107,7 @@ function Assets() {
     const [w, d = ""] = shifted.split(".");
     return `${negative ? "-" : ""}${w || "0"}.${(d + "0000").slice(0, 4)}`;
   }
-  function submit(e: FormEvent<HTMLFormElement>, kind: "metal" | "crypto") {
+  async function submit(e: FormEvent<HTMLFormElement>, kind: "metal" | "crypto") {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const v = (n: string) => String(f.get(n) ?? "");
@@ -121,7 +120,8 @@ function Assets() {
       metal.mutate({ metal_type: v("metal_type") as "GOLD" | "SILVER", brand: v("brand"), product_type: v("product_type"), purity: percentToFraction(v("purity")), quantity_grams: grams, purchase_date: v("date"), purchase_price: vd("price"), total_cost: vd("total") });
       return;
     }
-    if (!coin) return;
+    const code = v("symbol").trim();
+    if (!code) return;
     // BUGFIX guard (user report, 2026-08-26): buying in USD needs the live
     // FX rate to convert -- if it hasn't loaded yet (still fetching, or the
     // source is down), there is nothing correct to submit. Rather than
@@ -130,7 +130,16 @@ function Assets() {
     // the visible reason why.
     const totals = cryptoPurchaseTotals(vd("quantity"), vd("price"), cryptoCurrency, fx.data?.rate);
     if (!totals) return;
-    crypto.mutate({ coingecko_id: coin.id, symbol: coin.symbol, display_name: coin.name, quantity: vd("quantity"), purchase_date: v("date"), purchase_price: totals.unitPriceVnd, total_cost: totals.totalVnd });
+    // User correction, 2026-08-26 ("sai rồi, tôi muốn được tự nhập mã của
+    // coin. chỉ tham chiếu giá của coin khi tính giá trị tài sản"): the coin
+    // code is now typed by hand, not picked from a search popover. The
+    // catalog lookup below is only a best-effort background convenience so
+    // a future live-price lookup can still work when the typed code happens
+    // to match a known CoinGecko id/symbol -- it must never block recording
+    // the purchase itself, so any failure or no-match just falls back to
+    // the typed code verbatim.
+    const identity = await resolveCryptoIdentity(code);
+    crypto.mutate({ coingecko_id: identity.coingecko_id, symbol: identity.symbol, display_name: identity.display_name, quantity: vd("quantity"), purchase_date: v("date"), purchase_price: totals.unitPriceVnd, total_cost: totals.totalVnd });
   }
   // BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): neither form
   // below rendered its mutation's error at all, so a rejected submit (e.g.
@@ -150,14 +159,17 @@ function Assets() {
     as the value itself stores the human-readable text the user actually
     picked, in whichever language was active at the time. */}
     <select name="product_type" aria-label={tr("Product")} required defaultValue=""><option value="" disabled>{tr("Product")}</option>{productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}</select><input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" pattern={decimalPattern} required /><div className="amount-row purity-row"><input name="purity" placeholder="99.99" title={tr("Leave blank to use 99.99%")} aria-label={tr("Purity")} inputMode="decimal" pattern={decimalPattern} /><span className="currency-badge">%</span></div><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" pattern={decimalPattern} required /><input name="date" type="date" required /><button className="primary">+ {tr("Add")}</button></form>,
-    // User report, 2026-08-26: coin stays free-search-then-select (already
-    // correct, see the "Không sửa" note in docs/qa/QA_STATE.md); quantity
-    // and price are user-typed as before, but price now has a VND/USD
-    // toggle, and Total cost is no longer typed by hand -- it's always
-    // price * quantity (converting a USD price to VND first via the live
-    // rate), computed by cryptoPurchaseTotals() above and shown read-only
-    // so it can never drift from that formula.
-    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><CoinPicker selected={coin} onSelect={setCoin} tr={tr} /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required value={cryptoQty} onChange={e => setCryptoQty(e.target.value)} /><div className="amount-row crypto-price-row"><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required value={cryptoPrice} onChange={e => setCryptoPrice(e.target.value)} /><select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select></div>{cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoney(fx.data.rate)} VND`}</p>}<input name="total" aria-label={tr("Total cost")} placeholder={tr("Total cost")} value={cryptoTotalsPreview ? fmtMoney(cryptoTotalsPreview.totalVnd) ?? "" : ""} readOnly disabled /><input name="date" type="date" required /><button className="primary" disabled={!coin || !cryptoTotalsPreview}>+ {tr("Add")}</button></form>,
+    // User correction, 2026-08-26 ("sai rồi, tôi muốn được tự nhập mã của
+    // coin. chỉ tham chiếu giá của coin khi tính giá trị tài sản"): the coin
+    // is now a free-typed code, not a search-then-select popover -- the
+    // CoinGecko catalog is only consulted in the background, via
+    // resolveCryptoIdentity() in submit(), and only to help value the asset
+    // later. Quantity and price are user-typed as before, price has a
+    // VND/USD toggle, and Total cost is no longer typed by hand -- it's
+    // always price * quantity (converting a USD price to VND first via the
+    // live rate), computed by cryptoPurchaseTotals() above and shown
+    // read-only so it can never drift from that formula.
+    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><input name="symbol" placeholder={tr("Coin code")} aria-label={tr("Coin code")} autoCapitalize="characters" required /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required value={cryptoQty} onChange={e => setCryptoQty(e.target.value)} /><div className="amount-row crypto-price-row"><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required value={cryptoPrice} onChange={e => setCryptoPrice(e.target.value)} /><select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select></div>{cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoney(fx.data.rate)} VND`}</p>}<input name="total" aria-label={tr("Total cost")} placeholder={tr("Total cost")} value={cryptoTotalsPreview ? fmtMoney(cryptoTotalsPreview.totalVnd) ?? "" : ""} readOnly disabled /><input name="date" type="date" required /><button className="primary" disabled={!cryptoTotalsPreview}>+ {tr("Add")}</button></form>,
   };
   const p = q.data;
   return <Section title="Assets" subtitle="Manage assets, investments, and net worth in one place.">
@@ -249,6 +261,29 @@ function cryptoPurchaseTotals(
   if (!fxRateToVnd) return null;
   const unitPriceVnd = sumMoney([mulDecimal(price, fxRateToVnd)]);
   return { unitPriceVnd, totalVnd: sumMoney([mulDecimal(unitPriceVnd, quantity)]) };
+}
+
+// User correction, 2026-08-26 ("sai rồi, tôi muốn được tự nhập mã của coin.
+// chỉ tham chiếu giá của coin khi tính giá trị tài sản"): the coin identity
+// is now typed by hand (e.g. "BTC"), not picked from a search popover. This
+// does a best-effort, non-blocking background lookup against the existing
+// coin-catalog search endpoint (GET /assets/crypto/coins, backed by
+// CoinGecko) purely so a future live-price lookup at valuation time has a
+// real coingecko_id to work with when the typed code matches a known coin.
+// It must never gate recording the purchase: on no exact match, or on any
+// network/catalog error, it falls back to the typed code verbatim so the
+// user's purchase is always saved.
+async function resolveCryptoIdentity(code: string): Promise<{ coingecko_id: string; symbol: string; display_name: string }> {
+  const trimmed = code.trim();
+  const fallback = { coingecko_id: trimmed.toLowerCase(), symbol: trimmed.toLowerCase(), display_name: trimmed.toUpperCase() };
+  try {
+    const matches = await api.assets.crypto.searchCoins(trimmed);
+    const exact = matches.find(m => m.symbol.toLowerCase() === trimmed.toLowerCase());
+    if (!exact) return fallback;
+    return { coingecko_id: exact.id, symbol: exact.symbol, display_name: exact.name };
+  } catch {
+    return fallback;
+  }
 }
 
 function negateMoney(value: string): string {
@@ -543,33 +578,6 @@ function SavingsRenewForm({ id, walletAccounts, onDone, onCancel }: { id: number
   </form>;
 }
 
-function CoinPicker({ selected, onSelect, tr }: { selected: CoinSummary | null; onSelect: (coin: CoinSummary) => void; tr: (text: string) => string }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
-  const root = useRef<HTMLDivElement>(null);
-  useEffect(() => { const timer = setTimeout(() => setDebounced(query), 250); return () => clearTimeout(timer); }, [query]);
-  const results = useQuery({ queryKey: ["coins", debounced], queryFn: () => api.assets.crypto.searchCoins(debounced), enabled: open });
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", close); document.addEventListener("keydown", escape);
-    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
-  }, [open]);
-  return <div className="category-picker" ref={root}>
-    <button type="button" className="category-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(x => !x)}>
-      <span>{selected ? `${selected.name} (${selected.symbol.toUpperCase()})` : tr("Choose coin")}</span>
-      <span aria-hidden="true">⌄</span>
-    </button>
-    {open && <div className="category-popover" role="listbox" aria-label={tr("Search coin")}>
-      <input autoFocus aria-label={tr("Search coin")} placeholder={tr("Search coin")} value={query} onChange={e => setQuery(e.target.value)} />
-      {results.isFetching && <p className="hint">{tr("Loading…")}</p>}
-      {results.isError && <p className="hint">{tr("Coin catalog unavailable")}</p>}
-      {results.data?.map(item => <button type="button" role="option" key={item.id} aria-selected={selected?.id === item.id} className={selected?.id === item.id ? "selected" : ""} onClick={() => { onSelect(item); setOpen(false); }}>{item.name} <small>{item.symbol.toUpperCase()}</small></button>)}
-    </div>}
-  </div>;
-}
 // TASK-040: a short, human-readable tail describing what auto-apply did
 // with a batch's rows -- shared by the upload status line and the Review
 // page's manual "Apply" action so both report the same way.
