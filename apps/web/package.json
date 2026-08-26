@@ -1,5 +1,6 @@
 {
   "name": "personal-finance-web",
+  "description": "Frontend (Next.js) for a local-first personal finance app — transactions, accounts, categories, savings/metals/crypto assets, bank reconciliation.",
   "private": true,
   "scripts": {
     "dev": "next dev",

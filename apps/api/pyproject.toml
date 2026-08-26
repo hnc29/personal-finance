@@ -1,5 +1,6 @@
 [project]
 name = "api"
+description = "Backend (FastAPI + SQLAlchemy + Alembic) for a local-first personal finance app — ledger, accounts, savings/metals/crypto assets, bank reconciliation."
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [

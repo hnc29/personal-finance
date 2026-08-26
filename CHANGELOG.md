@@ -26,7 +26,98 @@ bản đặt tên theo `vMAJOR.MINOR` (ví dụ `v1.00`, `v1.01`, `v2.00`).
 
 ## [Unreleased]
 
-Chưa có thay đổi nào kể từ mốc `v2.00`.
+Chưa có thay đổi nào kể từ mốc `v3.00`.
+
+## [3.00] - 2026-08-26
+
+Tổng hợp toàn bộ công việc kể từ mốc `v2.00` (2026-08-25): bộ kiểm thử
+Playwright đầu-cuối đầu tiên cho frontend, thiết kế lại giao diện chính
+sang bố cục sidebar kèm trang "Sổ giao dịch" mới, gộp dashboard Portfolio
+vào tab Tài sản, cùng nhiều tính năng nghiệp vụ mới theo yêu cầu người
+dùng — lớn nhất là cờ "không tính vào báo cáo". Tăng MAJOR vì đổi kiến
+trúc giao diện (bố cục sidebar + trang mới) và mở rộng schema DB (4 bảng,
+migration `0019`).
+
+### Tính năng mới
+- Bộ kiểm thử Playwright đầu-cuối đầu tiên cho frontend (48 test, 12 file
+  `apps/web/e2e/*.spec.ts`), thay cho 16 script audit thủ công trước đó;
+  kèm 3 báo cáo QA đầy đủ (`FUNCTION_MATRIX.md`/`TEST_REPORT.md`/
+  `BUG_FIX_REPORT.md`).
+- Trang mới **"Sổ giao dịch"**: chọn tài khoản (mặc định theo `sort_order`),
+  số dư hiện tại, tab tháng cuộn ngang tự sinh từ giao dịch sớm nhất tới
+  nay (có bucket "Tương lai"), tổng đầu kỳ/cuối kỳ/chênh lệch ròng, composer
+  riêng luôn tạo mới, nút "Sao chép" một giao dịch cũ (điền sẵn form để
+  sửa trước khi lưu bản ghi mới), panel chi tiết bên phải.
+- Thiết kế lại giao diện chính (TASK-043 + theo bố cục tham khảo Money
+  Lover): 6 tab ngang → sidebar dọc bên trái (sau đó đổi nền trắng/chữ
+  đen, tô xanh dương khi đang chọn); gộp dashboard Portfolio (net worth/
+  KPI + thẻ tín dụng) thẳng vào tab Tài sản, bỏ tab Portfolio riêng; số
+  tiền hiển thị có dấu chấm ngăn cách hàng nghìn (1000000 → 1.000.000) ở
+  mọi nơi thuần hiển thị; tài khoản mặc định trong Ghi giao dịch tự chọn
+  theo lần dùng gần nhất kèm hiện số dư cạnh tên; khung chọn danh mục kéo
+  dài gần hết trang thay vì cuộn ngắn.
+- Tạo tài khoản mới có thể nhập số dư ban đầu; tài khoản Ngân hàng/Thẻ tín
+  dụng bắt buộc chọn từ danh sách ~49 ngân hàng Việt Nam đang hoạt động
+  (không gõ tự do); tiền tệ cố định VND.
+- Kim loại quý: độ tinh khiết không bắt buộc (mặc định 99,99%, nhập theo
+  %), chọn loại sản phẩm (Nhẫn/Miếng/Trang sức) từ danh sách thay vì gõ
+  tự do.
+- Mua tiền mã hoá có thể chọn trả bằng USD, tự động quy đổi sang VND theo
+  tỷ giá thời gian thực (nguồn ngoài, cache 1 giờ, endpoint
+  `GET /fx/usd-vnd`) — tổng chi phí luôn tự tính, không cho gõ tay. Mã
+  coin luôn tự gõ tay (không bắt buộc chọn từ danh sách search như thiết
+  kế ban đầu, sửa lại theo phản hồi trực tiếp của người dùng), API
+  CoinGecko chỉ dùng để tham chiếu giá định giá tài sản.
+- Xuất dữ liệu CSV/XLSX có thể lọc theo tài khoản và khoảng ngày.
+- **Cờ "Không tính vào báo cáo"** (yêu cầu chính của đợt backup này, migration
+  `0019`): thêm được khi tạo mới và sửa được sau đó cho cả giao dịch lẫn 3
+  loại tài sản (sổ tiết kiệm, kim loại quý, tiền mã hoá) — riêng sổ tiết
+  kiệm, cờ này luôn sửa được bất kể đã có lịch sử/gia hạn hay chưa, khác
+  với mọi trường khác của sổ. Toggle trên dòng tài sản và trong dialog chi
+  tiết sổ tiết kiệm dùng cập nhật lạc quan (optimistic update) để không bị
+  giật hình khi chờ server phản hồi. *Minh bạch: app hiện chưa có trang
+  "báo cáo tổng hợp thu chi" nào để thực sự lọc theo cờ này — cờ đã sẵn
+  sàng đầy đủ (tạo mới + sửa) ở mọi nơi, chờ trang báo cáo nếu người dùng
+  cần.*
+
+### Sửa lỗi
+- Danh mục con khớp tìm kiếm/đổi loại (Chi tiêu↔Thu nhập) bị ẩn nhầm
+  trong bộ chọn danh mục (composer giao dịch lẫn form danh mục).
+- Form tài sản kim loại/crypto không hiển thị lỗi khi submit bị máy chủ
+  từ chối — nút bấm "im lặng" không phản hồi gì.
+- Backend chấp nhận độ tinh khiết kim loại ngoài khoảng (0,1], gây crash
+  500 (lỗi ràng buộc DB không được bắt) thay vì trả lỗi 422 rõ ràng.
+- Backend không validate dấu tiền cho Chi tiêu/Thu nhập — phát hiện 1 bản
+  ghi thật bị sai dấu qua đối soát; không tự sửa dữ liệu, chỉ thêm chặn
+  từ phía server để không lặp lại.
+- Gõ dấu phẩy thập phân kiểu Việt Nam ("1,5") vào ô Số lượng/Độ tinh khiết
+  khi thêm tài sản kim loại làm nút "Thêm" "im lặng" không phản hồi (lỗi
+  `BigInt` không được bắt trong submit handler, xảy ra trước khi request
+  kịp gửi đi).
+- Khung chọn danh mục bị cắt cụt bởi `.txn-card{overflow:hidden}` dù
+  `max-height` đã tăng đúng.
+- Thanh sidebar/tab bị bó hẹp chữ không cuộn được trên di động.
+- Cập nhật Next.js lên 15.5.24 (vá lỗ hổng path-traversal trong ISR
+  file-system-cache) + `sharp` (vá 1 CVE gián tiếp không liên quan trực
+  tiếp tới app).
+
+### Kiểm thử & vận hành
+- Backend: 281 → **308 test pytest** (qua nhiều đợt: +1 validate dấu tiền,
+  +6 lọc export, +9 tỷ giá USD/VND, +10 cờ không tính vào báo cáo), ruff/
+  mypy sạch xuyên suốt toàn bộ đợt này.
+- Frontend: từ 0 test tự động (chỉ có script audit thủ công) → **48/48
+  Playwright E2E** (12 file), `tsc`/`eslint --max-warnings=0`/`next build`
+  sạch xuyên suốt.
+- Đối soát dữ liệu thật (chỉ đọc, `sqlite3 mode=ro`) một lần: 0 lỗi khoá
+  ngoại/dữ liệu rỗng, công thức net worth khớp khi tự tính lại độc lập.
+- Áp dụng migration `0019` (cờ không tính vào báo cáo, 4 bảng) lên
+  `data/finance.db` thật — sao lưu trước khi đổi
+  (`data/finance.db.bak-pre-0019-migration`), verify số dòng từng bảng,
+  kiểu cột, `PRAGMA integrity_check`, và `alembic_version` sau khi chạy —
+  không mất/lệch dữ liệu.
+
+Chi tiết đầy đủ từng batch nằm ở `docs/qa/QA_STATE.md` (Batch #1 đến #9)
+và `docs/tasks/TASK-043.md`.
 
 ## [2.00] - 2026-08-25
 
