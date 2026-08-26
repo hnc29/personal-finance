@@ -1,14 +1,15 @@
 import csv
+import datetime
 import io
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.ledger import FinancialEvent
+from app.models.ledger import AccountEntry, FinancialEvent
 from app.schemas.read_models import ImportApplyRead
 from app.services.moneylover_apply import (
     ApplyResult,
@@ -18,6 +19,33 @@ from app.services.moneylover_apply import (
 from app.services.moneylover_import import import_moneylover
 
 router = APIRouter(prefix="/api/v1", tags=["data"])
+
+
+# BUGFIX (user report, 2026-08-26: "Chức năng xuất dữ liệu: Lựa chọn tài
+# khoản, ngày bắt đầu, ngày kết thúc"): exports used to always dump every
+# entry of every event with no way to scope them. Filters here are all
+# optional and additive -- an unfiltered call behaves exactly as before, so
+# nothing that already depended on the old export shape breaks.
+def _export_rows(
+    db: Session,
+    account_id: int | None,
+    start_date: datetime.date | None,
+    end_date: datetime.date | None,
+) -> list[tuple[AccountEntry, FinancialEvent]]:
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(400, "start_date must not be after end_date")
+    stmt = (
+        select(AccountEntry, FinancialEvent)
+        .join(FinancialEvent, AccountEntry.financial_event_id == FinancialEvent.id)
+        .order_by(FinancialEvent.id, AccountEntry.id)
+    )
+    if account_id is not None:
+        stmt = stmt.where(AccountEntry.account_id == account_id)
+    if start_date is not None:
+        stmt = stmt.where(FinancialEvent.transaction_date >= start_date)
+    if end_date is not None:
+        stmt = stmt.where(FinancialEvent.transaction_date <= end_date)
+    return [(entry, event) for entry, event in db.execute(stmt).all()]
 
 
 def _apply_result_dict(result: ApplyResult) -> dict:
@@ -37,21 +65,25 @@ def _apply_result_dict(result: ApplyResult) -> dict:
 
 
 @router.get("/exports/events.csv")
-def export_csv(db: Session = Depends(get_db)):  # noqa: B008
+def export_csv(
+    db: Session = Depends(get_db),  # noqa: B008
+    account_id: int | None = Query(None),
+    start_date: datetime.date | None = Query(None),  # noqa: B008
+    end_date: datetime.date | None = Query(None),  # noqa: B008
+):
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["event_id", "date", "event_type", "account_id", "amount"])
-    for event in db.scalars(select(FinancialEvent).order_by(FinancialEvent.id)):
-        for entry in event.entries:
-            writer.writerow(
-                [
-                    event.id,
-                    event.transaction_date.isoformat(),
-                    event.event_type.value,
-                    entry.account_id,
-                    entry.amount,
-                ]
-            )
+    for entry, event in _export_rows(db, account_id, start_date, end_date):
+        writer.writerow(
+            [
+                event.id,
+                event.transaction_date.isoformat(),
+                event.event_type.value,
+                entry.account_id,
+                entry.amount,
+            ]
+        )
     return StreamingResponse(
         iter([out.getvalue().encode()]),
         media_type="text/csv",
@@ -60,23 +92,27 @@ def export_csv(db: Session = Depends(get_db)):  # noqa: B008
 
 
 @router.get("/exports/events.xlsx")
-def export_xlsx(db: Session = Depends(get_db)):  # noqa: B008
+def export_xlsx(
+    db: Session = Depends(get_db),  # noqa: B008
+    account_id: int | None = Query(None),
+    start_date: datetime.date | None = Query(None),  # noqa: B008
+    end_date: datetime.date | None = Query(None),  # noqa: B008
+):
     from openpyxl import Workbook  # type: ignore[import-untyped]
 
     wb = Workbook()
     ws = wb.active
     ws.append(["event_id", "date", "event_type", "account_id", "amount"])
-    for event in db.scalars(select(FinancialEvent).order_by(FinancialEvent.id)):
-        for entry in event.entries:
-            ws.append(
-                [
-                    event.id,
-                    event.transaction_date.isoformat(),
-                    event.event_type.value,
-                    entry.account_id,
-                    str(entry.amount),
-                ]
-            )
+    for entry, event in _export_rows(db, account_id, start_date, end_date):
+        ws.append(
+            [
+                event.id,
+                event.transaction_date.isoformat(),
+                event.event_type.value,
+                entry.account_id,
+                str(entry.amount),
+            ]
+        )
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)

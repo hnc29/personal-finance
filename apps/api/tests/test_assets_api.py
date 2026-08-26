@@ -108,6 +108,29 @@ def test_create_metal_rejects_purity_outside_unit_range(client: TestClient) -> N
     assert client.get("/api/v1/assets/metals").json() == []
 
 
+def test_create_metal_purity_defaults_to_9999_when_omitted(client: TestClient) -> None:
+    """Regression test (user report, 2026-08-26: "Độ tinh khiết ko bắt buộc
+    nhập, mặc định giá trị 99,99"): purity used to be a required field with
+    no default -- the frontend now defaults its own input to 99.99% when
+    left blank, but the API itself must also tolerate the field being
+    omitted entirely by any client, since "not required" means the server
+    accepts its absence, not just that one caller happens to always fill it.
+    """
+    response = client.post(
+        "/api/v1/assets/metals",
+        json={
+            "metal_type": "GOLD",
+            "brand": "SJC",
+            "product_type": "RING",
+            "quantity_grams": "3.75",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "7500000",
+            "total_cost": "7500000",
+        },
+    )
+    assert response.status_code == 201
+
+
 def test_create_crypto_persists_arbitrary_coingecko_id_not_only_btc(
     client: TestClient,
 ) -> None:

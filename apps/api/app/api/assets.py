@@ -48,7 +48,12 @@ class MetalCreate(BaseModel):
     metal_type: Literal["GOLD", "SILVER"]
     brand: PreciousMetalBrand = PreciousMetalBrand.RAW
     product_type: str
-    purity: Decimal
+    # BUGFIX (user report, 2026-08-26: "Độ tinh khiết ko bắt buộc nhập, mặc
+    # định giá trị 99,99"): purity used to be required with no default --
+    # the frontend now always sends a value (defaulting the UI itself to
+    # 99.99% when left blank), but the API is made tolerant of the same
+    # omission from any other client, matching what "not required" means.
+    purity: Decimal = Decimal("0.9999")
     quantity_grams: Decimal
     purchase_date: datetime.date
     purchase_price: Decimal

@@ -6,7 +6,7 @@ const vi = { transactions:"Giao dịch", accounts:"Tài khoản", categories:"Da
 export const copy = { en, vi } as const;
 export const display = {
   en: (value: string) => value.replaceAll("_", " ").toLowerCase().replace(/^./, c => c.toUpperCase()),
-  vi: (value: string) => ({ CASH:"Tiền mặt", BANK:"Ngân hàng", CREDIT_CARD:"Thẻ tín dụng", EWALLET:"Ví điện tử", EXPENSE:"Chi tiêu", INCOME:"Thu nhập", TRANSFER:"Chuyển tiền", CREDIT_CARD_PAYMENT:"Thanh toán thẻ tín dụng", INTEREST:"Tiền lãi", SAVINGS_DEPOSIT:"Gửi tiết kiệm", SAVINGS_WITHDRAWAL:"Rút tiết kiệm", ASSET_PURCHASE:"Mua tài sản", ASSET_SALE:"Bán tài sản", ADJUSTMENT:"Điều chỉnh", LIVE:"Trực tiếp", STALE:"Cũ", MANUAL:"Nhập thủ công", UNAVAILABLE:"Không khả dụng", RAW:"Nguyên liệu", ACTIVE:"Đang hoạt động", EARLY_CLOSED:"Tất toán trước hạn", OPEN:"Đang mở", CLOSED:"Đã đóng", AT_MATURITY:"Cuối kỳ", UPFRONT:"Trả trước", PERIODIC:"Định kỳ", RENEW_PRINCIPAL:"Tái tục gốc", RENEW_PRINCIPAL_AND_INTEREST:"Tái tục gốc & lãi", CLOSE:"Không tự động tái tục", ACTUAL_365:"Thực tế/365", ACTUAL_360:"Thực tế/360", THIRTY_360:"30/360" } as Record<string,string>)[value] ?? value,
+  vi: (value: string) => ({ CASH:"Tiền mặt", BANK:"Ngân hàng", CREDIT_CARD:"Thẻ tín dụng", EWALLET:"Ví điện tử", EXPENSE:"Chi tiêu", INCOME:"Thu nhập", TRANSFER:"Chuyển tiền", CREDIT_CARD_PAYMENT:"Thanh toán thẻ tín dụng", INTEREST:"Tiền lãi", SAVINGS_DEPOSIT:"Gửi tiết kiệm", SAVINGS_WITHDRAWAL:"Rút tiết kiệm", ASSET_PURCHASE:"Mua tài sản", ASSET_SALE:"Bán tài sản", ADJUSTMENT:"Điều chỉnh", LIVE:"Trực tiếp", STALE:"Cũ", MANUAL:"Nhập thủ công", UNAVAILABLE:"Không khả dụng", RAW:"Nguyên liệu", ACTIVE:"Đang hoạt động", EARLY_CLOSED:"Tất toán trước hạn", OPEN:"Đang mở", CLOSED:"Đã đóng", AT_MATURITY:"Cuối kỳ", UPFRONT:"Trả trước", PERIODIC:"Định kỳ", RENEW_PRINCIPAL:"Tái tục gốc", RENEW_PRINCIPAL_AND_INTEREST:"Tái tục gốc & lãi", CLOSE:"Không tự động tái tục", ACTUAL_365:"Thực tế/365", ACTUAL_360:"Thực tế/360", THIRTY_360:"30/360", RING:"Nhẫn", BAR:"Miếng", JEWELRY:"Trang sức" } as Record<string,string>)[value] ?? value,
 } as const;
 export function enumLabel(language: Language, value: string): string {
   return display[language](value);
@@ -31,6 +31,7 @@ const enUi = {
   , "Choose an account":"Choose an account", "Enter an amount":"Enter an amount", "Choose a category":"Choose a category"
   , "Delete":"Delete", "Confirm delete":"Confirm delete", "Deleting...":"Deleting...", "Transaction details":"Transaction details", "Editing transaction":"Editing transaction", "This transaction type is managed on its own page and can't be edited or deleted here.":"This transaction type is managed on its own page and can't be edited or deleted here."
   , "Assets":"Assets", "Manage assets, investments, and net worth in one place.":"Manage assets, investments, and net worth in one place."
+  , "Choose bank":"Choose bank", "Nickname (optional)":"Nickname (optional)", "Initial balance":"Initial balance", "Leave blank to use 99.99%":"Leave blank to use 99.99%", "Start date":"Start date", "End date":"End date", "All accounts":"All accounts", "Export filters":"Export filters"
 } as const;
 export type UiKey = keyof typeof enUi;
 export const transactionUiKeys = {
@@ -54,6 +55,7 @@ const viUi: Record<string, string> = {
   , "Choose an account":"Vui lòng chọn tài khoản", "Enter an amount":"Vui lòng nhập số tiền", "Choose a category":"Vui lòng chọn danh mục"
   , "Delete":"Xoá", "Confirm delete":"Xác nhận xoá", "Deleting...":"Đang xoá...", "Transaction details":"Chi tiết giao dịch", "Editing transaction":"Đang sửa giao dịch", "This transaction type is managed on its own page and can't be edited or deleted here.":"Loại giao dịch này được quản lý ở trang riêng (Tiết kiệm/Tài sản) và không thể sửa hoặc xoá tại đây."
   , "Assets":"Tài sản", "Manage assets, investments, and net worth in one place.":"Quản lý tài sản, đầu tư và tài sản ròng tại một nơi."
+  , "Choose bank":"Chọn ngân hàng", "Nickname (optional)":"Tên gợi nhớ (không bắt buộc)", "Initial balance":"Số dư ban đầu", "Leave blank to use 99.99%":"Để trống sẽ dùng 99,99%", "Start date":"Từ ngày", "End date":"Đến ngày", "All accounts":"Tất cả tài khoản", "Export filters":"Bộ lọc xuất dữ liệu"
 };
 export function ui(language: Language, text: string): string {
   const extra: Record<string, string> = { "Search category":"Tìm danh mục", "Collapse":"Thu gọn", "Expand":"Mở rộng", "All":"Tất cả", "Expenses":"Chi tiêu", "Income":"Thu nhập", "None":"Không có danh mục cha", "Add child category":"Thêm danh mục con", "Other / Unclassified":"Khác / Chưa phân loại", "No categories found.":"Không tìm thấy danh mục" };

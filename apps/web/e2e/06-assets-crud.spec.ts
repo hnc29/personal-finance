@@ -15,20 +15,59 @@ test.describe.serial("assets: add metal, add + edit savings account", () => {
     await goToTab(page, "Tài sản");
     await page.getByRole("tab", { name: VI.metalsTab }).click();
     await page.locator('select[name="metal_type"]').selectOption("GOLD");
-    await page.locator('input[name="product_type"]').fill("Nhẫn tròn trơn E2E");
+    // Product is a fixed 3-option select (user report, 2026-08-26: "Sản
+    // phẩm: chọn theo: Nhẫn, miếng, Trang sức") -- no free text anymore.
+    // The option *value* is the Vietnamese label itself, not an internal
+    // code (see the BUGFIX comment on that <select> in app/page.tsx) since
+    // AssetSection displays product_type verbatim as the holding's name.
+    await page.locator('select[name="product_type"]').selectOption("Nhẫn");
     await page.locator('input[name="quantity"]').fill("1");
-    // Purity is stored as a (0, 1] fraction server-side (see
-    // app/api/assets.py MetalCreate.purity_in_unit_range) -- 0.999 is the
-    // "999" (99.9%) gold the product name implies.
-    await page.locator('input[name="purity"]').fill("0.999");
+    // Purity is now optional (server default 0.9999) and entered as a
+    // percentage in the UI (converted to the (0,1] fraction the API stores
+    // -- see app/api/assets.py MetalCreate.purity_in_unit_range and
+    // page.tsx's percentToFraction()); leaving it blank exercises the
+    // 99.99% default end to end.
     await page.locator('input[name="price"]').fill("7500000");
     await page.locator('input[name="total"]').fill("7500000");
     await page.locator('input[name="date"]').fill("2026-08-20");
     await page.locator(".asset-form button.primary").click();
 
-    await expect(page.getByText("Nhẫn tròn trơn E2E")).toBeVisible();
+    await expect(page.locator(".asset-list").getByText("Nhẫn", { exact: true }).first()).toBeVisible();
     const after = await (await request.get(`${API}/assets/metals`)).json();
     expect(after.length).toBe(before.length + 1);
+  });
+
+  test("accepts a Vietnamese decimal comma in quantity and an explicit purity percentage", async ({ page, request }) => {
+    // Regression test (user report, 2026-08-26: "Vàng ... Chức năng chưa
+    // hoạt động, nhấn thêm không phản hồi"): typing a comma decimal (as
+    // Vietnamese numbers are naturally written) used to throw an uncaught
+    // BigInt parsing exception inside the submit handler before the
+    // mutation ever ran -- no request, no error, the button just did
+    // nothing. See the BUGFIX comment above normDecimal() in app/page.tsx.
+    const before = await (await request.get(`${API}/assets/metals`)).json();
+
+    await page.goto("/");
+    await goToTab(page, "Tài sản");
+    await page.getByRole("tab", { name: VI.metalsTab }).click();
+    await page.locator('select[name="metal_type"]').selectOption("GOLD");
+    await page.locator('select[name="product_type"]').selectOption("Miếng");
+    await page.locator('input[name="quantity"]').fill("1,5");
+    await page.locator('input[name="purity"]').fill("99,99");
+    await page.locator('input[name="price"]').fill("7500000");
+    await page.locator('input[name="total"]').fill("11250000");
+    await page.locator('input[name="date"]').fill("2026-08-20");
+    await page.locator(".asset-form button.primary").click();
+    // Wait for the new row to actually land before reading it back over the
+    // API -- clicking submit and immediately hitting the API via the raw
+    // `request` fixture races ahead of the browser's own in-flight POST
+    // otherwise (this is a test-timing fix, not a product behavior check).
+    await expect(page.locator(".asset-list").getByText("Miếng", { exact: true }).first()).toBeVisible();
+
+    const after = await (await request.get(`${API}/assets/metals`)).json();
+    expect(after.length).toBe(before.length + 1);
+    // 1.5 chỉ * 3.75 g/chỉ = 5.625 g -- confirms the comma was accepted by
+    // the same BigInt arithmetic as a dot, not silently dropped.
+    expect(after[after.length - 1].quantity_grams).toBe("5.6250");
   });
 
   test("adds a savings account", async ({ page }) => {

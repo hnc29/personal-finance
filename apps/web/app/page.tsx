@@ -6,7 +6,7 @@ import { api, Account, AccountBalance, AccountType, Category, CoinSummary, Event
 import { categoryLabel, copy, enumLabel, Language, transactionUiKeys, ui, useLanguage } from "../lib/i18n";
 import { buildCategoryTree, categoriesForEventType, categoryDepth, categoryIsValidForEventType, categoryPath, filterCategoryTree, toggleCategoryExpansion, canMoveCategory, categoryRoot, getCategoryDepth } from "../lib/category-tree";
 import { CategoryIcon, IconGlyph, ICON_GROUPS, iconLabel } from "../lib/category-icons";
-import { bankCatalog } from "../lib/bank-catalog";
+import { bankCatalog, bankCategoryLabel, bankCategoryOrder } from "../lib/bank-catalog";
 import { AccountLogo } from "../lib/account-logos";
 
 type View = "transactions" | "accounts" | "categories" | "review" | "assets" | "data";
@@ -41,7 +41,12 @@ function formatIsoDateLabel(language: Language, iso: string): string {
   const formatted = new Intl.DateTimeFormat(locale, { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }).format(local);
   return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 }
-const bankTemplates = [...bankCatalog.map(x => x.name), "Other / Custom bank"];
+// BUGFIX: this used to append a second, redundant "Other / Custom bank"
+// literal on top of the catalog's own "other" entry (see bank-catalog.ts) --
+// harmless duplication for the savings-form datalist below, but confusing
+// when read next to the strict <select> in AccountFormDialog, which builds
+// its options straight from bankCatalog instead of this list.
+const bankTemplates = bankCatalog.map(x => x.name);
 const LanguageContext = createContext<Language>("vi");
 function useI18n() {
   const language = useContext(LanguageContext);
@@ -61,31 +66,74 @@ function Assets() {
   const [coin, setCoin] = useState<CoinSummary | null>(null);
   const metal = useMutation({ mutationFn: api.assets.metals.create, onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }) });
   const crypto = useMutation({ mutationFn: api.assets.crypto.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["portfolio"] }); setCoin(null); } });
+  // BUGFIX (user report, 2026-08-26: "Vàng ... Chức năng chưa hoạt động,
+  // nhấn thêm không phản hồi"): reproduced with Playwright -- typing a
+  // Vietnamese-style decimal comma into Quantity or Purity (e.g. "1,5" or
+  // "99,99", exactly how these values are naturally written/spoken) threw
+  // an uncaught `BigInt("1,5")` parsing exception synchronously inside this
+  // handler, before `.mutate()` ever ran: no network request, no error
+  // banner (nothing to show -- the mutation never started), the "+ Thêm"
+  // button just did nothing. Root cause was two-fold: (a) unlike every
+  // other decimal input in this app (transaction amount, savings principal,
+  // adjust-balance), the metals/crypto quantity/purity/price/total inputs
+  // were missing the `pattern` attribute that makes the browser itself
+  // reject non-numeric characters before this code ever runs; (b) even with
+  // that pattern back, a well-intentioned Vietnamese comma should just work
+  // rather than being blocked, so it's normalized to a dot here too.
+  function normDecimal(raw: string): string { return raw.trim().replace(",", "."); }
+  // Purity is now optional (server default + this default both land on
+  // 99.99%) and entered as a percentage -- "99.99" for 999-gold -- matching
+  // how purity is actually talked about in Vietnamese, rather than the raw
+  // (0, 1] fraction the ledger stores. Converts via exact string/BigInt
+  // arithmetic (shifting the decimal point 2 places), never float, so it
+  // can't introduce rounding error the way `Number(x) / 100` could.
+  function percentToFraction(raw: string): string {
+    const trimmed = normDecimal(raw);
+    if (!trimmed) return "0.9999";
+    const negative = trimmed.startsWith("-");
+    const [wholeRaw, fracRaw = ""] = trimmed.replace(/^-/, "").split(".");
+    const whole = wholeRaw.replace(/\D/g, "") || "0";
+    const frac = fracRaw.replace(/\D/g, "");
+    const digits = whole + frac;
+    const pointPos = whole.length - 2;
+    const shifted = pointPos <= 0 ? `0.${"0".repeat(-pointPos)}${digits}` : `${digits.slice(0, pointPos)}.${digits.slice(pointPos)}`;
+    const [w, d = ""] = shifted.split(".");
+    return `${negative ? "-" : ""}${w || "0"}.${(d + "0000").slice(0, 4)}`;
+  }
   function submit(e: FormEvent<HTMLFormElement>, kind: "metal" | "crypto") {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const v = (n: string) => String(f.get(n) ?? "");
+    const vd = (n: string) => normDecimal(v(n));
     if (kind === "metal") {
-      const [whole, fraction = ""] = v("quantity").split(".");
+      const [whole, fraction = ""] = vd("quantity").split(".");
       const scaledChi = BigInt(whole || "0") * BigInt("10000") + BigInt((fraction + "0000").slice(0, 4));
       const scaledGrams = scaledChi * BigInt("375") / BigInt("100");
       const grams = `${scaledGrams / BigInt("10000")}.${String(scaledGrams % BigInt("10000")).padStart(4, "0")}`.replace(/\.?0+$/, "");
-      metal.mutate({ metal_type: v("metal_type") as "GOLD" | "SILVER", brand: v("brand"), product_type: v("product_type"), purity: v("purity"), quantity_grams: grams, purchase_date: v("date"), purchase_price: v("price"), total_cost: v("total") });
+      metal.mutate({ metal_type: v("metal_type") as "GOLD" | "SILVER", brand: v("brand"), product_type: v("product_type"), purity: percentToFraction(v("purity")), quantity_grams: grams, purchase_date: v("date"), purchase_price: vd("price"), total_cost: vd("total") });
       return;
     }
     if (!coin) return;
-    crypto.mutate({ coingecko_id: coin.id, symbol: coin.symbol, display_name: coin.name, quantity: v("quantity"), purchase_date: v("date"), purchase_price: v("price"), total_cost: v("total") });
+    crypto.mutate({ coingecko_id: coin.id, symbol: coin.symbol, display_name: coin.name, quantity: vd("quantity"), purchase_date: v("date"), purchase_price: vd("price"), total_cost: vd("total") });
   }
   // BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): neither form
   // below rendered its mutation's error at all, so a rejected submit (e.g.
   // the purity range validation added in app/api/assets.py) failed
   // completely silently -- the button just... did nothing, with no
-  // indication anything went wrong. Also clarified the purity field's
-  // expected format (a 0-1 fraction, not the common "999" per-mille
-  // shorthand) since that's exactly the input that used to 500.
+  // indication anything went wrong.
+  const decimalPattern = "^\\d+([.,]\\d{1,4})?$";
+  const productTypes = ["RING", "BAR", "JEWELRY"] as const;
   const forms = {
-    metals: <form className="panel form asset-form" onSubmit={e => submit(e, "metal")}><h3>{tr("Precious metals")}</h3><Error error={metal.error} /><select name="metal_type"><option value="GOLD">{tr("Gold")}</option><option value="SILVER">{tr("Silver")}</option></select><select name="brand" aria-label={tr("Product catalog")}>{(brands.data ?? []).map(b => <option value={b} key={b}>{label(b)}</option>)}</select><input name="product_type" placeholder={tr("Product")} required /><input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" required /><input name="purity" placeholder="0.999" title={tr("Purity")} aria-label={tr("Purity")} required /><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" required /><input name="date" type="date" required /><button className="primary">+ {tr("Add")}</button></form>,
-    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><CoinPicker selected={coin} onSelect={setCoin} tr={tr} /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" required /><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" required /><input name="date" type="date" required /><button className="primary" disabled={!coin}>+ {tr("Add")}</button></form>,
+    metals: <form className="panel form asset-form" onSubmit={e => submit(e, "metal")}><h3>{tr("Precious metals")}</h3><Error error={metal.error} /><select name="metal_type"><option value="GOLD">{tr("Gold")}</option><option value="SILVER">{tr("Silver")}</option></select><select name="brand" aria-label={tr("Product catalog")}>{(brands.data ?? []).map(b => <option value={b} key={b}>{label(b)}</option>)}</select>{/* BUGFIX: the option *value* (not just its label) is what gets sent as
+    product_type and later shown verbatim as the holding's name in
+    AssetSection (which renders row.name directly, with no label()/tr()
+    pass -- see app/api/assets.py list_metals's "name": row.product_type).
+    Submitting the raw code ("RING") would have shown the untranslated code
+    in the asset list forever instead of "Nhẫn" / "Ring" -- using label(x)
+    as the value itself stores the human-readable text the user actually
+    picked, in whichever language was active at the time. */}
+    <select name="product_type" aria-label={tr("Product")} required defaultValue=""><option value="" disabled>{tr("Product")}</option>{productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}</select><input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" pattern={decimalPattern} required /><div className="amount-row purity-row"><input name="purity" placeholder="99.99" title={tr("Leave blank to use 99.99%")} aria-label={tr("Purity")} inputMode="decimal" pattern={decimalPattern} /><span className="currency-badge">%</span></div><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" pattern={decimalPattern} required /><input name="date" type="date" required /><button className="primary">+ {tr("Add")}</button></form>,
+    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><CoinPicker selected={coin} onSelect={setCoin} tr={tr} /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required /><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" pattern={decimalPattern} required /><input name="date" type="date" required /><button className="primary" disabled={!coin}>+ {tr("Add")}</button></form>,
   };
   const p = q.data;
   return <Section title="Assets" subtitle="Manage assets, investments, and net worth in one place.">
@@ -459,12 +507,29 @@ function applySummary(tr: (text: string) => string, apply: ImportApplyResult | n
   return ` — ${parts.join("; ")}`;
 }
 function DataPage() {
-  const { tr } = useI18n();
+  const { tr, label } = useI18n();
   const qc = useQueryClient();
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState("");
   const [uploading, setUploading] = useState(false);
+  // BUGFIX (user report, 2026-08-26: "Chức năng xuất dữ liệu: Lựa chọn tài
+  // khoản, ngày bắt đầu, ngày kết thúc"): export used to be two bare links
+  // dumping every ledger entry with no way to scope them. All three filters
+  // are optional (see app/api/data.py's _export_rows) so leaving them unset
+  // still exports everything, same as before.
+  const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
+  const [exportAccountId, setExportAccountId] = useState("");
+  const [exportStart, setExportStart] = useState("");
+  const [exportEnd, setExportEnd] = useState("");
+  function exportUrl(kind: "csv" | "xlsx"): string {
+    const params = new URLSearchParams();
+    if (exportAccountId) params.set("account_id", exportAccountId);
+    if (exportStart) params.set("start_date", exportStart);
+    if (exportEnd) params.set("end_date", exportEnd);
+    const qs = params.toString();
+    return `${base}/api/v1/exports/events.${kind}${qs ? `?${qs}` : ""}`;
+  }
   async function upload() {
     if (!file || uploading) return;
     setUploading(true);
@@ -508,7 +573,17 @@ function DataPage() {
       setUploading(false);
     }
   }
-  return <Section title="Data" subtitle="Import and export personal finance records."><div className="panel data-workflow"><h3>{tr("Import from Money Lover")}</h3><input type="file" accept=".csv,.xlsx" aria-label={tr("Choose file")} onChange={e => setFile(e.target.files?.[0] ?? null)}/><button type="button" className="primary" disabled={!file || uploading} onClick={upload}>{uploading ? tr("Uploading...") : tr("Upload for review")}</button>{status && <p className="hint" role="status">{status}</p>}<p className="hint">{tr("Matching rows are applied straight into your ledger on upload; unmatched wallets are reported so you can fix and re-apply from the Review page.")}</p><div className="form-actions"><a className="secondary" href={`${base}/api/v1/exports/events.csv`}>{tr("Export CSV")}</a><a className="secondary" href={`${base}/api/v1/exports/events.xlsx`}>{tr("Export XLSX")}</a></div></div></Section>;
+  return <Section title="Data" subtitle="Import and export personal finance records."><div className="panel data-workflow"><h3>{tr("Import from Money Lover")}</h3><input type="file" accept=".csv,.xlsx" aria-label={tr("Choose file")} onChange={e => setFile(e.target.files?.[0] ?? null)}/><button type="button" className="primary" disabled={!file || uploading} onClick={upload}>{uploading ? tr("Uploading...") : tr("Upload for review")}</button>{status && <p className="hint" role="status">{status}</p>}<p className="hint">{tr("Matching rows are applied straight into your ledger on upload; unmatched wallets are reported so you can fix and re-apply from the Review page.")}</p></div>
+    <div className="panel data-workflow"><h3>{tr("Export filters")}</h3>
+      <Field label="Account"><select aria-label={tr("Account")} value={exportAccountId} onChange={e => setExportAccountId(e.target.value)}>
+        <option value="">{tr("All accounts")}</option>
+        {(accountsQ.data ?? []).map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
+      </select></Field>
+      <Field label="Start date"><input type="date" aria-label={tr("Start date")} value={exportStart} onChange={e => setExportStart(e.target.value)} max={exportEnd || undefined} /></Field>
+      <Field label="End date"><input type="date" aria-label={tr("End date")} value={exportEnd} onChange={e => setExportEnd(e.target.value)} min={exportStart || undefined} /></Field>
+      <div className="form-actions"><a className="secondary" href={exportUrl("csv")}>{tr("Export CSV")}</a><a className="secondary" href={exportUrl("xlsx")}>{tr("Export XLSX")}</a></div>
+    </div>
+  </Section>;
 }
 
 function Review() {
@@ -585,22 +660,78 @@ function Accounts() {
   </Section>;
 }
 
+// BUGFIX (user report, 2026-08-26): three changes to account creation.
+// 1) "Điền số dư ban đầu" -- a brand-new account had no way to start from a
+//    non-zero balance except the separate "Adjust balance" action after the
+//    fact. Reused that same mechanism (a single ADJUSTMENT ledger event,
+//    see AccountAdjustForm below) fired right after account creation when
+//    an initial balance is entered, instead of inventing a new balance
+//    column on Account (there isn't one -- balances are always derived from
+//    ledger entries, see app/models/account.py's docstring).
+// 2) "đối với loại tài khoản ngân hàng hoặc thẻ tín dụng thì chọn ngân hàng
+//    theo list, ko tự điền" -- the old "Bank template" control only ever
+//    *suggested* a name into the free-text Name input; nothing stopped
+//    typing anything else, for any account type. For new BANK/CREDIT_CARD
+//    accounts the Name input is now replaced entirely by a required
+//    <select> built from bankCatalog (grouped by category) plus an optional
+//    nickname suffix -- the bank itself can no longer be freely typed.
+//    Deliberately scoped to *new* accounts only: forcing a re-pick on edit
+//    risked silently mangling an existing account's name.
+// 3) "Loại tiền tệ là vnd mặc định theo sau số tiền (ko cho nhập)" -- the
+//    free-text 3-letter currency input is gone; currency is always VND now
+//    (this app has no other currency support anywhere else -- transactions,
+//    savings, and assets are all VND-only already), shown as a fixed,
+//    non-editable value.
 function AccountFormDialog({ editing, onDone, onCancel }: { editing: Account | null; onDone: () => void; onCancel: () => void }) {
   const { tr, label } = useI18n();
-  const [bankSearch, setBankSearch] = useState("");
-  const save = useMutation({ mutationFn: (input: { id?: number; name: string; account_type: AccountType; currency: string }) => input.id ? api.accounts.update(input.id, input) : api.accounts.create(input), onSuccess: onDone });
+  const [type, setType] = useState<AccountType>(editing?.account_type ?? "CASH");
+  const needsBankSelect = !editing && (type === "BANK" || type === "CREDIT_CARD");
+  const otherBank = bankCatalog[bankCatalog.length - 1];
+  const save = useMutation({
+    mutationFn: async (input: { id?: number; name: string; account_type: AccountType; currency: string; initialBalance?: string }) => {
+      if (input.id) return api.accounts.update(input.id, { name: input.name, account_type: input.account_type, currency: input.currency });
+      const account = await api.accounts.create({ name: input.name, account_type: input.account_type, currency: input.currency });
+      if (input.initialBalance && !isZeroMoney(input.initialBalance)) {
+        await api.events.create({ event_type: "ADJUSTMENT", transaction_date: todayIso(), note: tr("Initial balance"), entries: [{ account_id: account.id, amount: input.initialBalance }] });
+      }
+      return account;
+    },
+    onSuccess: onDone,
+  });
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    save.mutate({ id: editing?.id, name: String(f.get("name")).trim(), account_type: String(f.get("type")) as AccountType, currency: String(f.get("currency")).trim().toUpperCase() });
+    const v = (n: string) => String(f.get(n) ?? "").trim();
+    const name = needsBankSelect ? (v("nickname") ? `${v("bank_name")} (${v("nickname")})` : v("bank_name")) : v("name");
+    save.mutate({ id: editing?.id, name, account_type: type, currency: "VND", initialBalance: editing ? undefined : v("initial_balance") });
   }
   return <form onSubmit={submit} className="form">
     <Error error={save.error} />
-    <Field label="Name"><input name="name" defaultValue={editing?.name} required /></Field>
-    <Field label="Type"><select name="type" defaultValue={editing?.account_type ?? "CASH"}>{accountTypes.map(x => <option value={x} key={x}>{label(x)}</option>)}</select></Field>
-    {!editing && <Field label="Bank template"><input placeholder={tr("Search banks")} value={bankSearch} onChange={e => setBankSearch(e.target.value)} /><select defaultValue="" onChange={e => { const input = e.currentTarget.form?.elements.namedItem("name") as HTMLInputElement | null; if (input && !input.value) input.value = e.target.value; }}><option value="">{tr("Choose bank template")}</option>{bankTemplates.filter(bank => bank.toLowerCase().includes(bankSearch.toLowerCase())).map(bank => <option value={bank} key={bank}>{bank}</option>)}</select></Field>}
-    <Field label="Currency"><input name="currency" defaultValue={editing?.currency ?? "VND"} maxLength={3} pattern="[A-Za-z]{3}" required /></Field>
-    <div className="form-actions"><Submit pending={save.isPending} text={editing ? "Save changes" : "Add account"} /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
+    <Field label="Type"><select value={type} onChange={e => setType(e.target.value as AccountType)}>{accountTypes.map(x => <option value={x} key={x}>{label(x)}</option>)}</select></Field>
+    {needsBankSelect ? <>
+      <Field label="Choose bank"><select name="bank_name" required defaultValue="">
+        <option value="" disabled>{tr("Choose bank")}</option>
+        {bankCategoryOrder.map(cat => <optgroup label={bankCategoryLabel[cat]} key={cat}>
+          {bankCatalog.filter(b => b.category === cat && b.key !== "other").map(b => <option value={b.name} key={b.key}>{b.name}</option>)}
+        </optgroup>)}
+        <option value={otherBank.name}>{otherBank.name}</option>
+      </select></Field>
+      <Field label="Nickname (optional)"><input name="nickname" /></Field>
+    </> : <Field label="Name"><input name="name" defaultValue={editing?.name} required /></Field>}
+    <Field label="Currency"><input value="VND" disabled readOnly /></Field>
+    {!editing && <Field label="Initial balance"><div className="amount-row"><input name="initial_balance" inputMode="decimal" pattern="^-?\d+(\.\d{1,4})?$" placeholder="0" /><span className="currency-badge">VND</span></div></Field>}
+    {/* BUGFIX: this modal now has up to 5 fields (Type, bank-select-or-Name,
+        Currency, Initial balance, +Nickname for bank accounts), enough to
+        fully fill the shared `.form` grid's 4 column tracks (see
+        .form{grid-template-columns:repeat(3,minmax(0,1fr)) auto} in
+        styles.css) on its own -- form-actions used to then wrap onto its
+        own row inside just the first 1fr track, squeezing "Thêm tài khoản"
+        into ~3 lines of text. Forcing it to span every column (same as the
+        ≤820px/≤560px responsive rules already do) keeps the buttons full
+        width regardless of how many fields preceded them, without touching
+        the shared .form-actions rule other, shorter forms rely on looking
+        inline on desktop. */}
+    <div className="form-actions" style={{ gridColumn: "1 / -1" }}><Submit pending={save.isPending} text={editing ? "Save changes" : "Add account"} /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
   </form>;
 }
 
