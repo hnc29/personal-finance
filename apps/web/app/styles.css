@@ -89,8 +89,23 @@ fieldset { margin:0; min-width:0 } legend { padding:0 5px }.hint { color:var(--m
    `.row-picker` wrapper) gets a taller popover; the Categories admin
    page's ParentPicker reuses the same `.category-popover` class but isn't
    wrapped in `.row-picker`, so it keeps the original, more compact height
-   there. min(...) keeps it from overflowing a short/mobile viewport. */
-.row-picker .category-popover{max-height:min(65vh,560px)}
+   there. First attempt used min(65vh,560px), which the user said still
+   wasn't tall enough ("tôi muốn khung này hiện dài đến hết trang luôn" --
+   they want it to reach all the way down the page/viewport) -- switched to
+   calc(100vh - 32px), i.e. nearly the full browser window height with just
+   a small margin, since .category-popover already has its own
+   overflow:auto so it still scrolls internally on a viewport too short to
+   fit every category. That taller max-height alone was still invisible
+   though: `.txn-card` (the composer card both AccountRow's row-popover and
+   CategoryPicker's category-popover are absolutely positioned inside) has
+   `overflow:hidden` for its own rounded corners, which clips ANY
+   descendant -- including an absolutely-positioned popover -- to the
+   card's own (much shorter) height, no matter how tall max-height allows
+   it to grow. Only letting overflow escape while a popover is actually
+   open (via :has()) keeps the rounded-corner clipping intact the rest of
+   the time. */
+.row-picker .category-popover{max-height:calc(100vh - 32px)}
+.txn-card:has(.category-popover),.txn-card:has(.row-popover){overflow:visible}
 .amount-row{display:flex;align-items:center;gap:12px;min-height:70px;padding:10px 16px;border-bottom:1px solid var(--line)}
 .currency-badge{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 10px;border-radius:6px;background:#eceee8;color:var(--muted);font-weight:700;font-size:.82rem}
 .amount-input{flex:1;min-height:auto;border:0;background:transparent;padding:0;font-size:1.9rem;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}
