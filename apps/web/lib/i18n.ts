@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 export type Language = "vi" | "en";
-const en = { transactions:"Transactions", accounts:"Accounts", categories:"Categories", assets:"Assets", data:"Data", review:"Review", portfolio:"Portfolio", title:"Personal Finance", eyebrow:"Local-first ledger", language:"Language" } as const;
-const vi = { transactions:"Giao dịch", accounts:"Tài khoản", categories:"Danh mục", assets:"Tài sản", data:"Dữ liệu", review:"Đối soát", portfolio:"Đầu tư", title:"Tài chính cá nhân", eyebrow:"Sổ cái lưu trữ cục bộ", language:"Ngôn ngữ" } as const;
+const en = { transactions:"Transactions", ledger:"Ledger", accounts:"Accounts", categories:"Categories", assets:"Assets", data:"Data", review:"Review", portfolio:"Portfolio", title:"Personal Finance", eyebrow:"Local-first ledger", language:"Language" } as const;
+const vi = { transactions:"Giao dịch", ledger:"Sổ giao dịch", accounts:"Tài khoản", categories:"Danh mục", assets:"Tài sản", data:"Dữ liệu", review:"Đối soát", portfolio:"Đầu tư", title:"Tài chính cá nhân", eyebrow:"Sổ cái lưu trữ cục bộ", language:"Ngôn ngữ" } as const;
 export const copy = { en, vi } as const;
 export const display = {
   en: (value: string) => value.replaceAll("_", " ").toLowerCase().replace(/^./, c => c.toUpperCase()),
@@ -33,6 +33,7 @@ const enUi = {
   , "Assets":"Assets", "Manage assets, investments, and net worth in one place.":"Manage assets, investments, and net worth in one place."
   , "Choose bank":"Choose bank", "Nickname (optional)":"Nickname (optional)", "Initial balance":"Initial balance", "Leave blank to use 99.99%":"Leave blank to use 99.99%", "Start date":"Start date", "End date":"End date", "All accounts":"All accounts", "Export filters":"Export filters"
   , "Exchange rate":"Exchange rate", "Exchange rate unavailable":"Exchange rate unavailable", "Loading exchange rate…":"Loading exchange rate…"
+  , "Ledger":"Ledger", "This month":"This month", "Last month":"Last month", "Future":"Future", "Opening balance":"Opening balance", "Closing balance":"Closing balance", "Net change":"Net change", "Duplicate":"Duplicate", "Add transaction":"Add transaction", "No transactions in this period.":"No transactions in this period.", "Choose an account to view its ledger.":"Choose an account to view its ledger.", "No accounts yet. Create one first.":"No accounts yet. Create one first.", "Select a transaction to see its details.":"Select a transaction to see its details.", "New transaction":"New transaction"
 } as const;
 export type UiKey = keyof typeof enUi;
 export const transactionUiKeys = {
@@ -58,6 +59,7 @@ const viUi: Record<string, string> = {
   , "Assets":"Tài sản", "Manage assets, investments, and net worth in one place.":"Quản lý tài sản, đầu tư và tài sản ròng tại một nơi."
   , "Choose bank":"Chọn ngân hàng", "Nickname (optional)":"Tên gợi nhớ (không bắt buộc)", "Initial balance":"Số dư ban đầu", "Leave blank to use 99.99%":"Để trống sẽ dùng 99,99%", "Start date":"Từ ngày", "End date":"Đến ngày", "All accounts":"Tất cả tài khoản", "Export filters":"Bộ lọc xuất dữ liệu"
   , "Exchange rate":"Tỷ giá", "Exchange rate unavailable":"Không lấy được tỷ giá", "Loading exchange rate…":"Đang tải tỷ giá…"
+  , "Ledger":"Sổ giao dịch", "This month":"Tháng này", "Last month":"Tháng trước", "Future":"Tương lai", "Opening balance":"Số dư đầu kỳ", "Closing balance":"Số dư cuối kỳ", "Net change":"Chênh lệch ròng", "Duplicate":"Sao chép", "Add transaction":"Thêm giao dịch", "No transactions in this period.":"Chưa có giao dịch trong kỳ này.", "Choose an account to view its ledger.":"Hãy chọn một tài khoản để xem sổ giao dịch.", "No accounts yet. Create one first.":"Chưa có tài khoản nào. Hãy tạo tài khoản trước.", "Select a transaction to see its details.":"Chọn một giao dịch để xem chi tiết.", "New transaction":"Giao dịch mới"
 };
 export function ui(language: Language, text: string): string {
   const extra: Record<string, string> = { "Search category":"Tìm danh mục", "Collapse":"Thu gọn", "Expand":"Mở rộng", "All":"Tất cả", "Expenses":"Chi tiêu", "Income":"Thu nhập", "None":"Không có danh mục cha", "Add child category":"Thêm danh mục con", "Other / Unclassified":"Khác / Chưa phân loại", "No categories found.":"Không tìm thấy danh mục" };

@@ -7,7 +7,7 @@ import { NAV, goToTab } from "./helpers";
 test.describe("mobile navigation (390px)", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("all 6 tabs are reachable and no horizontal page overflow", async ({ page }) => {
+  test("all 7 tabs are reachable and no horizontal page overflow", async ({ page }) => {
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: /điều hướng/i });
     for (const label of Object.values(NAV)) {

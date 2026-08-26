@@ -2,6 +2,7 @@ import { Page, expect } from "@playwright/test";
 
 export const NAV = {
   transactions: "Giao dịch",
+  ledger: "Sổ giao dịch",
   accounts: "Tài khoản",
   categories: "Danh mục",
   assets: "Tài sản",
@@ -63,6 +64,10 @@ export const VI = {
   addSavingsAccount: "Thêm sổ tiết kiệm",
   add: "Thêm",
   loadFailed: "Tải dữ liệu thất bại",
+  addTransaction: "Thêm giao dịch",
+  duplicate: "Sao chép",
+  thisMonth: "Tháng này",
+  currentBalance: "Số dư hiện tại",
 } as const;
 
 export async function expectNoConsoleErrors(page: Page, errors: string[]) {

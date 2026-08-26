@@ -9,7 +9,23 @@ import { CategoryIcon, IconGlyph, ICON_GROUPS, iconLabel } from "../lib/category
 import { bankCatalog, bankCategoryLabel, bankCategoryOrder } from "../lib/bank-catalog";
 import { AccountLogo } from "../lib/account-logos";
 
-type View = "transactions" | "accounts" | "categories" | "review" | "assets" | "data";
+type View = "transactions" | "ledger" | "accounts" | "categories" | "review" | "assets" | "data";
+// User request, 2026-08-26 (UI redesign to a Money-Lover-style layout):
+// the 6 original nav tabs plus the new "Sổ giao dịch" (Ledger) tab now live
+// in a vertical sidebar (see the <aside className="sidebar"> in Home())
+// instead of the old horizontal scrolling nav. This list controls both the
+// render order and each tab's icon; the accessible nav role/label and each
+// button's exact visible text (t[item]) are unchanged from before, so
+// e2e/helpers.ts's goToTab() keeps working without modification.
+const navItems: { view: View; icon: string }[] = [
+  { view: "transactions", icon: "Wallet" },
+  { view: "ledger", icon: "Book" },
+  { view: "accounts", icon: "CreditCard" },
+  { view: "categories", icon: "Grid" },
+  { view: "assets", icon: "PiggyBank" },
+  { view: "data", icon: "Folder" },
+  { view: "review", icon: "BarChart" },
+];
 type EntryDraft = { accountId: string; amount: string };
 const accountTypes: AccountType[] = ["CASH", "BANK", "CREDIT_CARD", "EWALLET"];
 // TASK-034: the composer only creates the four transaction types a person
@@ -57,7 +73,23 @@ export default function Home() {
   const [view, setView] = useState<View>("transactions");
   const [language, setLanguage] = useLanguage();
   const t = copy[language];
-  return <LanguageContext.Provider value={language}><main><header><div><p className="eyebrow">{t.eyebrow}</p><h1>{t.title}</h1></div><div className="header-tools"><div className="language" role="group" aria-label={t.language}><button type="button" aria-pressed={language === "vi"} className={language === "vi" ? "active" : ""} onClick={() => setLanguage("vi")}>🇻🇳 <span>Tiếng Việt</span></button><button type="button" aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>🇺🇸 <span>English</span></button></div><div className="nav-scroll"><nav aria-label={ui(language, "Main navigation")}>{(["transactions", "accounts", "categories", "assets", "data", "review"] as View[]).map(item => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} onClick={() => setView(item)} key={item}>{t[item as keyof typeof t] ?? item}</button>)}</nav></div></div></header>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "review" ? <Review /> : view === "assets" ? <Assets /> : view === "data" ? <DataPage /> : <Transactions />}</main></LanguageContext.Provider>;
+  // User request, 2026-08-26 (UI redesign): the eyebrow ("SỔ CÁI LƯU TRỮ
+  // CỤC BỘ") and h1 title ("Tài chính cá nhân") that used to open every
+  // page are gone -- the sidebar's own branding now stands in for both.
+  // The horizontal <nav> is now a vertical sidebar column (styled in
+  // styles.css's .sidebar rules) holding all 7 tabs (the new "Sổ giao
+  // dịch" tab is navItems' 2nd entry, see its definition above); the
+  // language switcher moves to a slim top bar next to the page content.
+  return <LanguageContext.Provider value={language}><div className="app-shell">
+    <aside className="sidebar">
+      <div className="sidebar-brand" aria-hidden="true"><IconGlyph iconKey="Wallet" size={24} /><span>{language === "vi" ? "Sổ cái" : "Ledger"}</span></div>
+      <nav aria-label={ui(language, "Main navigation")}>{navItems.map(({ view: item, icon }) => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} onClick={() => setView(item)} key={item}><span className="nav-icon" aria-hidden="true"><IconGlyph iconKey={icon} size={20} /></span><span>{t[item as keyof typeof t] ?? item}</span></button>)}</nav>
+    </aside>
+    <div className="app-content">
+      <header className="topbar"><div className="header-tools"><div className="language" role="group" aria-label={t.language}><button type="button" aria-pressed={language === "vi"} className={language === "vi" ? "active" : ""} onClick={() => setLanguage("vi")}>🇻🇳 <span>Tiếng Việt</span></button><button type="button" aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>🇺🇸 <span>English</span></button></div></div></header>
+      <main>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "review" ? <Review /> : view === "assets" ? <Assets /> : view === "data" ? <DataPage /> : view === "ledger" ? <Ledger /> : <Transactions />}</main>
+    </div>
+  </div></LanguageContext.Provider>;
 }
 
 function Assets() {
@@ -169,7 +201,7 @@ function Assets() {
     // always price * quantity (converting a USD price to VND first via the
     // live rate), computed by cryptoPurchaseTotals() above and shown
     // read-only so it can never drift from that formula.
-    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><input name="symbol" placeholder={tr("Coin code")} aria-label={tr("Coin code")} autoCapitalize="characters" required /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required value={cryptoQty} onChange={e => setCryptoQty(e.target.value)} /><div className="amount-row crypto-price-row"><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required value={cryptoPrice} onChange={e => setCryptoPrice(e.target.value)} /><select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select></div>{cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoney(fx.data.rate)} VND`}</p>}<input name="total" aria-label={tr("Total cost")} placeholder={tr("Total cost")} value={cryptoTotalsPreview ? fmtMoney(cryptoTotalsPreview.totalVnd) ?? "" : ""} readOnly disabled /><input name="date" type="date" required /><button className="primary" disabled={!cryptoTotalsPreview}>+ {tr("Add")}</button></form>,
+    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><input name="symbol" placeholder={tr("Coin code")} aria-label={tr("Coin code")} autoCapitalize="characters" required /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required value={cryptoQty} onChange={e => setCryptoQty(e.target.value)} /><div className="amount-row crypto-price-row"><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required value={cryptoPrice} onChange={e => setCryptoPrice(e.target.value)} /><select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select></div>{cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoneyDisplay(fx.data.rate)} VND`}</p>}<input name="total" aria-label={tr("Total cost")} placeholder={tr("Total cost")} value={cryptoTotalsPreview ? fmtMoneyDisplay(cryptoTotalsPreview.totalVnd) ?? "" : ""} readOnly disabled /><input name="date" type="date" required /><button className="primary" disabled={!cryptoTotalsPreview}>+ {tr("Add")}</button></form>,
   };
   const p = q.data;
   return <Section title="Assets" subtitle="Manage assets, investments, and net worth in one place.">
@@ -177,9 +209,9 @@ function Assets() {
     <Error error={q.error} />
     {p && <>
       <div className="portfolio-grid metrics-grid">
-        <article className="panel"><h3>{tr("Net worth")}</h3><p className="metric">{fmtMoney(p.net_worth) ?? tr("Valuation incomplete")}</p></article>
+        <article className="panel"><h3>{tr("Net worth")}</h3><p className="metric">{fmtMoneyDisplay(p.net_worth) ?? tr("Valuation incomplete")}</p></article>
         <article className="panel"><h3>{tr("Accounts in scope")}</h3><p className="metric">{p.account_count}</p></article>
-        <article className="panel"><h3>{tr("Invested assets")}</h3><p className="metric">{fmtMoney(p.invested_assets) ?? tr("Valuation incomplete")}</p></article>
+        <article className="panel"><h3>{tr("Invested assets")}</h3><p className="metric">{fmtMoneyDisplay(p.invested_assets) ?? tr("Valuation incomplete")}</p></article>
       </div>
       {!p.valuation_complete && <p className="quote-notice" role="status">{tr("Valuation incomplete: one or more invested assets has no usable quote.")}</p>}
     </>}
@@ -312,6 +344,35 @@ function fmtMoney(value: string | null | undefined): string | null | undefined {
   return sumMoney([value]);
 }
 
+// User request, 2026-08-26 ("Hiển thị số tiền hãy thêm mặc định dấu chấm
+// giữa 3 số, ví dụ 1000000 se được hiển thị là 1.000.000"): every money
+// amount shown as read-only DISPLAY text (KPIs, list rows, detail panels)
+// now groups whole-number digits with "." every 3 digits from the right.
+// This must never touch an editable amount <input>'s controlled value --
+// grouping punctuation fed back through the BigInt-based amount parsing in
+// submit()/sumMoney() would corrupt it -- so fmtMoney() itself is left
+// completely unchanged and still used as-is at every input-feeding call
+// site (AccountAdjustForm's target input, Transactions' startEdit()
+// pre-filling the composer). fmtMoneyDisplay() is a pure additional
+// formatting layer on top of fmtMoney(), applied only where the result is
+// rendered as plain text (or into a readOnly/disabled input used purely as
+// a visual echo, e.g. the crypto form's computed Total cost preview).
+function groupThousands(digits: string): string {
+  let out = "";
+  for (let i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 === 0) out += ".";
+    out += digits[i];
+  }
+  return out;
+}
+function fmtMoneyDisplay(value: string | null | undefined): string | null | undefined {
+  const normalized = fmtMoney(value);
+  if (normalized == null || normalized === "") return normalized;
+  const negative = normalized.startsWith("-");
+  const [whole, frac] = normalized.replace("-", "").split(".");
+  return `${negative ? "-" : ""}${groupThousands(whole)}${frac ? "," + frac : ""}`;
+}
+
 /** Bulk-fetch every account's balance under one query key, keyed off the id
  * set so it refetches when accounts are added/removed. Used wherever an
  * account list needs to show a live balance (Accounts page, credit-card
@@ -371,8 +432,8 @@ function SavingsPanel() {
   function refresh() { qc.invalidateQueries({ queryKey: ["savings"] }); qc.invalidateQueries({ queryKey: ["portfolio"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); }
   return <div className="savings-panel">
     <div className="savings-summary metrics-grid">
-      <article className="panel"><h3>{tr("Total principal")}</h3><p className="metric">{totalPrincipal || "0"}</p></article>
-      <article className="panel"><h3>{tr("Expected interest")}</h3><p className="metric">{totalExpectedInterest || "0"}</p></article>
+      <article className="panel"><h3>{tr("Total principal")}</h3><p className="metric">{fmtMoneyDisplay(totalPrincipal) || "0"}</p></article>
+      <article className="panel"><h3>{tr("Expected interest")}</h3><p className="metric">{fmtMoneyDisplay(totalExpectedInterest) || "0"}</p></article>
       <article className="panel"><h3>{tr("Accounts maturing soon")}</h3><p className="metric">{maturingSoonCount}</p></article>
     </div>
     <div className="savings-toolbar"><button type="button" className="primary" onClick={() => setCreateOpen(true)}>+ {tr("Add savings account")}</button></div>
@@ -384,7 +445,7 @@ function SavingsPanel() {
       return <button type="button" className="savings-card" key={row.id} onClick={() => setDetailId(row.id)}>
         <div className="savings-card-head"><strong>{row.institution}</strong><span className={`badge ${savingsStatusClass(status)}`}>{tr(status)}</span></div>
         <p className="savings-card-name">{row.name}</p>
-        <p className="savings-card-principal">{fmtMoney(row.principal)} {row.currency}</p>
+        <p className="savings-card-principal">{fmtMoneyDisplay(row.principal)} {row.currency}</p>
         {row.current_term && <p className="savings-card-rate">{tr("Interest rate")}: {row.current_term.annual_rate}%/năm · {row.current_term.term_months} {tr("months")}</p>}
         {row.current_term && <p className="savings-card-dates">{row.current_term.start_date} → {row.current_term.maturity_date}</p>}
         {row.current_term?.status === "ACTIVE" && row.current_term.days_to_maturity != null && <p className="savings-card-countdown">{row.current_term.days_to_maturity >= 0 ? `${tr("Remaining")} ${row.current_term.days_to_maturity} ${tr("days")}` : tr("Matured")}</p>}
@@ -465,13 +526,13 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
       <dl className="savings-detail-grid">
         <div><dt>{tr("Institution")}</dt><dd>{row.institution}</dd></div>
         <div><dt>{tr("Savings product")}</dt><dd>{row.product_name}</dd></div>
-        <div><dt>{tr("Current principal")}</dt><dd>{fmtMoney(row.principal)} {row.currency}</dd></div>
+        <div><dt>{tr("Current principal")}</dt><dd>{fmtMoneyDisplay(row.principal)} {row.currency}</dd></div>
         {term && <div><dt>{tr("Interest rate")}</dt><dd>{term.annual_rate}%/năm</dd></div>}
         {term && <div><dt>{tr("Deposit date")}</dt><dd>{term.start_date}</dd></div>}
         {term && <div><dt>{tr("Term (months)")}</dt><dd>{term.term_months}</dd></div>}
         {term && <div><dt>{tr("Maturity date")}</dt><dd>{term.maturity_date}</dd></div>}
-        {term && term.status === "ACTIVE" && <div><dt>{tr("Expected interest")}</dt><dd>{fmtMoney(term.expected_interest)}</dd></div>}
-        {term && term.status === "ACTIVE" && term.expected_interest && <div><dt>{tr("Projected value at maturity")}</dt><dd>{sumMoney([row.principal, term.expected_interest])}</dd></div>}
+        {term && term.status === "ACTIVE" && <div><dt>{tr("Expected interest")}</dt><dd>{fmtMoneyDisplay(term.expected_interest)}</dd></div>}
+        {term && term.status === "ACTIVE" && term.expected_interest && <div><dt>{tr("Projected value at maturity")}</dt><dd>{fmtMoneyDisplay(sumMoney([row.principal, term.expected_interest]))}</dd></div>}
         <div><dt>{tr("On maturity")}</dt><dd>{term ? label(term.maturity_action) : "—"}</dd></div>
         <div><dt>{tr("Notes")}</dt><dd>{row.notes || "—"}</dd></div>
       </dl>
@@ -486,9 +547,9 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
       <div className="savings-term-history">{(row.terms ?? []).map(t => <div className="savings-term-row" key={t.id}>
         <strong>{tr("Term")} {t.sequence}</strong>
         <span>{t.start_date} - {t.maturity_date}</span>
-        <span>{fmtMoney(t.principal)} {row.currency}</span>
+        <span>{fmtMoneyDisplay(t.principal)} {row.currency}</span>
         <span>{t.annual_rate}%/năm</span>
-        {t.actual_interest != null && <span>{tr("Actual interest received")}: {fmtMoney(t.actual_interest)}</span>}
+        {t.actual_interest != null && <span>{tr("Actual interest received")}: {fmtMoneyDisplay(t.actual_interest)}</span>}
         <span className={`badge ${t.status === "ACTIVE" ? "" : "muted"}`}>{label(t.status)}</span>
       </div>)}</div>
     </div>}
@@ -698,7 +759,7 @@ function Review() {
   return <Section title="Import & reconciliation review" subtitle="Persisted import batches and reconciliation candidates."><div className="review-grid"><article className="panel"><h3>{tr("Import batches")}</h3><Loading show={imports.isPending}/><Error error={imports.error}/><Empty show={!imports.isPending && imports.data?.length === 0} text="No import batches yet."/>{imports.data?.map(x => <div className="review-row" key={x.id}><div><strong>{x.original_filename}</strong><small>{x.source} · {x.row_count} {tr("rows")} · {x.applied_row_count >= x.row_count ? tr("Applied") : `${x.applied_row_count}/${x.row_count} ${tr("applied")}`}</small>{applyStatus[x.id] && <small className="hint">{applyStatus[x.id]}</small>}</div><div className="review-row-actions"><small>{x.imported_at}</small><button type="button" className="secondary" disabled={apply.isPending && apply.variables === x.id} onClick={() => apply.mutate(x.id)}>{apply.isPending && apply.variables === x.id ? tr("Applying...") : x.applied_row_count >= x.row_count ? tr("Re-apply") : tr("Apply")}</button></div></div>)}</article><article className="panel"><h3>{tr("Reconciliation candidates")}</h3><Loading show={reconciliation.isPending}/><Error error={reconciliation.error}/><Empty show={!reconciliation.isPending && reconciliation.data?.length === 0} text="No reconciliation candidates yet."/>{reconciliation.data?.map(x => <div className="review-row" key={x.id}><div><strong>{tr("Raw row")} #{x.source_row_number}</strong><small>{x.transaction_date} · {label(x.event_type)} · {tr("Event")} #{x.financial_event_id}</small></div><span className="badge warning">{label(x.state)}</span></div>)}</article></div></Section>;
 }
 
-function AssetSection({ title, rows }: { title: string; rows: import("../lib/api").PortfolioRow[] }) { const { label, tr } = useI18n(); return <article className="panel asset-panel"><h3>{tr(title)}</h3><Empty show={rows.length === 0} text={`No ${title.toLowerCase()} yet.`}/><div className="asset-list">{rows.map(row => <div className="asset-row" key={row.id}><div><strong>{row.name}</strong><small>{fmtMoney(row.value) ?? tr("Valuation unavailable")}</small></div>{row.quote && <div><span className="provider">{row.quote.provider ?? tr("No provider")}</span><span className="quote-state">{label(row.quote.state)}</span><small>{row.quote.quoted_at ?? tr("No quote timestamp")}</small></div>}</div>)}</div></article>; }
+function AssetSection({ title, rows }: { title: string; rows: import("../lib/api").PortfolioRow[] }) { const { label, tr } = useI18n(); return <article className="panel asset-panel"><h3>{tr(title)}</h3><Empty show={rows.length === 0} text={`No ${title.toLowerCase()} yet.`}/><div className="asset-list">{rows.map(row => <div className="asset-row" key={row.id}><div><strong>{row.name}</strong><small>{fmtMoneyDisplay(row.value) ?? tr("Valuation unavailable")}</small></div>{row.quote && <div><span className="provider">{row.quote.provider ?? tr("No provider")}</span><span className="quote-state">{label(row.quote.state)}</span><small>{row.quote.quoted_at ?? tr("No quote timestamp")}</small></div>}</div>)}</div></article>; }
 
 function Accounts() {
   const { label, tr } = useI18n();
@@ -727,7 +788,7 @@ function Accounts() {
     <div className="cards">{query.data?.map((x, i) => <article className={!x.is_active ? "inactive" : ""} key={x.id}>
       <div><span className="account-name"><AccountLogo name={x.name} accountType={x.account_type} /><strong>{x.name}</strong></span><Status active={x.is_active} /></div>
       <span>{label(x.account_type)} · {x.currency}</span>
-      <p className="account-balance">{tr("Current balance")}: <strong>{fmtMoney(balances.balances.get(x.id)) ?? (balances.isPending ? "…" : "—")}</strong></p>
+      <p className="account-balance">{tr("Current balance")}: <strong>{fmtMoneyDisplay(balances.balances.get(x.id)) ?? (balances.isPending ? "…" : "—")}</strong></p>
       <div className="card-actions">
         <button type="button" className="text-button" aria-label={tr("Move up")} disabled={move.isPending || i === 0} onClick={() => moveBy(i, -1)}>↑</button>
         <button type="button" className="text-button" aria-label={tr("Move down")} disabled={move.isPending || i === (query.data?.length ?? 0) - 1} onClick={() => moveBy(i, 1)}>↓</button>
@@ -837,9 +898,9 @@ function AccountAdjustForm({ account, currentBalance, onDone, onCancel }: { acco
   }
   return <form onSubmit={submit} className="form savings-form">
     <Error error={adjust.error} />
-    <p className="hint">{tr("Current balance")}: <strong>{fmtMoney(currentBalance)}</strong> {account.currency}</p>
+    <p className="hint">{tr("Current balance")}: <strong>{fmtMoneyDisplay(currentBalance)}</strong> {account.currency}</p>
     <Field label="New balance"><input inputMode="decimal" pattern="^-?\d+(\.\d{1,4})?$" value={target} onChange={e => setTarget(e.target.value)} required /></Field>
-    <p className="hint">{tr("Difference")}: <strong>{delta}</strong>{noChange && ` — ${tr("No change to save.")}`}</p>
+    <p className="hint">{tr("Difference")}: <strong>{fmtMoneyDisplay(delta)}</strong>{noChange && ` — ${tr("No change to save.")}`}</p>
     <Field label="Adjustment date"><input name="date" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
     <Field label="Notes"><input name="note" /></Field>
     <div className="form-actions"><Submit pending={adjust.isPending} text="Save changes" /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
@@ -1093,60 +1154,85 @@ function Transactions() {
   </div>;
   {/* TASK-037: 26px matches AccountLogo/CategoryIcon in the other .row-icon slots below (32px container, ~26px content) so every composer row reads at the same visual weight. */}
   const noteRow = <div className="note-row"><span className="row-icon" aria-hidden="true"><IconGlyph iconKey="Notebook" size={26} /></span><input name="note" placeholder={tr("Add a note")} defaultValue={editingEvent?.note ?? ""} className="note-input" /></div>;
-  return <Section title="Transactions" subtitle="Record events with exact signed decimal amounts; validation and balances remain on the server.">
-    {/* TASK-042: keying the form on the edit target forces React to remount
-        it (and its uncontrolled payee/trip/note inputs) whenever editingEvent
-        changes -- from null to an event when Edit is clicked, between two
-        different events, or back to null on cancel/save -- so those
-        inputs' defaultValue is re-applied instead of sticking to whatever
-        was typed for the previously-edited transaction. */}
-    <form onSubmit={submit} className="event-form composer" key={editingEvent ? `edit-${editingEvent.id}` : "new"}>
-      {editingEvent && <p className="hint editing-banner" role="status">{tr("Editing transaction")} #{editingEvent.id} · <button type="button" className="text-button" onClick={cancelEdit}>{tr("Cancel")}</button></p>}
-      <div className="type-row"><div className="segmented" role="group" aria-label={tr("Type")}>{composerEventTypes.map(x => <button type="button" className={type === x ? "active" : ""} onClick={() => changeType(x)} key={x}>{label(x)}</button>)}</div></div>
-      <div className="txn-card">
-        {type === "TRANSFER" ? <>
-          <AccountRow label="From account" accounts={activeAccounts} value={transferFrom} onChange={setTransferFrom} />
-          <AccountRow label="To account" accounts={activeAccounts} value={transferTo} onChange={setTransferTo} />
-          <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={transferAmount} onChange={e => setTransferAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
-          {formError && <p className="error" role="alert">{formError}</p>}
-        </> : type === "CREDIT_CARD_PAYMENT" ? <>
-          {creditCardAccounts.length === 0 ? <p className="hint">{tr("No credit card accounts available. Create one first.")}</p> : fundingAccounts.length === 0 ? <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p> : <>
-            <AccountRow label="Credit card" accounts={creditCardAccounts} value={cardAccountId} onChange={setCardAccountId} />
-            <AccountRow label="From account" accounts={fundingAccounts} value={fundingAccountId} onChange={setFundingAccountId} />
-            <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
-          </>}
-          {formError && <p className="error" role="alert">{formError}</p>}
-        </> : <>
-          <AccountRow label="Select account" accounts={activeAccounts} value={entries[0]?.accountId ?? ""} onChange={v => updateEntry(0, "accountId", v)} />
-          <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={entries[0]?.amount ?? ""} onChange={e => updateEntry(0, "amount", e.target.value)} inputMode="decimal" pattern={moneyPattern} placeholder="0" required /></div>
-          {formError && <p className="error" role="alert">{formError}</p>}
-        </>}
-        {/* BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): CategoryPicker's
-            expanded-node state used to be computed once at mount from whichever
-            root (Expenses/Income) was current then, so switching the composer's
-            Type after the picker had already mounted (e.g. Expense -> Income)
-            left the new root's children collapsed with no visual affordance
-            that a click was needed -- `key={type}` forces a remount so the
-            picker's default-expanded state is always derived from the type
-            that's actually selected. */}
-        {validCategories.length > 0 && <CategoryPicker key={type} categories={validCategories} selected={categoryId} onChange={setCategoryId} language={language} />}
-        {noteRow}
-        {dateRow}
+  // User request, 2026-08-26 (UI redesign): "Đưa danh sách các giao dịch
+  // sang góc bên phải, chỉ đưa 20 giao dịch gần nhất theo thời gian hoặc
+  // các giao dịch tương lai nếu có" -- the old full-width table of every
+  // transaction is gone from this page (the new "Sổ giao dịch"/Ledger page
+  // is where the full, filterable history now lives); this page's right
+  // column instead shows a short recency-ranked slice: if any transaction
+  // is dated after today, those future transactions are shown (soonest
+  // first) instead of history, otherwise the 20 most recent past/today
+  // transactions are shown (most recent first).
+  const todayStr = todayIso();
+  const allEvents = events.data ?? [];
+  const futureEvents = allEvents.filter(x => x.transaction_date > todayStr).sort((a, b) => a.transaction_date < b.transaction_date ? -1 : a.transaction_date > b.transaction_date ? 1 : a.id - b.id);
+  const recentEvents = futureEvents.length > 0
+    ? futureEvents.slice(0, 20)
+    : [...allEvents].sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id).slice(0, 20);
+  const showingFuture = futureEvents.length > 0;
+  return <section className="transactions-page">
+    <div className="transactions-layout">
+      <div className="transactions-composer-col">
+        {/* TASK-042: keying the form on the edit target forces React to remount
+            it (and its uncontrolled payee/trip/note inputs) whenever editingEvent
+            changes -- from null to an event when Edit is clicked, between two
+            different events, or back to null on cancel/save -- so those
+            inputs' defaultValue is re-applied instead of sticking to whatever
+            was typed for the previously-edited transaction. */}
+        <form onSubmit={submit} className="event-form composer" key={editingEvent ? `edit-${editingEvent.id}` : "new"}>
+          {editingEvent && <p className="hint editing-banner" role="status">{tr("Editing transaction")} #{editingEvent.id} · <button type="button" className="text-button" onClick={cancelEdit}>{tr("Cancel")}</button></p>}
+          <div className="type-row"><div className="segmented" role="group" aria-label={tr("Type")}>{composerEventTypes.map(x => <button type="button" className={type === x ? "active" : ""} onClick={() => changeType(x)} key={x}>{label(x)}</button>)}</div></div>
+          <div className="txn-card">
+            {type === "TRANSFER" ? <>
+              <AccountRow label="From account" accounts={activeAccounts} value={transferFrom} onChange={setTransferFrom} />
+              <AccountRow label="To account" accounts={activeAccounts} value={transferTo} onChange={setTransferTo} />
+              <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={transferAmount} onChange={e => setTransferAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
+              {formError && <p className="error" role="alert">{formError}</p>}
+            </> : type === "CREDIT_CARD_PAYMENT" ? <>
+              {creditCardAccounts.length === 0 ? <p className="hint">{tr("No credit card accounts available. Create one first.")}</p> : fundingAccounts.length === 0 ? <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p> : <>
+                <AccountRow label="Credit card" accounts={creditCardAccounts} value={cardAccountId} onChange={setCardAccountId} />
+                <AccountRow label="From account" accounts={fundingAccounts} value={fundingAccountId} onChange={setFundingAccountId} />
+                <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
+              </>}
+              {formError && <p className="error" role="alert">{formError}</p>}
+            </> : <>
+              <AccountRow label="Select account" accounts={activeAccounts} value={entries[0]?.accountId ?? ""} onChange={v => updateEntry(0, "accountId", v)} />
+              <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={entries[0]?.amount ?? ""} onChange={e => updateEntry(0, "amount", e.target.value)} inputMode="decimal" pattern={moneyPattern} placeholder="0" required /></div>
+              {formError && <p className="error" role="alert">{formError}</p>}
+            </>}
+            {/* BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): CategoryPicker's
+                expanded-node state used to be computed once at mount from whichever
+                root (Expenses/Income) was current then, so switching the composer's
+                Type after the picker had already mounted (e.g. Expense -> Income)
+                left the new root's children collapsed with no visual affordance
+                that a click was needed -- `key={type}` forces a remount so the
+                picker's default-expanded state is always derived from the type
+                that's actually selected. */}
+            {validCategories.length > 0 && <CategoryPicker key={type} categories={validCategories} selected={categoryId} onChange={setCategoryId} language={language} />}
+            {noteRow}
+            {dateRow}
+          </div>
+          <button type="button" className="secondary details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => !open)}>{detailsOpen ? tr("Hide details") : `+ ${tr("Add details")}`}</button>
+          {detailsOpen && <div className="form event-details"><Field label="Payee"><input name="payee" defaultValue={editingEvent?.payee_text ?? ""} /></Field><Field label="Trip / event"><input name="trip" defaultValue={editingEvent?.trip_event_text ?? ""} /></Field></div>}
+          <div className="form-actions"><Submit pending={mutation.isPending} text={editingEvent ? "Save changes" : "Record transaction"} />{editingEvent && <button type="button" className="secondary" onClick={cancelEdit}>{tr("Cancel")}</button>}</div>
+        </form>
+        <Error error={events.error ?? accounts.error ?? categories.error ?? mutation.error} />
       </div>
-      <button type="button" className="secondary details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => !open)}>{detailsOpen ? tr("Hide details") : `+ ${tr("Add details")}`}</button>
-      {detailsOpen && <div className="form event-details"><Field label="Payee"><input name="payee" defaultValue={editingEvent?.payee_text ?? ""} /></Field><Field label="Trip / event"><input name="trip" defaultValue={editingEvent?.trip_event_text ?? ""} /></Field></div>}
-      <div className="form-actions"><Submit pending={mutation.isPending} text={editingEvent ? "Save changes" : "Record transaction"} />{editingEvent && <button type="button" className="secondary" onClick={cancelEdit}>{tr("Cancel")}</button>}</div>
-    </form>
-    <Error error={events.error ?? accounts.error ?? categories.error ?? mutation.error} />
-    <Loading show={events.isPending || accounts.isPending || categories.isPending} />
-    <Empty show={!events.isPending && events.data?.length === 0} text="No transactions yet." />
-    <div className="table" role="table" aria-label={tr("Transactions")}>
-      <div className="row heading" role="row"><span>{tr("Date")}</span><span>{tr("Type")}</span><span>{tr("Details")}</span><span>{tr("Entries")}</span></div>
-      {/* TASK-042: "thiết kế thêm tính năng xem chi tiết..." -- each row
-          opens a details modal on click (mouse) or Enter/Space (keyboard);
-          tabIndex + onKeyDown make this reachable without a mouse since
-          the row itself carries the handler rather than a nested button. */}
-      {events.data?.map(x => <div className="row row-clickable" role="row" tabIndex={0} key={x.id} onClick={() => setDetailEvent(x)} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailEvent(x); } }}><span data-label={tr("Date")}>{x.transaction_date}</span><span data-label={tr("Type")}><span className="event-type">{label(x.event_type)}</span>{x.category_id && <small>{categoryNames.get(x.category_id) ?? `${tr("Category")} #${x.category_id}`}</small>}</span><span data-label={tr("Details")}>{x.payee_text ?? x.trip_event_text ?? x.note ?? tr("None")}</span><span data-label={tr("Entries")}>{x.entries.map(e => <span className="entry" key={e.id}><b>{fmtMoney(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</span>)}</span></div>)}
+      <aside className="transactions-recent-col">
+        <div className="panel recent-panel">
+          <h3>{showingFuture ? tr("Future") : tr("Transactions")}</h3>
+          <Loading show={events.isPending} />
+          <Empty show={!events.isPending && recentEvents.length === 0} text="No transactions yet." />
+          {/* TASK-042: same click-to-open-details behavior as the old full
+              table, just in a compact recency-ranked list instead of every
+              row -- tabIndex + onKeyDown keep it keyboard-reachable. */}
+          <div className="recent-list">{recentEvents.map(x => <div className="recent-row" tabIndex={0} key={x.id} onClick={() => setDetailEvent(x)} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailEvent(x); } }}>
+            <div className="recent-row-main"><span className="event-type">{label(x.event_type)}{x.category_id && <small> · {categoryNames.get(x.category_id) ?? `${tr("Category")} #${x.category_id}`}</small>}</span><small>{x.transaction_date}</small></div>
+            <div className="recent-row-detail"><small>{x.payee_text ?? x.trip_event_text ?? x.note ?? tr("None")}</small></div>
+            <div className="recent-row-entries">{x.entries.map(e => <span className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</span>)}</div>
+          </div>)}</div>
+        </div>
+      </aside>
     </div>
     {detailEvent && <TransactionDetailModal
       event={detailEvent}
@@ -1156,7 +1242,7 @@ function Transactions() {
       onClose={() => setDetailEvent(null)}
       onEdit={() => { const target = detailEvent; setDetailEvent(null); startEdit(target); }}
     />}
-  </Section>;
+  </section>;
 }
 
 /** TASK-042: read-only detail view for one transaction, plus Edit/Delete
@@ -1190,7 +1276,7 @@ function TransactionDetailModal({ event, accounts, categories, language, onClose
         {event.trip_event_text && <div><dt>{tr("Trip / event")}</dt><dd>{event.trip_event_text}</dd></div>}
         {event.note && <div><dt>{tr("Note")}</dt><dd>{event.note}</dd></div>}
       </dl>
-      <div className="detail-entries">{event.entries.map(e => <div className="entry" key={e.id}><b>{fmtMoney(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</div>)}</div>
+      <div className="detail-entries">{event.entries.map(e => <div className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</div>)}</div>
       <Error error={remove.error} />
       {editable ? <div className="form-actions">
         <button type="button" className="secondary" onClick={onEdit}>{tr("Edit")}</button>
@@ -1203,6 +1289,351 @@ function TransactionDetailModal({ event, accounts, categories, language, onClose
       </div> : <p className="hint">{tr("This transaction type is managed on its own page and can't be edited or deleted here.")}</p>}
     </div>
   </Modal>;
+}
+
+// User request, 2026-08-26 (UI redesign, new "Sổ giao dịch" page): splits a
+// TRANSFER/CREDIT_CARD_PAYMENT event's two entries into its negative
+// ("from"/funding) and positive ("to"/card) legs -- the same convention
+// Transactions()'s startEdit() already relies on to tell them apart, reused
+// here so LedgerComposerForm can pre-fill a duplicated transfer the same
+// way the composer's own Edit does.
+function splitTransferEntries(event: FinancialEvent) {
+  const negEntry = event.entries.find(e => e.amount.trim().startsWith("-")) ?? event.entries[0];
+  const posEntry = event.entries.find(e => e.id !== negEntry.id) ?? event.entries[1];
+  return { negEntry, posEntry };
+}
+
+/** User request, 2026-08-26 (UI redesign, new "Sổ giao dịch" page): the
+ * Ledger's floating "+ Thêm giao dịch" button and its detail panel's "Sao
+ * chép" (Duplicate) action both need a composer that always CREATES a new
+ * event (never edits one in place) -- Transactions()'s own composer is
+ * deliberately left untouched (it's the heavily-tested, existing create/
+ * edit flow for the Giao dịch page) rather than generalized to cover this
+ * too, to avoid any risk of regressing it. This is therefore an
+ * intentionally-duplicated, independent copy of that composer's markup and
+ * submit validation, adapted to: (a) always POST via api.events.create
+ * regardless of `duplicateFrom`, (b) default the account to whichever
+ * account the Ledger page currently has selected when there's nothing to
+ * duplicate, and (c) pre-fill every field (including the original date --
+ * user answer, 2026-08-26: "Mở lại form nhập, điền sẵn dữ liệu để xem/sửa
+ * trước khi lưu", i.e. duplicate copies everything for review, not just a
+ * blank form) from `duplicateFrom` when duplicating. */
+function LedgerComposerForm({ accounts, categories, defaultAccountId, duplicateFrom, onClose, onSaved }: {
+  accounts: Account[]; categories: Category[]; defaultAccountId: number; duplicateFrom: FinancialEvent | null; onClose: () => void; onSaved: () => void;
+}) {
+  const { label, language, tr } = useI18n();
+  const initial = duplicateFrom;
+  const isTransferLike = !!initial && (initial.event_type === "TRANSFER" || initial.event_type === "CREDIT_CARD_PAYMENT");
+  const initialTransfer = initial && isTransferLike ? splitTransferEntries(initial) : null;
+  const [type, setType] = useState<EventType>(initial && composerEventTypes.includes(initial.event_type) ? initial.event_type : "EXPENSE");
+  const [categoryId, setCategoryId] = useState(initial?.category_id != null ? String(initial.category_id) : "");
+  const [date, setDate] = useState(() => initial ? initial.transaction_date : todayIso());
+  const [entries, setEntries] = useState<EntryDraft[]>(() => {
+    if (initial && !isTransferLike) {
+      const entry = initial.entries[0];
+      return [{ accountId: String(entry.account_id), amount: fmtMoney(entry.amount.replace(/^-/, "")) ?? "" }];
+    }
+    return [{ accountId: String(defaultAccountId), amount: "" }];
+  });
+  const [transferFrom, setTransferFrom] = useState(initial?.event_type === "TRANSFER" && initialTransfer ? String(initialTransfer.negEntry.account_id) : "");
+  const [transferTo, setTransferTo] = useState(initial?.event_type === "TRANSFER" && initialTransfer ? String(initialTransfer.posEntry.account_id) : "");
+  const [transferAmount, setTransferAmount] = useState(initial?.event_type === "TRANSFER" && initialTransfer ? fmtMoney(initialTransfer.posEntry.amount.replace(/^-/, "")) ?? "" : "");
+  const [cardAccountId, setCardAccountId] = useState(initial?.event_type === "CREDIT_CARD_PAYMENT" && initialTransfer ? String(initialTransfer.posEntry.account_id) : "");
+  const [fundingAccountId, setFundingAccountId] = useState(initial?.event_type === "CREDIT_CARD_PAYMENT" && initialTransfer ? String(initialTransfer.negEntry.account_id) : "");
+  const [paymentAmount, setPaymentAmount] = useState(initial?.event_type === "CREDIT_CARD_PAYMENT" && initialTransfer ? fmtMoney(initialTransfer.posEntry.amount.replace(/^-/, "")) ?? "" : "");
+  const [detailsOpen, setDetailsOpen] = useState(Boolean(initial?.payee_text || initial?.trip_event_text));
+  const [formError, setFormError] = useState("");
+  const mutation = useMutation({ mutationFn: (input: EventInput) => api.events.create(input), onSuccess: onSaved });
+
+  function updateEntry(index: number, field: keyof EntryDraft, value: string) { setEntries(current => current.map((entry, i) => i === index ? { ...entry, [field]: value } : entry)); }
+  function changeType(next: EventType) { setType(next); setFormError(""); if (!categoryIsValidForEventType(next, categoryId, categories)) setCategoryId(""); }
+  const validCategories = categoriesForEventType(type, categories).filter(x => x.is_active);
+  const creditCardAccounts = accounts.filter(x => x.account_type === "CREDIT_CARD");
+  const fundingAccounts = accounts.filter(x => x.account_type !== "CREDIT_CARD");
+
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setFormError("");
+    const f = new FormData(e.currentTarget);
+    if (type === "TRANSFER" && (!transferFrom || !transferTo || transferFrom === transferTo)) { setFormError(tr("Choose two different accounts")); return; }
+    if (type === "CREDIT_CARD_PAYMENT" && (!cardAccountId || !fundingAccountId)) { setFormError(tr("Choose two different accounts")); return; }
+    if (type === "EXPENSE" || type === "INCOME") {
+      if (!entries[0]?.accountId) { setFormError(tr("Choose an account")); return; }
+      if (!entries[0]?.amount?.trim()) { setFormError(tr("Enter an amount")); return; }
+      if (validCategories.length > 0 && !categoryIsValidForEventType(type, categoryId, categories)) { setFormError(tr("Choose a category")); return; }
+    }
+    const submittedEntries = type === "TRANSFER"
+      ? [{ account_id: Number(transferFrom), amount: `-${transferAmount}` }, { account_id: Number(transferTo), amount: transferAmount }]
+      : type === "CREDIT_CARD_PAYMENT"
+      ? [{ account_id: Number(fundingAccountId), amount: `-${paymentAmount}` }, { account_id: Number(cardAccountId), amount: paymentAmount }]
+      : entries.map(entry => {
+          const magnitude = entry.amount.trim().replace(/^-/, "");
+          return { account_id: Number(entry.accountId), amount: type === "EXPENSE" ? negateMoney(magnitude) : magnitude };
+        });
+    mutation.mutate({ event_type: type, transaction_date: date, category_id: categoryIsValidForEventType(type, categoryId, categories) ? Number(categoryId) : null, payee_text: String(f.get("payee") ?? "").trim() || undefined, trip_event_text: String(f.get("trip") ?? "").trim() || undefined, note: String(f.get("note") ?? "").trim() || undefined, entries: submittedEntries });
+  }
+
+  const amountCurrency = (type === "TRANSFER" ? accounts.find(a => String(a.id) === transferFrom)
+    : type === "CREDIT_CARD_PAYMENT" ? accounts.find(a => String(a.id) === fundingAccountId)
+    : accounts.find(a => String(a.id) === entries[0]?.accountId))?.currency ?? "VND";
+  const dateRow = <div className="date-row">
+    <button type="button" className="date-nav" aria-label={tr("Previous day")} onClick={() => setDate(d => shiftIsoDate(d, -1))}>‹</button>
+    <label className="date-center">
+      <span>{formatIsoDateLabel(language, date)}</span>
+      <input type="date" aria-label={tr("Choose date")} value={date} onChange={e => setDate(e.target.value || todayIso())} required className="date-native" />
+    </label>
+    <button type="button" className="date-nav" aria-label={tr("Next day")} onClick={() => setDate(d => shiftIsoDate(d, 1))}>›</button>
+  </div>;
+  const noteRow = <div className="note-row"><span className="row-icon" aria-hidden="true"><IconGlyph iconKey="Notebook" size={26} /></span><input name="note" placeholder={tr("Add a note")} defaultValue={initial?.note ?? ""} className="note-input" /></div>;
+
+  return <form onSubmit={submit} className="event-form composer">
+    <div className="type-row"><div className="segmented" role="group" aria-label={tr("Type")}>{composerEventTypes.map(x => <button type="button" className={type === x ? "active" : ""} onClick={() => changeType(x)} key={x}>{label(x)}</button>)}</div></div>
+    <div className="txn-card">
+      {type === "TRANSFER" ? <>
+        <AccountRow label="From account" accounts={accounts} value={transferFrom} onChange={setTransferFrom} />
+        <AccountRow label="To account" accounts={accounts} value={transferTo} onChange={setTransferTo} />
+        <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={transferAmount} onChange={e => setTransferAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
+        {formError && <p className="error" role="alert">{formError}</p>}
+      </> : type === "CREDIT_CARD_PAYMENT" ? <>
+        {creditCardAccounts.length === 0 ? <p className="hint">{tr("No credit card accounts available. Create one first.")}</p> : fundingAccounts.length === 0 ? <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p> : <>
+          <AccountRow label="Credit card" accounts={creditCardAccounts} value={cardAccountId} onChange={setCardAccountId} />
+          <AccountRow label="From account" accounts={fundingAccounts} value={fundingAccountId} onChange={setFundingAccountId} />
+          <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
+        </>}
+        {formError && <p className="error" role="alert">{formError}</p>}
+      </> : <>
+        <AccountRow label="Select account" accounts={accounts} value={entries[0]?.accountId ?? ""} onChange={v => updateEntry(0, "accountId", v)} />
+        <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={entries[0]?.amount ?? ""} onChange={e => updateEntry(0, "amount", e.target.value)} inputMode="decimal" pattern={moneyPattern} placeholder="0" required /></div>
+        {formError && <p className="error" role="alert">{formError}</p>}
+      </>}
+      {validCategories.length > 0 && <CategoryPicker key={type} categories={validCategories} selected={categoryId} onChange={setCategoryId} language={language} />}
+      {noteRow}
+      {dateRow}
+    </div>
+    <button type="button" className="secondary details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => !open)}>{detailsOpen ? tr("Hide details") : `+ ${tr("Add details")}`}</button>
+    {detailsOpen && <div className="form event-details"><Field label="Payee"><input name="payee" defaultValue={initial?.payee_text ?? ""} /></Field><Field label="Trip / event"><input name="trip" defaultValue={initial?.trip_event_text ?? ""} /></Field></div>}
+    <Error error={mutation.error} />
+    <div className="form-actions"><Submit pending={mutation.isPending} text="Record transaction" /><button type="button" className="secondary" onClick={onClose}>{tr("Cancel")}</button></div>
+  </form>;
+}
+
+/** User request, 2026-08-26 (UI redesign, new "Sổ giao dịch" page): the
+ * inline right-side detail panel for a transaction selected in the ledger
+ * list -- deliberately a plain panel, not the <Modal>-wrapped
+ * TransactionDetailModal above, since the reference layout shows details
+ * beside the list rather than over it. Offers "Sao chép" (Duplicate, per
+ * the user's own answer: reopens the composer pre-filled for review rather
+ * than saving instantly) and "Xóa giao dịch" (Delete) for the same
+ * composer-owned event types TransactionDetailModal already restricts
+ * Edit/Delete to -- everything else (ADJUSTMENT, INTEREST, SAVINGS_*,
+ * ASSET_*) is read-only here too, for the same reason. */
+function LedgerDetailPanel({ event, accountNames, categories, language, onDuplicate, onDeleted }: {
+  event: FinancialEvent; accountNames: Map<number, string>; categories: Category[]; language: Language; onDuplicate: () => void; onDeleted: () => void;
+}) {
+  const { label, tr } = useI18n();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const remove = useMutation({ mutationFn: () => api.events.remove(event.id), onSuccess: onDeleted });
+  const editable = composerEventTypes.includes(event.event_type);
+  const category = categories.find(c => c.id === event.category_id);
+  return <div className="ledger-detail-panel">
+    <h3>{tr("Transaction details")}</h3>
+    <dl className="detail-grid">
+      <div><dt>{tr("Date")}</dt><dd>{formatIsoDateLabel(language, event.transaction_date)}</dd></div>
+      <div><dt>{tr("Type")}</dt><dd>{label(event.event_type)}</dd></div>
+      {category && <div><dt>{tr("Category")}</dt><dd>{categoryPath(category, categories, n => categoryLabel(language, n))}</dd></div>}
+      {event.payee_text && <div><dt>{tr("Payee")}</dt><dd>{event.payee_text}</dd></div>}
+      {event.trip_event_text && <div><dt>{tr("Trip / event")}</dt><dd>{event.trip_event_text}</dd></div>}
+      {event.note && <div><dt>{tr("Note")}</dt><dd>{event.note}</dd></div>}
+    </dl>
+    <div className="detail-entries">{event.entries.map(e => <div className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</div>)}</div>
+    <Error error={remove.error} />
+    {editable ? <div className="form-actions">
+      <button type="button" className="secondary" onClick={onDuplicate}>{tr("Duplicate")}</button>
+      {!confirmingDelete
+        ? <button type="button" className="text-button danger" onClick={() => setConfirmingDelete(true)}>{tr("Delete")}</button>
+        : <>
+          <button type="button" className="text-button danger" disabled={remove.isPending} onClick={() => remove.mutate()}>{remove.isPending ? tr("Deleting...") : tr("Confirm delete")}</button>
+          <button type="button" className="text-button" onClick={() => setConfirmingDelete(false)}>{tr("Cancel")}</button>
+        </>}
+    </div> : <p className="hint">{tr("This transaction type is managed on its own page and can't be edited or deleted here.")}</p>}
+  </div>;
+}
+
+/** User request, 2026-08-26 (UI redesign): the new "Sổ giao dịch" page --
+ * an account switcher + live balance header, a horizontally-scrolling row
+ * of auto-generated month tabs (earliest transaction month for the
+ * selected account through this month, plus a "TƯƠNG LAI" bucket when
+ * future-dated transactions exist), a period summary (opening/closing/net,
+ * computed client-side from the already-fetched event list -- no new
+ * backend endpoint), a transaction list grouped by day with per-day
+ * subtotals, a right-side detail panel, and a floating "+ Thêm giao dịch"
+ * button. Deliberately skips the reference image's "Xem báo cáo cho giai
+ * đoạn này" link per the user's own instruction to leave it out of this
+ * pass. */
+function Ledger() {
+  const { label, language, tr } = useI18n();
+  const qc = useQueryClient();
+  const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
+  const eventsQ = useQuery({ queryKey: ["events"], queryFn: api.events.list });
+  const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
+  const activeAccounts = (accountsQ.data ?? []).filter(a => a.is_active);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
+  const [detailEventId, setDetailEventId] = useState<number | null>(null);
+  const [composerOpen, setComposerOpen] = useState<"new" | "duplicate" | null>(null);
+
+  // User answer (AskUserQuestion, 2026-08-26): default selected account =
+  // "Tài khoản đầu tiên theo thứ tự sắp xếp hiện có (giống trang Tài
+  // khoản)" -- accounts.list() is already returned in sort_order (see
+  // Accounts(), which renders query.data in API order with no client
+  // sort), so the first active account in that order is the default.
+  useEffect(() => {
+    if (selectedAccountId == null && activeAccounts.length > 0) setSelectedAccountId(activeAccounts[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAccounts.length, selectedAccountId]);
+
+  const balanceQ = useQuery({
+    queryKey: ["account-balance", selectedAccountId],
+    queryFn: () => api.accounts.balance(selectedAccountId as number),
+    enabled: selectedAccountId != null,
+  });
+
+  const accountEvents = selectedAccountId == null ? [] : (eventsQ.data ?? []).filter(e => e.entries.some(en => en.account_id === selectedAccountId));
+  function entryAmountFor(event: FinancialEvent): string {
+    const entry = event.entries.find(e => e.account_id === selectedAccountId);
+    return entry ? entry.amount : "0";
+  }
+
+  const todayStr = todayIso();
+  const hasFuture = accountEvents.some(e => e.transaction_date > todayStr);
+  const currentMonthKey = todayStr.slice(0, 7);
+  const pastEvents = accountEvents.filter(e => e.transaction_date <= todayStr);
+  const earliestMonthKey = pastEvents.length > 0
+    ? pastEvents.reduce((min, e) => e.transaction_date.slice(0, 7) < min ? e.transaction_date.slice(0, 7) : min, currentMonthKey)
+    : currentMonthKey;
+
+  function shiftMonthKey(key: string, delta: number): string {
+    const [y, m] = key.split("-").map(Number);
+    const total = (m - 1) + delta;
+    const year = y + Math.floor(total / 12);
+    const month = ((total % 12) + 12) % 12;
+    return `${year}-${String(month + 1).padStart(2, "0")}`;
+  }
+  // User answer (AskUserQuestion, 2026-08-26): "Danh sách tháng cuộn ngang,
+  // tự sinh từ tháng có giao dịch sớm nhất tới nay" -- guard bounds the
+  // generation loop against a corrupt/garbage transaction_date ever
+  // causing it to run away; any real account's history is far short of
+  // 1200 months.
+  const months: string[] = [];
+  for (let key = earliestMonthKey, guard = 0; key <= currentMonthKey && guard < 1200; key = shiftMonthKey(key, 1), guard++) {
+    months.push(key);
+  }
+  const lastMonthKey = shiftMonthKey(currentMonthKey, -1);
+  function monthLabel(key: string): string {
+    if (key === currentMonthKey) return tr("This month");
+    if (key === lastMonthKey) return tr("Last month");
+    const [y, m] = key.split("-");
+    return `${m}/${y}`;
+  }
+
+  // Defaults to (and resets to, on every account switch) the current month
+  // -- there's no user instruction covering what should happen to the
+  // month selection when the account changes, and carrying over a
+  // selection that might not even exist in the new account's month list
+  // would be worse than this simple, predictable reset.
+  useEffect(() => { setSelectedMonthKey(currentMonthKey); }, [selectedAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activeMonthKey = selectedMonthKey ?? currentMonthKey;
+  const isFutureBucket = activeMonthKey === "FUTURE";
+  const periodStart = isFutureBucket ? shiftIsoDate(todayStr, 1) : `${activeMonthKey}-01`;
+  const periodEnd = isFutureBucket
+    ? accountEvents.reduce((max, e) => e.transaction_date > max ? e.transaction_date : max, periodStart)
+    : (() => { const [y, m] = activeMonthKey.split("-").map(Number); return new Date(y, m, 0).toISOString().slice(0, 10); })();
+
+  function balanceAsOf(cutoffIso: string): string {
+    return sumMoney(accountEvents.filter(e => e.transaction_date <= cutoffIso).map(e => entryAmountFor(e)));
+  }
+  const openingBalance = balanceAsOf(shiftIsoDate(periodStart, -1));
+  const closingBalance = balanceAsOf(periodEnd);
+  const netChange = sumMoney([closingBalance, negateMoney(openingBalance)]);
+
+  const periodEvents = accountEvents
+    .filter(e => e.transaction_date >= periodStart && e.transaction_date <= periodEnd)
+    .sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id);
+  const groupedByDay = new Map<string, FinancialEvent[]>();
+  for (const e of periodEvents) {
+    const list = groupedByDay.get(e.transaction_date) ?? [];
+    list.push(e);
+    groupedByDay.set(e.transaction_date, list);
+  }
+
+  const categoryNames = new Map((categoriesQ.data ?? []).map(x => [x.id, categoryLabel(language, x.name)]));
+  const accountNames = new Map((accountsQ.data ?? []).map(x => [x.id, x.name]));
+  const detailEvent = detailEventId != null ? (eventsQ.data ?? []).find(e => e.id === detailEventId) ?? null : null;
+
+  function refresh() {
+    qc.invalidateQueries({ queryKey: ["events"] });
+    qc.invalidateQueries({ queryKey: ["account-balance"] });
+    qc.invalidateQueries({ queryKey: ["account-balances"] });
+    qc.invalidateQueries({ queryKey: ["portfolio"] });
+  }
+
+  if (accountsQ.isPending) return <section className="ledger-page"><Loading show /></section>;
+  if (!accountsQ.isPending && (accountsQ.data ?? []).length === 0) return <section className="ledger-page"><Empty show text="No accounts yet. Create one first." /></section>;
+
+  return <section className="ledger-page">
+    <div className="ledger-header">
+      <AccountRow label="Select account" accounts={activeAccounts} value={selectedAccountId != null ? String(selectedAccountId) : ""} onChange={v => setSelectedAccountId(Number(v))} />
+      <div className="ledger-balance"><span>{tr("Current balance")}</span><strong>{fmtMoneyDisplay(balanceQ.data?.balance) ?? (balanceQ.isPending ? "…" : "—")}</strong></div>
+    </div>
+    <div className="ledger-months" role="tablist">
+      {months.map(key => <button type="button" role="tab" aria-selected={activeMonthKey === key} className={activeMonthKey === key ? "active" : ""} onClick={() => setSelectedMonthKey(key)} key={key}>{monthLabel(key)}</button>)}
+      {hasFuture && <button type="button" role="tab" aria-selected={isFutureBucket} className={isFutureBucket ? "active" : ""} onClick={() => setSelectedMonthKey("FUTURE")}>{tr("Future")}</button>}
+    </div>
+    <div className="ledger-summary">
+      <div><span>{tr("Opening balance")}</span><strong>{fmtMoneyDisplay(openingBalance)}</strong></div>
+      <div><span>{tr("Closing balance")}</span><strong>{fmtMoneyDisplay(closingBalance)}</strong></div>
+      <div><span>{tr("Net change")}</span><strong className={netChange.startsWith("-") ? "negative" : "positive"}>{fmtMoneyDisplay(netChange)}</strong></div>
+    </div>
+    <div className="ledger-body">
+      <div className="ledger-list">
+        <Loading show={eventsQ.isPending} />
+        <Empty show={!eventsQ.isPending && periodEvents.length === 0} text="No transactions in this period." />
+        {[...groupedByDay.entries()].map(([dateIso, dayEvents]) => {
+          const daySubtotal = sumMoney(dayEvents.map(e => entryAmountFor(e)));
+          return <div className="ledger-day" key={dateIso}>
+            <div className="ledger-day-heading"><span>{formatIsoDateLabel(language, dateIso)}</span><b className={daySubtotal.startsWith("-") ? "negative" : "positive"}>{fmtMoneyDisplay(daySubtotal)}</b></div>
+            {dayEvents.map(e => <div className={`ledger-row${detailEventId === e.id ? " selected" : ""}`} tabIndex={0} key={e.id} onClick={() => setDetailEventId(e.id)} onKeyDown={ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setDetailEventId(e.id); } }}>
+              <span className="event-type">{label(e.event_type)}{e.category_id && <small> · {categoryNames.get(e.category_id) ?? `${tr("Category")} #${e.category_id}`}</small>}</span>
+              <small>{e.payee_text ?? e.trip_event_text ?? e.note ?? tr("None")}</small>
+              <b className={entryAmountFor(e).startsWith("-") ? "negative" : "positive"}>{fmtMoneyDisplay(entryAmountFor(e))}</b>
+            </div>)}
+          </div>;
+        })}
+      </div>
+      <aside className="ledger-detail">
+        {detailEvent ? <LedgerDetailPanel
+          event={detailEvent}
+          accountNames={accountNames}
+          categories={categoriesQ.data ?? []}
+          language={language}
+          onDuplicate={() => setComposerOpen("duplicate")}
+          onDeleted={() => { setDetailEventId(null); refresh(); }}
+        /> : <p className="hint">{tr("Select a transaction to see its details.")}</p>}
+      </aside>
+    </div>
+    <button type="button" className="ledger-fab" onClick={() => setComposerOpen("new")}>+ {tr("Add transaction")}</button>
+    {composerOpen && selectedAccountId != null && <Modal title={composerOpen === "duplicate" ? "New transaction" : "Add transaction"} onClose={() => setComposerOpen(null)}>
+      <LedgerComposerForm
+        accounts={activeAccounts}
+        categories={categoriesQ.data ?? []}
+        defaultAccountId={selectedAccountId}
+        duplicateFrom={composerOpen === "duplicate" ? detailEvent : null}
+        onClose={() => setComposerOpen(null)}
+        onSaved={() => { setComposerOpen(null); refresh(); }}
+      />
+    </Modal>}
+  </section>;
 }
 
 /** TASK-036: a tappable row (icon + name + chevron) that opens a popover

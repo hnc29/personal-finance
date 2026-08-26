@@ -133,8 +133,11 @@ test.describe.serial("crypto: purchase price in VND or USD auto-computes the tot
     await page.locator('input[name="quantity"]').fill("2");
     await page.locator('input[name="price"]').fill("50000000");
     // Total cost is now a read-only field driven by cryptoPurchaseTotals(),
-    // not user input -- 2 * 50,000,000 = 100,000,000.
-    await expect(page.locator('input[name="total"]')).toHaveValue("100000000");
+    // not user input -- 2 * 50,000,000 = 100,000,000. UI redesign,
+    // 2026-08-26: this display value now goes through fmtMoneyDisplay too
+    // (it's a readOnly/disabled echo field, not an editable input), so it
+    // renders with "." thousand separators.
+    await expect(page.locator('input[name="total"]')).toHaveValue("100.000.000");
     await page.locator('input[name="date"]').fill("2026-08-20");
     await page.locator(".asset-form button.primary").click();
 
@@ -160,10 +163,11 @@ test.describe.serial("crypto: purchase price in VND or USD auto-computes the tot
     await page.locator('input[name="price"]').fill("100");
     await page.locator('select[name="purchase_currency"]').selectOption("USD");
 
-    // The live rate is shown so the conversion isn't a black box.
-    await expect(page.getByText("1 USD ≈ 26000 VND")).toBeVisible();
+    // The live rate is shown so the conversion isn't a black box. UI
+    // redesign, 2026-08-26: fmtMoneyDisplay now groups this too.
+    await expect(page.getByText("1 USD ≈ 26.000 VND")).toBeVisible();
     // 100 USD/unit * 26000 = 2,600,000 VND/unit; total = 2,600,000 * 1.
-    await expect(page.locator('input[name="total"]')).toHaveValue("2600000");
+    await expect(page.locator('input[name="total"]')).toHaveValue("2.600.000");
 
     await page.locator('input[name="date"]').fill("2026-08-20");
     await page.locator(".asset-form button.primary").click();
@@ -198,7 +202,8 @@ test.describe.serial("crypto: purchase price in VND or USD auto-computes the tot
     await expect(page.locator(".asset-form button.primary")).toBeDisabled();
 
     releaseFx();
-    await expect(page.getByText("1 USD ≈ 26000 VND")).toBeVisible();
+    // UI redesign, 2026-08-26: fmtMoneyDisplay groups this too.
+    await expect(page.getByText("1 USD ≈ 26.000 VND")).toBeVisible();
     await expect(page.locator(".asset-form button.primary")).toBeEnabled();
   });
 });

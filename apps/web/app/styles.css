@@ -105,3 +105,83 @@ fieldset { margin:0; min-width:0 } legend { padding:0 5px }.hint { color:var(--m
 .icon-swatch:hover{background:#f0f4f0}
 .icon-swatch.selected{border-color:#238b57;background:#eaf7ef}
 @media (max-width:560px){.amount-input{font-size:1.5rem}}
+
+/* User request, 2026-08-26 (UI redesign to a Money-Lover-style layout):
+   the old top eyebrow/title header + horizontal scrolling nav become a
+   left sidebar (branding + vertical nav) alongside the page content; a
+   slim top bar holds just the language switcher now. `.sidebar nav`/
+   `.sidebar nav button` intentionally out-specificity the older bare
+   `nav`/`nav button` rules above (still used nowhere now that Home() no
+   longer renders `.nav-scroll`, but left in place -- harmless) so this
+   sidebar doesn't inherit their horizontal-pill styling. */
+.app-shell{display:flex;align-items:stretch;min-height:100vh}
+.sidebar{flex:0 0 232px;display:flex;flex-direction:column;gap:4px;padding:22px 14px;background:#0f2a20}
+.sidebar-brand{display:flex;align-items:center;gap:10px;padding:6px 10px 22px;color:#fff;font-family:Georgia,serif;font-size:1.15rem;font-weight:600}
+.sidebar nav{display:flex;flex-direction:column;gap:2px;background:transparent;padding:0;border-radius:0;overflow:visible}
+.sidebar nav button{display:flex;align-items:center;gap:12px;justify-content:flex-start;text-align:left;padding:11px 12px;border-radius:10px;color:#cbdccf;text-transform:none;white-space:normal;font-size:.92rem}
+.sidebar nav button:hover{background:#173c2c}
+.sidebar nav button.active{background:var(--accent);color:#fff}
+.nav-icon{flex:0 0 auto;display:inline-flex}
+.app-content{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{border-bottom:0;padding:14px 28px 0;justify-content:flex-end}
+.topbar .language{margin-bottom:0}
+.app-content main{max-width:none;margin:0;padding:18px 28px 64px}
+@media (max-width:960px){
+  .app-shell{flex-direction:column}
+  .sidebar{flex:0 0 auto;flex-direction:row;align-items:center;gap:10px;padding:10px 14px;position:relative}
+  .sidebar-brand{padding:0 10px 0 0}
+  .sidebar nav{flex-direction:row;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;min-width:0}
+  .sidebar nav::-webkit-scrollbar{display:none}
+  .sidebar nav button{flex:0 0 auto;white-space:nowrap;padding:9px 12px}
+  .app-content main{padding:18px 16px 48px}
+  .topbar{padding:12px 16px 0}
+}
+
+/* Transactions page: composer stays where it was, but the full history
+   table is replaced by a compact "20 most recent (or future) transactions"
+   panel in the right column -- see Transactions()'s recentEvents. */
+.transactions-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,380px);gap:24px;align-items:start}
+.transactions-composer-col,.transactions-recent-col{min-width:0}
+.recent-panel{padding:18px}
+.recent-list{display:flex;flex-direction:column;gap:2px;margin-top:10px}
+.recent-row{display:flex;flex-direction:column;gap:4px;padding:12px 6px;border-bottom:1px solid var(--line);cursor:pointer;border-radius:8px}
+.recent-row:last-child{border-bottom:0}
+.recent-row:hover,.recent-row:focus-visible{background:#f7f6ef}
+.recent-row-main{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.recent-row-main small{color:var(--muted);flex:0 0 auto}
+.recent-row-detail small{color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-row-entries{display:flex;flex-direction:column;gap:2px}
+@media (max-width:1024px){.transactions-layout{grid-template-columns:1fr}}
+
+/* New "Sổ giao dịch" (Ledger) page. */
+.ledger-page{display:flex;flex-direction:column;gap:16px;padding-bottom:80px;position:relative}
+.ledger-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:8px 18px;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+.ledger-header .row-picker{flex:1;max-width:320px;border-bottom:0}
+.ledger-balance{text-align:right}
+.ledger-balance span{display:block;color:var(--muted);font-size:.76rem;font-weight:700;text-transform:uppercase}
+.ledger-balance strong{font-size:1.4rem;font-variant-numeric:tabular-nums}
+.ledger-months{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+.ledger-months::-webkit-scrollbar{display:none}
+.ledger-months button{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--muted);padding:8px 14px;border-radius:999px;font-size:.78rem;font-weight:700;text-transform:uppercase;white-space:nowrap}
+.ledger-months button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.ledger-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.ledger-summary>div{padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.ledger-summary span{display:block;color:var(--muted);font-size:.74rem;font-weight:700;text-transform:uppercase}
+.ledger-summary strong{display:block;margin-top:4px;font-size:1.15rem;font-variant-numeric:tabular-nums}
+.positive{color:var(--positive)}
+.negative{color:var(--negative)}
+.ledger-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,360px);gap:16px;align-items:start}
+.ledger-list{display:flex;flex-direction:column;gap:14px;min-width:0}
+.ledger-day{border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
+.ledger-day-heading{display:flex;justify-content:space-between;padding:10px 14px;background:#eceee8;font-size:.8rem;font-weight:700}
+.ledger-row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-top:1px solid var(--line);cursor:pointer}
+.ledger-row:hover,.ledger-row:focus-visible,.ledger-row.selected{background:#f7f6ef}
+.ledger-row .event-type{flex:0 0 auto;font-weight:650;min-width:88px}
+.ledger-row small{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.ledger-row b{flex:0 0 auto;font-variant-numeric:tabular-nums}
+.ledger-detail{position:sticky;top:16px;min-width:0}
+.ledger-detail-panel{padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+.ledger-detail-panel h3{font-family:Georgia,serif;font-size:1.2rem;font-weight:500;margin-bottom:14px}
+.ledger-fab{position:fixed;right:32px;bottom:32px;z-index:10;border:0;border-radius:999px;padding:14px 22px;background:var(--accent);color:#fff;font-weight:700;box-shadow:0 14px 30px #183b2640}
+@media (max-width:960px){.ledger-body{grid-template-columns:1fr}.ledger-detail{position:static}}
+@media (max-width:560px){.ledger-header{flex-direction:column;align-items:stretch}.ledger-balance{text-align:left}.ledger-summary{grid-template-columns:1fr}.ledger-fab{right:16px;bottom:16px;padding:12px 18px}}

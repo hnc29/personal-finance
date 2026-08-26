@@ -75,10 +75,12 @@ test.describe.serial("transactions: add / edit / delete / persistence", () => {
     await page.getByText("E2E-CRUD-INCOME-1").click();
     await page.getByRole("button", { name: VI.delete }).click();
     await page.getByRole("button", { name: VI.confirmDelete }).click();
-    // Scope to the transaction table row specifically: right after delete,
-    // the closing detail modal can still be mid-transition, and matching
-    // plain text would hit both the row and the modal's own copy of it.
-    await expect(page.locator(".table .row-clickable", { hasText: "E2E-CRUD-INCOME-1" })).toHaveCount(0);
+    // Scope to the recent-transactions widget's row specifically (UI
+    // redesign, 2026-08-26: the old full `.table` was replaced by the
+    // right-column "20 most recent" list, see Transactions()): right after
+    // delete, the closing detail modal can still be mid-transition, and
+    // matching plain text would hit both the row and the modal's own copy.
+    await expect(page.locator(".recent-row", { hasText: "E2E-CRUD-INCOME-1" })).toHaveCount(0);
 
     const event = await findEventByNote(request, "E2E-CRUD-INCOME-1");
     expect(event).toBeFalsy();

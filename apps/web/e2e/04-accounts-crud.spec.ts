@@ -62,6 +62,9 @@ test.describe.serial("accounts: bank account with a strict bank list + initial b
 
     const card = page.locator("article").filter({ has: page.getByText("Vietcombank (E2E Lương)", { exact: true }) });
     await expect(card).toBeVisible();
-    await expect(card.getByText(/Số dư hiện tại:\s*15000000/)).toBeVisible();
+    // UI redesign, 2026-08-26: money now displays with "." thousand
+    // separators (fmtMoneyDisplay -- see docs/qa/QA_STATE.md), so
+    // 15000000 renders as "15.000.000".
+    await expect(card.getByText(/Số dư hiện tại:\s*15\.000\.000/)).toBeVisible();
   });
 });
