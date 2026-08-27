@@ -29,10 +29,19 @@ class UrllibResponse:
 
 
 class UrllibHttpClient:
-    """Stdlib-only GET client; matches the ``get(url, params=, timeout=)`` shape."""
+    """Stdlib-only GET client; matches the ``get(url, params=, timeout=)`` shape.
+
+    ``params`` defaults to ``None`` (treated the same as no query string) --
+    the metal price adapters (``metal_price_adapters.py``) call
+    ``client.get(url, timeout=...)`` without a ``params`` keyword at all
+    (unlike ``crypto_coin_catalog.py``/``fx_rate.py``, which always pass
+    ``params={}``), so a required keyword would raise ``TypeError`` the
+    first time this client backs a real metal adapter (found 2026-08-27
+    while wiring btmc.vn as a live source; both call styles work now).
+    """
 
     def get(
-        self, url: str, *, params: Mapping[str, str], timeout: float
+        self, url: str, *, params: Mapping[str, str] | None = None, timeout: float
     ) -> UrllibResponse:
         query = urllib.parse.urlencode(dict(params)) if params else ""
         full_url = f"{url}?{query}" if query else url
