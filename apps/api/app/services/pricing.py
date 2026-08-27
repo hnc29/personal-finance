@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import datetime
-from collections.abc import Iterable, Mapping, Sequence
+import re
+import unicodedata
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
-from typing import Final, Protocol
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,12 +19,12 @@ from app.models.pricing import (
     QuoteState,
 )
 
-VN_METAL_FALLBACK_PRIORITY: Final[tuple[str, ...]] = (
-    "BTMC",
-    "BTMH",
-    "DOJI",
-    "SJC",
-)
+
+def _normalized(value: str) -> str:
+    decomposed = unicodedata.normalize("NFD", value)
+    unaccented = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", unaccented.lower()).split())
+
 
 
 class PricingProvider(Protocol):
@@ -70,22 +72,33 @@ def provider_quote(
     return quote
 
 
-def metal_provider_order(
+def resolve_metal_instrument(
     brand: str,
-    configured_provider_codes: Iterable[str],
-    fallback_priority: Sequence[str] = VN_METAL_FALLBACK_PRIORITY,
-) -> tuple[str, ...]:
-    """Put an available own-brand provider first, followed by configured fallbacks."""
-    configured = {code.upper() for code in configured_provider_codes}
-    order: list[str] = []
-    normalized_brand = brand.upper()
-    if normalized_brand in configured:
-        order.append(normalized_brand)
-    for code in fallback_priority:
-        normalized_code = code.upper()
-        if normalized_code in configured and normalized_code not in order:
-            order.append(normalized_code)
-    return tuple(order)
+    product_type: str,
+    purity: Decimal | str | int | None = None,
+) -> str:
+    """Resolve exact canonical pricing instrument for a gold/silver holding (Rule 2)."""
+    norm_brand = brand.strip().upper()
+    norm_product = _normalized(product_type)
+
+    purity_str = str(purity) if purity is not None else ""
+    is_999 = "999" in purity_str and "9999" not in purity_str and "0.9999" not in purity_str
+    suffix = "999" if is_999 else "9999"
+
+    if any(k in norm_product for k in ("nhan", "tron", "tron tron", "ep vi", "hung thinh vuong", "kim gia bao")):
+        cat = "PLAIN_RING"
+    elif any(k in norm_product for k in ("mieng", "bar", "thoi", "la")):
+        cat = "GOLD_BAR"
+    elif any(k in norm_product for k in ("nu trang", "trang suc", "jewelry")):
+        cat = "JEWELRY"
+    elif any(k in norm_product for k in ("nguyen lieu", "raw")):
+        cat = "RAW_GOLD"
+    else:
+        cat = "PLAIN_RING"
+
+    if norm_brand in {"SJC", "PNJ", "DOJI", "BTMC", "BTMH"}:
+        return f"{norm_brand}_{cat}_{suffix}"
+    return f"RAW_{cat}_{suffix}"
 
 
 def select_metal_quote(
@@ -96,41 +109,66 @@ def select_metal_quote(
     providers: Mapping[str, PricingProvider],
     historical_quotes: Mapping[str, Iterable[PriceQuote]] | None = None,
     manual_quote: PriceQuote | None = None,
-    fallback_priority: Sequence[str] = VN_METAL_FALLBACK_PRIORITY,
     recoverable_errors: tuple[type[Exception], ...] = (Exception,),
-) -> PriceQuote | None:
-    """Resolve an exact live quote, then prior successful BUY, then manual quote."""
-    normalized_providers = {code.upper(): provider for code, provider in providers.items()}
-    for code in metal_provider_order(
-        brand, normalized_providers, fallback_priority=fallback_priority
-    ):
-        try:
-            quote = normalized_providers[code].quote(instrument, as_of)
-        except recoverable_errors:
-            quote = None
-        if (
-            quote is not None
-            and quote.provider.code.upper() == code
-            and quote.match_level is QuoteMatchLevel.EXACT
-            and quote.state is QuoteState.LIVE
-            and quote.buy_price is not None
-            and quote.observed_at <= as_of
-        ):
-            return quote
+) -> PriceQuote:
+    """Resolve quote for a specific metal instrument (Rule 5 & Rule 6).
 
-    previous = [
-        quote
-        for quote in (() if historical_quotes is None else historical_quotes.get(instrument, ()))
-        if quote.state in {QuoteState.LIVE, QuoteState.STALE}
-        and quote.match_level is QuoteMatchLevel.EXACT
-        and quote.buy_price is not None
-        and quote.observed_at <= as_of
-    ]
-    if previous:
-        return max(
-            previous,
-            key=lambda quote: (quote.observed_at, quote.quoted_at, quote.id or 0),
-        )
+    Strict fallback order:
+    1. LIVE quote from own brand provider for exact instrument.
+    2. STALE quote from cached official history for exact instrument.
+    3. MANUAL quote for exact instrument.
+    4. UNAVAILABLE (no cross-brand fallback).
+    """
+    normalized_providers = {code.upper(): provider for code, provider in providers.items()}
+    norm_brand = brand.upper()
+
+    # 1. Try own brand provider for exact instrument (LIVE)
+    if norm_brand in normalized_providers:
+        try:
+            quote = normalized_providers[norm_brand].quote(instrument, as_of)
+            if (
+                quote is not None
+                and quote.provider.code.upper() == norm_brand
+                and quote.match_level is QuoteMatchLevel.EXACT
+                and quote.state is QuoteState.LIVE
+                and quote.buy_price is not None
+                and quote.observed_at <= as_of
+            ):
+                return quote
+        except recoverable_errors:
+            pass
+
+    # 2. Check cached historical quotes of the EXACT same instrument (STALE)
+    if historical_quotes is not None:
+        exact_history = [
+            q
+            for q in historical_quotes.get(instrument, ())
+            if q.match_level is QuoteMatchLevel.EXACT
+            and q.buy_price is not None
+            and q.observed_at <= as_of
+        ]
+        if exact_history:
+            latest = max(
+                exact_history,
+                key=lambda q: (q.observed_at, q.quoted_at, q.id or 0),
+            )
+            return PriceQuote(
+                id=latest.id,
+                instrument=latest.instrument,
+                instrument_id=latest.instrument_id,
+                provider=latest.provider,
+                provider_id=latest.provider_id,
+                product_code=latest.product_code,
+                match_level=QuoteMatchLevel.EXACT,
+                state=QuoteState.STALE,
+                quoted_at=latest.quoted_at,
+                observed_at=latest.observed_at,
+                buy_price_scaled=latest.buy_price_scaled,
+                sell_price_scaled=latest.sell_price_scaled,
+                source_metadata=latest.source_metadata,
+            )
+
+    # 3. Check manual quote for the EXACT same instrument (MANUAL)
     if (
         manual_quote is not None
         and manual_quote.state is QuoteState.MANUAL
@@ -138,7 +176,17 @@ def select_metal_quote(
         and manual_quote.observed_at <= as_of
     ):
         return manual_quote
-    return None
+
+    # 4. UNAVAILABLE (never return price=0, never fallback cross-brand)
+    return PriceQuote(
+        product_code=instrument,
+        match_level=QuoteMatchLevel.EXACT,
+        state=QuoteState.UNAVAILABLE,
+        quoted_at=as_of,
+        observed_at=as_of,
+        buy_price_scaled=None,
+        sell_price_scaled=None,
+    )
 
 
 def quote_state(

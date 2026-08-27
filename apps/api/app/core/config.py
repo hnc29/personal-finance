@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     fx_rate_url: str = "https://open.er-api.com/v6/latest/USD"
     fx_rate_timeout_seconds: float = 10.0
 
+    # Live gold reference price for precious-metal valuation (user request,
+    # 2026-08-27: use btmc.vn as the one reference source for ring/bar
+    # holdings of BTMC/BTMH/DOJI, plus the SJC-bar and raw-material rows it
+    # also publishes -- see app/services/metal_price_reference.py).
+    btmc_price_url: str = "https://btmc.vn/"
+    btmc_price_timeout_seconds: float = 10.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> object:

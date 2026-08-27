@@ -15,9 +15,9 @@ from app.models.pricing import (
 )
 from app.services.pricing import (
     InMemoryQuoteCache,
-    metal_provider_order,
     provider_quote,
     quote_state,
+    resolve_metal_instrument,
     select_metal_quote,
 )
 from app.services.pricing import PricingProvider as PricingProviderProtocol
@@ -155,192 +155,104 @@ def _selection_quote(
     return quote
 
 
-def test_metal_provider_order_prefers_own_brand_then_configured_priority() -> None:
-    assert metal_provider_order("SJC", ["DOJI", "SJC", "BTMC", "PNJ"]) == (
-        "SJC",
-        "BTMC",
-        "DOJI",
-    )
-    assert metal_provider_order("PNJ", ["SJC", "PNJ", "BTMH"]) == (
-        "PNJ",
-        "BTMH",
-        "SJC",
-    )
-    assert metal_provider_order("sjc", ["sjc", "btmc"]) == ("SJC", "BTMC")
+def test_resolve_metal_instrument() -> None:
+    assert resolve_metal_instrument("SJC", "Vàng miếng SJC", "0.9999") == "SJC_GOLD_BAR_9999"
+    assert resolve_metal_instrument("SJC", "Nhẫn trơn 999.9", "0.9999") == "SJC_PLAIN_RING_9999"
+    assert resolve_metal_instrument("PNJ", "Nhẫn Trơn PNJ 999.9", "0.9999") == "PNJ_PLAIN_RING_9999"
+    assert resolve_metal_instrument("PNJ", "Vàng miếng PNJ", "0.9999") == "PNJ_GOLD_BAR_9999"
+    assert resolve_metal_instrument("PNJ", "Vàng nguyên liệu", "0.999") == "PNJ_RAW_GOLD_999"
+    assert resolve_metal_instrument("DOJI", "Nhẫn tròn Hưng Thịnh Vượng", "0.9999") == "DOJI_PLAIN_RING_9999"
+    assert resolve_metal_instrument("DOJI", "Vàng miếng DOJI", "0.9999") == "DOJI_GOLD_BAR_9999"
+    assert resolve_metal_instrument("BTMC", "Nhẫn tròn trơn Vàng Rồng Thăng Long", "0.9999") == "BTMC_PLAIN_RING_9999"
+    assert resolve_metal_instrument("BTMH", "Nhẫn tròn ép vỉ Kim Gia Bảo", "0.9999") == "BTMH_PLAIN_RING_9999"
 
 
-def test_selection_tries_own_brand_then_fallback_and_requires_exact_quote() -> None:
-    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
-    wrong = _selection_quote("SJC", QuoteState.LIVE, as_of)
-    wrong.match_level = QuoteMatchLevel.PRODUCT
-    exact = _selection_quote("BTMC", QuoteState.LIVE, as_of)
-    sjc = Mock(spec=PricingProviderProtocol)
-    sjc.quote.return_value = wrong
-    btmc = Mock(spec=PricingProviderProtocol)
-    btmc.quote.return_value = exact
-
-    assert select_metal_quote(
-        instrument="GOLD/SJC/BAR", brand="SJC", as_of=as_of, providers={"BTMC": btmc, "SJC": sjc}
-    ) is exact
-    sjc.quote.assert_called_once_with("GOLD/SJC/BAR", as_of)
-    btmc.quote.assert_called_once_with("GOLD/SJC/BAR", as_of)
-
-
-def test_selection_uses_latest_successful_buy_then_manual() -> None:
-    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
-    provider = Mock(spec=PricingProviderProtocol)
-    provider.quote.side_effect = ValueError("synthetic outage")
-    older = _selection_quote("BTMC", QuoteState.STALE, as_of - datetime.timedelta(hours=2))
-    newer = _selection_quote("DOJI", QuoteState.LIVE, as_of - datetime.timedelta(hours=1))
-    manual = _selection_quote("MANUAL", QuoteState.MANUAL, as_of - datetime.timedelta(minutes=30))
-
-    assert select_metal_quote(
-        instrument="GOLD/RAW/BAR", brand="RAW", as_of=as_of,
-        providers={"BTMC": provider},
-        historical_quotes={"GOLD/RAW/BAR": [older, newer]},
-        manual_quote=manual,
-    ) is newer
-    assert select_metal_quote(
-        instrument="GOLD/RAW/BAR", brand="RAW", as_of=as_of,
-        providers={"BTMC": provider}, manual_quote=manual,
-    ) is manual
-
-
-def test_selection_falls_back_in_btmc_btmh_doji_sjc_order() -> None:
+def test_selection_returns_live_quote_from_own_brand() -> None:
     as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
     exact = _selection_quote("SJC", QuoteState.LIVE, as_of)
-    calls: list[str] = []
-
-    def provider(code: str, result: PriceQuote | Exception) -> Mock:
-        mocked = Mock(spec=PricingProviderProtocol)
-
-        def quote(_instrument: str, _as_of: datetime.datetime) -> PriceQuote:
-            calls.append(code)
-            if isinstance(result, Exception):
-                raise result
-            return result
-
-        mocked.quote.side_effect = quote
-        return mocked
-
-    providers = {
-        "SJC": provider("SJC", exact),
-        "DOJI": provider("DOJI", ValueError("synthetic outage")),
-        "BTMH": provider("BTMH", ValueError("synthetic outage")),
-        "BTMC": provider("BTMC", ValueError("synthetic outage")),
-    }
+    sjc = Mock(spec=PricingProviderProtocol)
+    sjc.quote.return_value = exact
 
     result = select_metal_quote(
-        instrument="GOLD/RAW/BAR",
-        brand="RAW",
+        instrument="SJC_GOLD_BAR_9999",
+        brand="SJC",
         as_of=as_of,
-        providers=providers,
+        providers={"SJC": sjc},
     )
-
     assert result is exact
-    assert calls == ["BTMC", "BTMH", "DOJI", "SJC"]
+    sjc.quote.assert_called_once_with("SJC_GOLD_BAR_9999", as_of)
 
 
-def test_selection_tries_own_brand_before_btmc_fallback() -> None:
+def test_selection_never_cross_brand_falls_back_when_own_brand_fails() -> None:
+    """Rule 5: No cross-brand fallback. If SJC provider fails, DO NOT fetch DOJI or BTMC."""
     as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
-    own_brand = _selection_quote("DOJI", QuoteState.LIVE, as_of)
+    sjc = Mock(spec=PricingProviderProtocol)
+    sjc.quote.side_effect = ValueError("SJC website outage")
     doji = Mock(spec=PricingProviderProtocol)
-    doji.quote.return_value = own_brand
     btmc = Mock(spec=PricingProviderProtocol)
 
     result = select_metal_quote(
-        instrument="GOLD/DOJI/RING",
+        instrument="SJC_GOLD_BAR_9999",
+        brand="SJC",
+        as_of=as_of,
+        providers={"SJC": sjc, "DOJI": doji, "BTMC": btmc},
+    )
+
+    sjc.quote.assert_called_once_with("SJC_GOLD_BAR_9999", as_of)
+    doji.quote.assert_not_called()
+    btmc.quote.assert_not_called()
+    assert result.state is QuoteState.UNAVAILABLE
+    assert result.buy_price is None
+
+
+def test_selection_uses_stale_cached_quote_of_exact_instrument() -> None:
+    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
+    sjc = Mock(spec=PricingProviderProtocol)
+    sjc.quote.side_effect = ValueError("SJC outage")
+    cached = _selection_quote("SJC", QuoteState.LIVE, as_of - datetime.timedelta(hours=2))
+
+    result = select_metal_quote(
+        instrument="SJC_GOLD_BAR_9999",
+        brand="SJC",
+        as_of=as_of,
+        providers={"SJC": sjc},
+        historical_quotes={"SJC_GOLD_BAR_9999": [cached]},
+    )
+
+    assert result.state is QuoteState.STALE
+    assert result.buy_price == cached.buy_price
+    assert result.product_code == cached.product_code
+
+
+def test_selection_uses_manual_quote_when_no_live_or_cached_exists() -> None:
+    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
+    provider = Mock(spec=PricingProviderProtocol)
+    provider.quote.side_effect = ValueError("Outage")
+    manual = _selection_quote("MANUAL", QuoteState.MANUAL, as_of - datetime.timedelta(minutes=10))
+
+    result = select_metal_quote(
+        instrument="BTMH_RAW_GOLD_9999",
+        brand="BTMH",
+        as_of=as_of,
+        providers={"BTMH": provider},
+        manual_quote=manual,
+    )
+    assert result is manual
+    assert result.state is QuoteState.MANUAL
+
+
+def test_selection_returns_unavailable_when_all_fail() -> None:
+    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
+    provider = Mock(spec=PricingProviderProtocol)
+    provider.quote.side_effect = ValueError("Outage")
+
+    result = select_metal_quote(
+        instrument="DOJI_PLAIN_RING_9999",
         brand="DOJI",
         as_of=as_of,
-        providers={"BTMC": btmc, "DOJI": doji},
+        providers={"DOJI": provider},
     )
+    assert result.state is QuoteState.UNAVAILABLE
+    assert result.buy_price is None
+    assert result.valuation_price is None
 
-    assert result is own_brand
-    doji.quote.assert_called_once_with("GOLD/DOJI/RING", as_of)
-    btmc.quote.assert_not_called()
-
-
-def test_selection_rejects_equivalent_product_and_continues_fallback() -> None:
-    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
-    equivalent = _selection_quote("BTMC", QuoteState.LIVE, as_of)
-    equivalent.match_level = QuoteMatchLevel.PRODUCT
-    exact = _selection_quote("BTMH", QuoteState.LIVE, as_of)
-    btmc = Mock(spec=PricingProviderProtocol)
-    btmc.quote.return_value = equivalent
-    btmh = Mock(spec=PricingProviderProtocol)
-    btmh.quote.return_value = exact
-
-    result = select_metal_quote(
-        instrument="GOLD/RAW/BAR",
-        brand="RAW",
-        as_of=as_of,
-        providers={"BTMC": btmc, "BTMH": btmh},
-    )
-
-    assert result is exact
-    btmc.quote.assert_called_once()
-    btmh.quote.assert_called_once()
-
-
-def test_selection_uses_stale_successful_buy_before_manual_quote() -> None:
-    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
-    provider = Mock(spec=PricingProviderProtocol)
-    provider.quote.side_effect = ValueError("synthetic outage")
-    stale = _selection_quote("BTMC", QuoteState.STALE, as_of - datetime.timedelta(days=1))
-    manual = _selection_quote("MANUAL", QuoteState.MANUAL, as_of - datetime.timedelta(minutes=1))
-
-    result = select_metal_quote(
-        instrument="GOLD/RAW/BAR",
-        brand="BTMC",
-        as_of=as_of,
-        providers={"BTMC": provider},
-        historical_quotes={"GOLD/RAW/BAR": [stale]},
-        manual_quote=manual,
-    )
-
-    assert result is stale
-
-
-def test_selection_ignores_history_for_other_instruments_and_nonexact_quotes() -> None:
-    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
-    provider = Mock(spec=PricingProviderProtocol)
-    provider.quote.side_effect = ValueError("synthetic outage")
-    other_instrument = _selection_quote(
-        "BTMC", QuoteState.STALE, as_of - datetime.timedelta(hours=1)
-    )
-    nonexact = _selection_quote(
-        "BTMC", QuoteState.STALE, as_of - datetime.timedelta(hours=2)
-    )
-    nonexact.match_level = QuoteMatchLevel.PRODUCT
-    manual = _selection_quote(
-        "MANUAL", QuoteState.MANUAL, as_of - datetime.timedelta(minutes=1)
-    )
-
-    result = select_metal_quote(
-        instrument="GOLD/RAW/BAR",
-        brand="RAW",
-        as_of=as_of,
-        providers={"BTMC": provider},
-        historical_quotes={
-            "GOLD/OTHER/BAR": [other_instrument],
-            "GOLD/RAW/BAR": [nonexact],
-        },
-        manual_quote=manual,
-    )
-
-    assert result is manual
-
-
-def test_selection_uses_manual_quote_when_no_live_or_historical_buy_exists() -> None:
-    as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
-    provider = Mock(spec=PricingProviderProtocol)
-    provider.quote.side_effect = ValueError("synthetic outage")
-    manual = _selection_quote("MANUAL", QuoteState.MANUAL, as_of - datetime.timedelta(minutes=1))
-
-    assert select_metal_quote(
-        instrument="GOLD/RAW/BAR",
-        brand="RAW",
-        as_of=as_of,
-        providers={"BTMC": provider},
-        manual_quote=manual,
-    ) is manual

@@ -53,8 +53,16 @@ def test_btmc_parses_exact_product_from_mocked_html() -> None:
         2026, 8, 23, 10, 15, tzinfo=datetime.timezone(datetime.timedelta(hours=7))
     )
     assert json.loads(quote.source_metadata or "") == {
+        "provider": "BTMC",
+        "instrument": "GOLD/BTMC/VRTL-9999",
+        "product_code": "BTMC-VRTL-9999",
         "product_name": "Vàng Rồng Thăng Long 999.9",
         "source_url": "https://prices.example.invalid/btmc",
+        "source_unit": "CHI",
+        "currency": "VND",
+        "buy_price": "12345678.9000",
+        "sell_price": "12456789.0000",
+        "status": "LIVE",
     }
 
 
@@ -158,3 +166,46 @@ def test_adapter_rejects_malformed_or_future_source_data(
 
     with pytest.raises(PriceSourceError, match=message):
         adapter.quote("GOLD/X", AS_OF)
+
+
+def test_btmc_parses_real_site_layout_with_text_timestamp_and_unit_scale() -> None:
+    client, _ = _client_for("btmc_prices_real.html")
+    adapter = BtmcPriceAdapter(
+        client,
+        "https://btmc.vn/",
+        {"BTMC_PLAIN_RING_9999": "NHẪN TRÒN TRƠN BẢO TÍN MINH CHÂU"},
+        unit_scale=Decimal(1000),
+    )
+
+    quote = adapter.quote(
+        "BTMC_PLAIN_RING_9999",
+        datetime.datetime(2026, 8, 27, 10, tzinfo=datetime.UTC),
+    )
+
+    assert quote.buy_price == Decimal("14800000.0000")
+    assert quote.sell_price == Decimal("15200000.0000")
+    assert quote.quoted_at == datetime.datetime(
+        2026, 8, 27, 15, tzinfo=datetime.timezone(datetime.timedelta(hours=7))
+    )
+
+
+def test_btmc_tolerates_missing_sell_price_and_uses_sjc_and_raw_reference_rows() -> None:
+    client, _ = _client_for("btmc_prices_real.html")
+    adapter = BtmcPriceAdapter(
+        client,
+        "https://btmc.vn/",
+        {
+            "SJC_GOLD_BAR_9999": "VÀNG MIẾNG SJC",
+            "RAW_GOLD_BAR_9999": "VÀNG NGUYÊN LIỆU",
+        },
+        unit_scale=Decimal(1000),
+    )
+    as_of = datetime.datetime(2026, 8, 27, 10, tzinfo=datetime.UTC)
+
+    sjc = adapter.quote("SJC_GOLD_BAR_9999", as_of)
+    assert sjc.buy_price == Decimal("14700000.0000")
+    assert sjc.sell_price == Decimal("15000000.0000")
+
+    raw = adapter.quote("RAW_GOLD_BAR_9999", as_of)
+    assert raw.buy_price == Decimal("14150000.0000")
+    assert raw.sell_price is None
