@@ -47,7 +47,7 @@ class CreditCardProfile(Base):
     payment_due_month_offset: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
-    account: Mapped[Account] = relationship()
+    account: Mapped[Account] = relationship(back_populates="credit_card_profile")
 
     @property
     def credit_limit(self) -> Decimal:

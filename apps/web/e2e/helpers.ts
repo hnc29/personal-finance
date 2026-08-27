@@ -68,6 +68,11 @@ export const VI = {
   duplicate: "Sao chép",
   thisMonth: "Tháng này",
   currentBalance: "Số dư hiện tại",
+  allAccounts: "Tất cả tài khoản",
+  selectAll: "Chọn tất cả",
+  deleteSelected: "Xoá đã chọn",
+  deleteAll: "Xoá tất cả",
+  confirmDeleteAll: "Xác nhận xoá tất cả",
 } as const;
 
 // User request, 2026-08-26: the single-account picker in the

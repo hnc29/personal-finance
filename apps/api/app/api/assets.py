@@ -98,15 +98,34 @@ class CryptoCreate(BaseModel):
         return stripped
 
 
-class MetalPatch(BaseModel):
-    """Minimal patch payload -- currently only this one metadata field is
-    editable for metals/crypto holdings (no other edit endpoint exists yet)."""
+class MetalUpdate(BaseModel):
+    brand: PreciousMetalBrand | None = None
+    product_type: str | None = None
+    purity: Decimal | None = None
+    quantity_grams: Decimal | None = None
+    purchase_date: datetime.date | None = None
+    purchase_price: Decimal | None = None
+    total_cost: Decimal | None = None
+    pricing_instrument: str | None = None
+    excluded_from_reports: bool | None = None
 
-    excluded_from_reports: bool
+    @field_validator("purity")
+    @classmethod
+    def purity_in_unit_range(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and not (0 < value <= 1):
+            raise ValueError("purity must be a fraction between 0 (exclusive) and 1 (inclusive)")
+        return value
 
 
-class CryptoPatch(BaseModel):
-    excluded_from_reports: bool
+class CryptoUpdate(BaseModel):
+    symbol: str | None = None
+    display_name: str | None = None
+    quantity: Decimal | None = None
+    purchase_date: datetime.date | None = None
+    purchase_price: Decimal | None = None
+    total_cost: Decimal | None = None
+    pricing_instrument: str | None = None
+    excluded_from_reports: bool | None = None
 
 
 @router.get("/metal-brands")
@@ -126,11 +145,16 @@ def list_metals(db: DbSession):
         {
             "id": row.id,
             "name": row.product_type,
+            "product_type": row.product_type,
             "brand": row.brand.value,
             "metal_type": row.metal_type.value,
+            "purity": str(row.purity),
             "quantity_grams": str(
                 sum((lot.canonical_grams for lot in row.lots), Decimal(0))
             ),
+            "purchase_price": str(row.lots[0].purchase_price) if row.lots else "0",
+            "total_cost": str(row.lots[0].total_cost) if row.lots else "0",
+            "purchase_date": row.lots[0].purchase_date.isoformat() if row.lots else None,
             "excluded_from_reports": row.excluded_from_reports,
         }
         for row in rows
@@ -162,25 +186,74 @@ def create_metal(data: MetalCreate, db: DbSession):
     return {
         "id": holding.id,
         "name": holding.product_type,
+        "product_type": holding.product_type,
         "brand": holding.brand.value,
         "metal_type": holding.metal_type.value,
+        "purity": str(holding.purity),
         "quantity_grams": str(lot.canonical_grams),
+        "purchase_price": str(lot.purchase_price),
+        "total_cost": str(lot.total_cost),
+        "purchase_date": lot.purchase_date.isoformat(),
         "excluded_from_reports": holding.excluded_from_reports,
     }
 
 
 @router.patch("/metals/{holding_id}")
-def update_metal(holding_id: int, data: MetalPatch, db: DbSession):
-    """Minimal edit endpoint -- only ``excluded_from_reports`` is patchable
-    for metal holdings today (user request, 2026-08-26: allow editing the
-    "không tính vào báo cáo" flag from the asset-edit menu)."""
+def update_metal(holding_id: int, data: MetalUpdate, db: DbSession):
+    holding = db.scalar(
+        select(PreciousMetalHolding)
+        .options(selectinload(PreciousMetalHolding.lots))
+        .where(PreciousMetalHolding.id == holding_id)
+    )
+    if holding is None:
+        raise HTTPException(404, "Metal holding not found")
+    if data.brand is not None:
+        holding.brand = data.brand
+    if data.product_type is not None:
+        holding.product_type = data.product_type
+    if data.purity is not None:
+        holding.purity = data.purity
+    if data.pricing_instrument is not None:
+        holding.pricing_instrument = data.pricing_instrument
+    if data.excluded_from_reports is not None:
+        holding.excluded_from_reports = data.excluded_from_reports
+    if holding.lots:
+        lot = holding.lots[0]
+        if data.quantity_grams is not None:
+            lot.set_quantity(data.quantity_grams, PreciousMetalQuantityUnit.GRAM)
+        if data.purchase_date is not None:
+            lot.purchase_date = data.purchase_date
+        if data.purchase_price is not None:
+            lot.purchase_price = data.purchase_price
+        if data.total_cost is not None:
+            lot.total_cost = data.total_cost
+    db.commit()
+    db.refresh(holding)
+    return {
+        "id": holding.id,
+        "name": holding.product_type,
+        "product_type": holding.product_type,
+        "brand": holding.brand.value,
+        "metal_type": holding.metal_type.value,
+        "purity": str(holding.purity),
+        "quantity_grams": str(
+            sum((lot.canonical_grams for lot in holding.lots), Decimal(0))
+        ),
+        "purchase_price": str(holding.lots[0].purchase_price) if holding.lots else "0",
+        "total_cost": str(holding.lots[0].total_cost) if holding.lots else "0",
+        "purchase_date": holding.lots[0].purchase_date.isoformat() if holding.lots else None,
+        "excluded_from_reports": holding.excluded_from_reports,
+    }
+
+
+@router.delete("/metals/{holding_id}")
+def delete_metal(holding_id: int, db: DbSession):
     holding = db.get(PreciousMetalHolding, holding_id)
     if holding is None:
         raise HTTPException(404, "Metal holding not found")
-    holding.excluded_from_reports = data.excluded_from_reports
+    db.delete(holding)
     db.commit()
-    db.refresh(holding)
-    return {"id": holding.id, "excluded_from_reports": holding.excluded_from_reports}
+    return {"id": holding_id, "deleted": True}
 
 
 @router.get("/crypto/coins")
@@ -212,6 +285,9 @@ def list_crypto(db: DbSession):
             "symbol": row.symbol,
             "display_name": row.display_name,
             "quantity": str(sum((lot.quantity for lot in row.lots), Decimal(0))),
+            "purchase_price": str(row.lots[0].purchase_price) if row.lots else "0",
+            "total_cost": str(row.lots[0].total_cost) if row.lots else "0",
+            "purchase_date": row.lots[0].purchase_date.isoformat() if row.lots else None,
             "excluded_from_reports": row.excluded_from_reports,
         }
         for row in rows
@@ -247,18 +323,60 @@ def create_crypto(data: CryptoCreate, db: DbSession):
         "symbol": holding.symbol,
         "display_name": holding.display_name,
         "quantity": str(lot.quantity),
+        "purchase_price": str(lot.purchase_price),
+        "total_cost": str(lot.total_cost),
+        "purchase_date": lot.purchase_date.isoformat(),
         "excluded_from_reports": holding.excluded_from_reports,
     }
 
 
 @router.patch("/crypto/{holding_id}")
-def update_crypto(holding_id: int, data: CryptoPatch, db: DbSession):
-    """Minimal edit endpoint -- only ``excluded_from_reports`` is patchable
-    for crypto holdings today (user request, 2026-08-26)."""
+def update_crypto(holding_id: int, data: CryptoUpdate, db: DbSession):
+    holding = db.scalar(
+        select(CryptoHolding)
+        .options(selectinload(CryptoHolding.lots))
+        .where(CryptoHolding.id == holding_id)
+    )
+    if holding is None:
+        raise HTTPException(404, "Crypto holding not found")
+    if data.symbol is not None:
+        holding.symbol = data.symbol.lower()
+    if data.display_name is not None:
+        holding.display_name = data.display_name
+    if data.pricing_instrument is not None:
+        holding.pricing_instrument = data.pricing_instrument
+    if data.excluded_from_reports is not None:
+        holding.excluded_from_reports = data.excluded_from_reports
+    if holding.lots:
+        lot = holding.lots[0]
+        if data.quantity is not None:
+            lot.set_quantity(data.quantity)
+        if data.purchase_date is not None:
+            lot.purchase_date = data.purchase_date
+        if data.purchase_price is not None:
+            lot.purchase_price = data.purchase_price
+        if data.total_cost is not None:
+            lot.total_cost = data.total_cost
+    db.commit()
+    db.refresh(holding)
+    return {
+        "id": holding.id,
+        "coingecko_id": holding.coingecko_id,
+        "symbol": holding.symbol,
+        "display_name": holding.display_name,
+        "quantity": str(sum((lot.quantity for lot in holding.lots), Decimal(0))),
+        "purchase_price": str(holding.lots[0].purchase_price) if holding.lots else "0",
+        "total_cost": str(holding.lots[0].total_cost) if holding.lots else "0",
+        "purchase_date": holding.lots[0].purchase_date.isoformat() if holding.lots else None,
+        "excluded_from_reports": holding.excluded_from_reports,
+    }
+
+
+@router.delete("/crypto/{holding_id}")
+def delete_crypto(holding_id: int, db: DbSession):
     holding = db.get(CryptoHolding, holding_id)
     if holding is None:
         raise HTTPException(404, "Crypto holding not found")
-    holding.excluded_from_reports = data.excluded_from_reports
+    db.delete(holding)
     db.commit()
-    db.refresh(holding)
-    return {"id": holding.id, "excluded_from_reports": holding.excluded_from_reports}
+    return {"id": holding_id, "deleted": True}

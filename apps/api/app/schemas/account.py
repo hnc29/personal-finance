@@ -21,6 +21,8 @@ class AccountBase(BaseModel):
 class AccountCreate(AccountBase):
     """Payload for creating an account."""
 
+    credit_limit: str | None = None
+
 
 class AccountUpdate(BaseModel):
     """Partial account update; unset fields are left unchanged."""
@@ -30,6 +32,7 @@ class AccountUpdate(BaseModel):
     currency: str | None = None
     is_active: bool | None = None
     sort_order: int | None = None
+    credit_limit: str | None = None
 
 
 class AccountRead(AccountBase):
@@ -39,3 +42,4 @@ class AccountRead(AccountBase):
 
     id: int
     sort_order: int
+    credit_limit: str | None = None

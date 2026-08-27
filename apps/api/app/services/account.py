@@ -9,15 +9,28 @@ return ``None`` for an unknown id so the routing layer can map that to 404.
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.account import Account
+from app.models.account import Account, AccountType
+from app.models.credit_card import CreditCardProfile
 from app.schemas.account import AccountCreate, AccountUpdate
 
 
 def create_account(db: Session, data: AccountCreate) -> Account:
     """Create and persist a new account, appended to the end of the order."""
     next_order = (db.scalar(select(func.max(Account.sort_order))) or 0) + 1
-    account = Account(**data.model_dump(), sort_order=next_order)
+    dump = data.model_dump()
+    credit_limit = dump.pop("credit_limit", None)
+    account = Account(**dump, sort_order=next_order)
     db.add(account)
+    db.flush()
+    if account.account_type == AccountType.CREDIT_CARD and credit_limit is not None and str(credit_limit).strip():
+        profile = CreditCardProfile(
+            account_id=account.id,
+            credit_limit=credit_limit,
+            statement_day=1,
+            payment_due_day=15,
+            payment_due_month_offset=0,
+        )
+        db.add(profile)
     db.commit()
     db.refresh(account)
     return account
@@ -45,8 +58,28 @@ def update_account(
     if account is None:
         return None
 
-    for field, value in data.model_dump(exclude_unset=True).items():
+    update_dict = data.model_dump(exclude_unset=True)
+    credit_limit = update_dict.pop("credit_limit", None)
+    for field, value in update_dict.items():
         setattr(account, field, value)
+
+    if account.account_type == AccountType.CREDIT_CARD and credit_limit is not None:
+        profile = db.scalar(
+            select(CreditCardProfile).where(CreditCardProfile.account_id == account.id)
+        )
+        if profile is None:
+            if str(credit_limit).strip():
+                profile = CreditCardProfile(
+                    account_id=account.id,
+                    credit_limit=credit_limit,
+                    statement_day=1,
+                    payment_due_day=15,
+                    payment_due_month_offset=0,
+                )
+                db.add(profile)
+        else:
+            if str(credit_limit).strip():
+                profile.credit_limit = credit_limit
 
     db.commit()
     db.refresh(account)

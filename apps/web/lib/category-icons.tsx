@@ -723,11 +723,50 @@ export function IconGlyph({ iconKey, ...rest }: { iconKey: string } & IconProps)
   return <Icon {...rest} />;
 }
 
-/** Render a category's icon: its own custom pick if set, else the
- * name-based default. Pass the category (or a `{name, icon}` shape) so a
- * per-category override is honored wherever categories are drawn. */
 export function CategoryIcon({ name, icon, ...rest }: { name: string; icon?: string | null } & IconProps) {
   const key = resolveIconKey({ name, icon });
   const Icon = ICON_REGISTRY[key] ?? Grid;
   return <Icon {...rest} />;
 }
+
+export function categoryColorTheme(name: string, icon?: string | null): { bg: string; fg: string } {
+  const key = resolveIconKey({ name, icon });
+  if (["Utensils", "Coffee", "Beer", "Cocktail", "Cake", "Apple"].includes(key)) return { bg: "rgba(255, 115, 60, 0.15)", fg: "#f97316" };
+  if (["Basket", "Cart", "ShoppingBag", "Shirt", "Gift", "Tag", "Monitor"].includes(key)) return { bg: "rgba(168, 85, 247, 0.15)", fg: "#a855f7" };
+  if (["Fuel", "Car", "Bus", "Plane", "Luggage", "Truck", "Parking"].includes(key)) return { bg: "rgba(59, 130, 246, 0.15)", fg: "#3b82f6" };
+  if (["Bolt", "Droplet", "Wifi", "Phone", "Windmill", "Receipt"].includes(key)) return { bg: "rgba(6, 182, 212, 0.15)", fg: "#06b6d4" };
+  if (["Home", "Bed", "Box", "Users", "Baby", "Paw", "Dog", "Cat", "Plant"].includes(key)) return { bg: "rgba(16, 185, 129, 0.15)", fg: "#10b981" };
+  if (["Heart", "Pill", "Activity", "Swim"].includes(key)) return { bg: "rgba(236, 72, 153, 0.15)", fg: "#ec4899" };
+  if (["Play", "Gamepad", "Music", "Piano", "Microphone", "Speaker", "Camera", "Ticket", "Ball", "Trophy", "Palette"].includes(key)) return { bg: "rgba(139, 92, 246, 0.15)", fg: "#8b5cf6" };
+  if (["Book", "GraduationCap", "Notebook", "Folder"].includes(key)) return { bg: "rgba(245, 158, 11, 0.15)", fg: "#f59e0b" };
+  if (["PlusCircle", "Briefcase", "TrendingUp", "MoneyBag", "PiggyBank", "BarChart", "CreditCard"].includes(key)) return { bg: "rgba(34, 197, 94, 0.15)", fg: "#22c55e" };
+  return { bg: "rgba(100, 116, 139, 0.15)", fg: "#64748b" };
+}
+
+/** Render a category's icon inside a modern colored circular badge. */
+export function CategoryIconBadge({ name, icon, size = 36, iconSize }: { name: string; icon?: string | null; size?: number; iconSize?: number }) {
+  const theme = categoryColorTheme(name, icon);
+  const glyphSize = iconSize ?? Math.round(size * 0.55);
+  return (
+    <span
+      className="category-icon-circle"
+      style={{
+        width: size,
+        height: size,
+        minWidth: size,
+        minHeight: size,
+        borderRadius: "50%",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: theme.bg,
+        color: theme.fg,
+        flexShrink: 0,
+      }}
+      aria-hidden="true"
+    >
+      <CategoryIcon name={name} icon={icon} size={glyphSize} />
+    </span>
+  );
+}
+

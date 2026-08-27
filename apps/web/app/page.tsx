@@ -1,13 +1,13 @@
 "use client";
 
-import { createContext, FormEvent, useContext, useEffect, useRef, useState } from "react";
+import { createContext, FormEvent, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, Account, AccountBalance, AccountType, Category, EventInput, EventType, FinancialEvent, ImportApplyResult, SavingsAccount, SavingsCreateInput, SavingsPatchInput } from "../lib/api";
+import { api, Account, AccountBalance, AccountType, Category, CryptoHolding, CryptoUpdateInput, EventInput, EventType, FinancialEvent, ImportApplyResult, MetalHolding, MetalUpdateInput, SavingsAccount, SavingsCreateInput, SavingsPatchInput } from "../lib/api";
 import { categoryLabel, copy, enumLabel, Language, transactionUiKeys, ui, useLanguage } from "../lib/i18n";
 import { buildCategoryTree, categoriesForEventType, categoryDepth, categoryIsValidForEventType, categoryPath, filterCategoryTree, toggleCategoryExpansion, canMoveCategory, categoryRoot, getCategoryDepth } from "../lib/category-tree";
-import { CategoryIcon, IconGlyph, ICON_GROUPS, iconLabel } from "../lib/category-icons";
-import { bankCatalog, bankCategoryLabel, bankCategoryOrder } from "../lib/bank-catalog";
-import { AccountLogo } from "../lib/account-logos";
+import { CategoryIcon, CategoryIconBadge, IconGlyph, ICON_GROUPS, iconLabel } from "../lib/category-icons";
+import { bankCatalog, bankCategoryLabel, bankCategoryOrder, ewalletCatalog } from "../lib/bank-catalog";
+import { AccountLogo, getAccountBrand } from "../lib/account-logos";
 
 type View = "transactions" | "ledger" | "accounts" | "categories" | "review" | "assets" | "data";
 // User request, 2026-08-26 (UI redesign to a Money-Lover-style layout):
@@ -28,19 +28,7 @@ const navItems: { view: View; icon: string }[] = [
 ];
 type EntryDraft = { accountId: string; amount: string };
 const accountTypes: AccountType[] = ["CASH", "BANK", "CREDIT_CARD", "EWALLET"];
-// TASK-034: the composer only creates the four transaction types a person
-// enters by hand. INTEREST/SAVINGS_DEPOSIT/SAVINGS_WITHDRAWAL are owned
-// exclusively by the Savings module's own actions (a manually-typed one
-// would be an orphan event with no SavingsTerm/principal behind it);
-// ADJUSTMENT now lives on the Accounts page (see AccountAdjustForm);
-// ASSET_PURCHASE/ASSET_SALE have no live producer anywhere in the app.
 const composerEventTypes: EventType[] = ["EXPENSE", "INCOME", "TRANSFER", "CREDIT_CARD_PAYMENT"];
-// BUGFIX: no leading "-?" here -- the single-entry EXPENSE/INCOME amount
-// input's sign is now entirely determined by the Expense/Income segmented
-// control (see Transactions' submit()), so this field only ever accepts an
-// unsigned magnitude, matching the TRANSFER/CREDIT_CARD_PAYMENT amount
-// inputs which never allowed a sign either.
-const moneyPattern = "^\\d+(\\.\\d{1,4})?$";
 function pad2(n: number): string { return String(n).padStart(2, "0"); }
 function todayIso(): string { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
 function shiftIsoDate(iso: string, deltaDays: number): string {
@@ -92,40 +80,219 @@ export default function Home() {
   </div></LanguageContext.Provider>;
 }
 
-function Assets() {
-  const { tr, label } = useI18n(); const qc = useQueryClient(); const q = useQuery({ queryKey: ["portfolio"], queryFn: api.portfolio.overview }); const [tab, setTab] = useState<"savings" | "metals" | "crypto">("savings");
-  const brands = useQuery({ queryKey: ["metal-brands"], queryFn: api.assets.metalBrands });
-  // User report, 2026-08-26: purchase price/quantity need to be controlled
-  // (rather than read from FormData like the rest of this uncontrolled
-  // form) so the computed VND total can be shown live as the user types,
-  // and so the currency toggle can gate a live FX-rate fetch.
-  const [cryptoCurrency, setCryptoCurrency] = useState<"VND" | "USD">("VND");
-  const [cryptoQty, setCryptoQty] = useState("");
-  const [cryptoPrice, setCryptoPrice] = useState("");
-  const fx = useQuery({ queryKey: ["fx", "usd-vnd"], queryFn: api.fx.usdVnd, enabled: cryptoCurrency === "USD", staleTime: 5 * 60 * 1000 });
-  const metal = useMutation({ mutationFn: api.assets.metals.create, onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }) });
-  const crypto = useMutation({ mutationFn: api.assets.crypto.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["portfolio"] }); setCryptoQty(""); setCryptoPrice(""); } });
-  // BUGFIX (user report, 2026-08-26: "Vàng ... Chức năng chưa hoạt động,
-  // nhấn thêm không phản hồi"): reproduced with Playwright -- typing a
-  // Vietnamese-style decimal comma into Quantity or Purity (e.g. "1,5" or
-  // "99,99", exactly how these values are naturally written/spoken) threw
-  // an uncaught `BigInt("1,5")` parsing exception synchronously inside this
-  // handler, before `.mutate()` ever ran: no network request, no error
-  // banner (nothing to show -- the mutation never started), the "+ Thêm"
-  // button just did nothing. Root cause was two-fold: (a) unlike every
-  // other decimal input in this app (transaction amount, savings principal,
-  // adjust-balance), the metals/crypto quantity/purity/price/total inputs
-  // were missing the `pattern` attribute that makes the browser itself
-  // reject non-numeric characters before this code ever runs; (b) even with
-  // that pattern back, a well-intentioned Vietnamese comma should just work
-  // rather than being blocked, so it's normalized to a dot here too.
+function DateRow({ value, onChange, language, label: labelText, name }: { value: string; onChange: (v: string) => void; language: Language; label?: string; name?: string }) {
+  const { tr } = useI18n();
+  return <div className="date-row">
+    <button type="button" className="date-nav" aria-label={tr("Previous day")} onClick={() => onChange(shiftIsoDate(value, -1))}>‹</button>
+    <label className="date-center">
+      <span>{formatIsoDateLabel(language, value)}</span>
+      <input type="date" name={name} aria-label={labelText ? tr(labelText) : tr("Choose date")} value={value} onChange={e => onChange(e.target.value || todayIso())} required className="date-native" />
+    </label>
+    <button type="button" className="date-nav" aria-label={tr("Next day")} onClick={() => onChange(shiftIsoDate(value, 1))}>›</button>
+  </div>;
+}
+
+function AssetDashboard({
+  accounts,
+  accountBalances,
+  savings,
+  metals,
+  crypto,
+  activeTab,
+  onSelectTab,
+}: {
+  accounts: Account[];
+  accountBalances: Map<number, string>;
+  savings: SavingsAccount[];
+  metals: MetalHolding[];
+  crypto: CryptoHolding[];
+  activeTab: "liquid" | "savings" | "metals" | "crypto";
+  onSelectTab: (tab: "liquid" | "savings" | "metals" | "crypto") => void;
+}) {
+  const { tr } = useI18n();
+
+  let liquidTotal = "0";
+  for (const a of accounts) {
+    if (a.is_active && a.account_type !== "CREDIT_CARD") {
+      const bal = accountBalances.get(a.id);
+      if (bal) liquidTotal = sumMoney([liquidTotal, bal]);
+    }
+  }
+
+  let savingsTotal = "0";
+  for (const s of savings) {
+    if (s.status === "OPEN" && !s.excluded_from_reports) {
+      savingsTotal = sumMoney([savingsTotal, s.principal]);
+    }
+  }
+
+  let metalsTotal = "0";
+  for (const m of metals) {
+    if (!m.excluded_from_reports) {
+      metalsTotal = sumMoney([metalsTotal, m.total_cost]);
+    }
+  }
+
+  let cryptoTotal = "0";
+  for (const c of crypto) {
+    if (!c.excluded_from_reports) {
+      cryptoTotal = sumMoney([cryptoTotal, c.total_cost]);
+    }
+  }
+
+  let creditCardDebt = "0";
+  for (const a of accounts) {
+    if (a.is_active && a.account_type === "CREDIT_CARD") {
+      const bal = accountBalances.get(a.id);
+      if (bal && bal.startsWith("-")) {
+        creditCardDebt = sumMoney([creditCardDebt, negateMoney(bal)]);
+      }
+    }
+  }
+
+  const totalGrossAssets = sumMoney([liquidTotal, savingsTotal, metalsTotal, cryptoTotal]);
+  const netWorth = sumMoney([totalGrossAssets, negateMoney(creditCardDebt)]);
+
+  const grossNum = Number(totalGrossAssets) || 1;
+  const liquidPct = Math.max(0, Math.round((Number(liquidTotal) / grossNum) * 100));
+  const savingsPct = Math.max(0, Math.round((Number(savingsTotal) / grossNum) * 100));
+  const metalsPct = Math.max(0, Math.round((Number(metalsTotal) / grossNum) * 100));
+  const cryptoPct = Math.max(0, 100 - liquidPct - savingsPct - metalsPct);
+
+  return (
+    <div className="assets-dashboard">
+      <div className="net-worth-hero">
+        <div className="net-worth-hero-top">
+          <div>
+            <span className="net-worth-hero-label">{tr("Total Net Worth")}</span>
+            <div className="net-worth-hero-amount">{fmtMoneyDisplay(netWorth)} VND</div>
+          </div>
+          <div className="net-worth-hero-subtotals">
+            <div className="net-worth-subtotal">
+              <span>{tr("Total Assets")}</span>
+              <strong>{fmtMoneyDisplay(totalGrossAssets)} VND</strong>
+            </div>
+            <div className="net-worth-subtotal">
+              <span>{tr("Total Liabilities")}</span>
+              <strong style={{ color: "#fca5a5" }}>-{fmtMoneyDisplay(creditCardDebt)} VND</strong>
+            </div>
+          </div>
+        </div>
+
+        <div className="asset-breakdown-container">
+          <div className="asset-breakdown-bar">
+            {liquidPct > 0 && <div className="asset-breakdown-segment" style={{ width: `${liquidPct}%`, backgroundColor: "#3b82f6" }} title={`Tiền mặt & Ngân hàng: ${liquidPct}%`} />}
+            {savingsPct > 0 && <div className="asset-breakdown-segment" style={{ width: `${savingsPct}%`, backgroundColor: "#10b981" }} title={`Tiết kiệm: ${savingsPct}%`} />}
+            {metalsPct > 0 && <div className="asset-breakdown-segment" style={{ width: `${metalsPct}%`, backgroundColor: "#f59e0b" }} title={`Kim loại quý: ${metalsPct}%`} />}
+            {cryptoPct > 0 && <div className="asset-breakdown-segment" style={{ width: `${cryptoPct}%`, backgroundColor: "#8b5cf6" }} title={`Tiền mã hóa: ${cryptoPct}%`} />}
+          </div>
+          <div className="asset-breakdown-legend">
+            <div className="asset-breakdown-item"><span className="asset-dot" style={{ backgroundColor: "#3b82f6" }} /><span>{tr("Cash & Liquid")} ({liquidPct}%)</span></div>
+            <div className="asset-breakdown-item"><span className="asset-dot" style={{ backgroundColor: "#10b981" }} /><span>{tr("Savings")} ({savingsPct}%)</span></div>
+            <div className="asset-breakdown-item"><span className="asset-dot" style={{ backgroundColor: "#f59e0b" }} /><span>{tr("Precious metals & Gold")} ({metalsPct}%)</span></div>
+            <div className="asset-breakdown-item"><span className="asset-dot" style={{ backgroundColor: "#8b5cf6" }} /><span>{tr("Crypto")} ({cryptoPct}%)</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="asset-metric-grid" role="tablist" aria-label={tr("Assets")}>
+        <div
+          role="tab"
+          tabIndex={0}
+          aria-selected={activeTab === "liquid"}
+          className={`asset-metric-card ${activeTab === "liquid" ? "active" : ""}`}
+          onClick={() => onSelectTab("liquid")}
+          onKeyDown={e => (e.key === "Enter" || e.key === " ") && onSelectTab("liquid")}
+        >
+          <div className="asset-metric-header">
+            <span>{tr("Cash & Liquid")}</span>
+            <IconGlyph iconKey="Wallet" size={18} />
+          </div>
+          <div className="asset-metric-amount">{fmtMoneyDisplay(liquidTotal)} VND</div>
+          <div className="asset-metric-sub">{accounts.filter(a => a.is_active && a.account_type !== "CREDIT_CARD").length} {tr("Accounts")}</div>
+        </div>
+
+        <div
+          role="tab"
+          tabIndex={0}
+          aria-selected={activeTab === "savings"}
+          className={`asset-metric-card ${activeTab === "savings" ? "active" : ""}`}
+          onClick={() => onSelectTab("savings")}
+          onKeyDown={e => (e.key === "Enter" || e.key === " ") && onSelectTab("savings")}
+        >
+          <div className="asset-metric-header">
+            <span>{tr("Savings")}</span>
+            <IconGlyph iconKey="PiggyBank" size={18} />
+          </div>
+          <div className="asset-metric-amount">{fmtMoneyDisplay(savingsTotal)} VND</div>
+          <div className="asset-metric-sub">{savings.filter(s => s.status === "OPEN").length} {tr("Accounts")}</div>
+        </div>
+
+        <div
+          role="tab"
+          tabIndex={0}
+          aria-selected={activeTab === "metals"}
+          className={`asset-metric-card ${activeTab === "metals" ? "active" : ""}`}
+          onClick={() => onSelectTab("metals")}
+          onKeyDown={e => (e.key === "Enter" || e.key === " ") && onSelectTab("metals")}
+        >
+          <div className="asset-metric-header">
+            <span>{tr("Precious metals & Gold")}</span>
+            <IconGlyph iconKey="Award" size={18} />
+          </div>
+          <div className="asset-metric-amount">{fmtMoneyDisplay(metalsTotal)} VND</div>
+          <div className="asset-metric-sub">{metals.length} {tr("Holdings")}</div>
+        </div>
+
+        <div
+          role="tab"
+          tabIndex={0}
+          aria-selected={activeTab === "crypto"}
+          className={`asset-metric-card ${activeTab === "crypto" ? "active" : ""}`}
+          onClick={() => onSelectTab("crypto")}
+          onKeyDown={e => (e.key === "Enter" || e.key === " ") && onSelectTab("crypto")}
+        >
+          <div className="asset-metric-header">
+            <span>{tr("Crypto")}</span>
+            <IconGlyph iconKey="TrendingUp" size={18} />
+          </div>
+          <div className="asset-metric-amount">{fmtMoneyDisplay(cryptoTotal)} VND</div>
+          <div className="asset-metric-sub">{crypto.length} {tr("Holdings")}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetalEditModal({
+  holding,
+  brands,
+  onDone,
+  onCancel,
+}: {
+  holding: MetalHolding;
+  brands: string[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const { tr, label, language } = useI18n();
+  const [metalDate, setMetalDate] = useState(holding.purchase_date ?? todayIso());
+  const [metalType, setMetalType] = useState(holding.metal_type);
+  const [brand, setBrand] = useState(holding.brand);
+  const [productType, setProductType] = useState(holding.product_type);
+  const initialChi = holding.quantity_grams ? (Number(holding.quantity_grams) / 3.75).toString() : "";
+  const [quantityChi, setQuantityChi] = useState(initialChi);
+  const [purity, setPurity] = useState(holding.purity ? (Number(holding.purity) * 100).toFixed(2) : "99.99");
+  const [price, setPrice] = useState(holding.purchase_price ? (fmtMoney(holding.purchase_price) ?? holding.purchase_price) : "");
+  const [totalCost, setTotalCost] = useState(holding.total_cost ? (fmtMoney(holding.total_cost) ?? holding.total_cost) : "");
+  const [excluded, setExcluded] = useState(Boolean(holding.excluded_from_reports));
+
+  const update = useMutation({
+    mutationFn: (data: MetalUpdateInput) => api.assets.metals.update(holding.id, data),
+    onSuccess: onDone,
+  });
+
   function normDecimal(raw: string): string { return raw.trim().replace(",", "."); }
-  // Purity is now optional (server default + this default both land on
-  // 99.99%) and entered as a percentage -- "99.99" for 999-gold -- matching
-  // how purity is actually talked about in Vietnamese, rather than the raw
-  // (0, 1] fraction the ledger stores. Converts via exact string/BigInt
-  // arithmetic (shifting the decimal point 2 places), never float, so it
-  // can't introduce rounding error the way `Number(x) / 100` could.
   function percentToFraction(raw: string): string {
     const trimmed = normDecimal(raw);
     if (!trimmed) return "0.9999";
@@ -139,91 +306,718 @@ function Assets() {
     const [w, d = ""] = shifted.split(".");
     return `${negative ? "-" : ""}${w || "0"}.${(d + "0000").slice(0, 4)}`;
   }
+
+  function handleChiChange(v: string) {
+    setQuantityChi(v);
+    const q = Number(normDecimal(v));
+    const p = Number(normDecimal(price));
+    if (q > 0 && p > 0) setTotalCost(String(Math.round(q * p)));
+  }
+  function handlePriceChange(v: string) {
+    setPrice(v);
+    const p = Number(normDecimal(v));
+    const q = Number(normDecimal(quantityChi));
+    if (q > 0 && p > 0) setTotalCost(String(Math.round(q * p)));
+  }
+  function handleTotalChange(v: string) {
+    setTotalCost(v);
+    const t = Number(normDecimal(v));
+    const q = Number(normDecimal(quantityChi));
+    if (q > 0 && t > 0) setPrice(String(Math.round(t / q)));
+  }
+
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const [whole, fraction = ""] = normDecimal(quantityChi).split(".");
+    const scaledChi = BigInt(whole || "0") * BigInt("10000") + BigInt((fraction + "0000").slice(0, 4));
+    const scaledGrams = scaledChi * BigInt("375") / BigInt("100");
+    const grams = `${scaledGrams / BigInt("10000")}.${String(scaledGrams % BigInt("10000")).padStart(4, "0")}`.replace(/\.?0+$/, "");
+
+    update.mutate({
+      metal_type: metalType,
+      brand,
+      product_type: productType,
+      purity: percentToFraction(purity),
+      quantity_grams: grams,
+      purchase_price: normDecimal(price) || undefined,
+      total_cost: normDecimal(totalCost) || undefined,
+      purchase_date: metalDate || undefined,
+      excluded_from_reports: excluded,
+    });
+  }
+
+  const productTypes = ["RING", "BAR", "JEWELRY"] as const;
+
+  return (
+    <Modal title="Edit metal holding" onClose={onCancel} wide>
+      <form onSubmit={submit} className="form">
+        <Error error={update.error} />
+        <div className="account-form-grid" style={{ gridColumn: "1 / -1", width: "100%" }}>
+          <Field label="Type">
+            <select value={metalType} onChange={e => setMetalType(e.target.value as "GOLD" | "SILVER")}>
+              <option value="GOLD">{tr("Gold")}</option>
+              <option value="SILVER">{tr("Silver")}</option>
+            </select>
+          </Field>
+          <Field label="Brand">
+            <select value={brand} onChange={e => setBrand(e.target.value)}>
+              {brands.map(b => <option value={b} key={b}>{label(b)}</option>)}
+            </select>
+          </Field>
+          <Field label="Product">
+            <select value={productType} onChange={e => setProductType(e.target.value)}>
+              {productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}
+            </select>
+          </Field>
+          <Field label="Quantity (chỉ)">
+            <input value={quantityChi} onChange={e => handleChiChange(e.target.value)} required inputMode="decimal" />
+          </Field>
+          <Field label="Purity">
+            <div className="amount-row"><input value={purity} onChange={e => setPurity(e.target.value)} inputMode="decimal" /><span className="currency-badge">%</span></div>
+          </Field>
+          <Field label="Purchase price">
+            <div className="amount-row"><MoneyInput value={price} onChange={handlePriceChange} placeholder="0" required /><span className="currency-badge">VND</span></div>
+          </Field>
+          <Field label="Total cost">
+            <div className="amount-row"><MoneyInput value={totalCost} onChange={handleTotalChange} placeholder="0" required /><span className="currency-badge">VND</span></div>
+          </Field>
+          <div className="full-span">
+            <Field label="Purchase date">
+              <DateRow value={metalDate} onChange={setMetalDate} language={language} label="Purchase date" />
+            </Field>
+          </div>
+          <div className="full-span">
+            <label className="checkbox-row">
+              <input type="checkbox" checked={excluded} onChange={e => setExcluded(e.target.checked)} />
+              <span>{tr("Exclude from reports")}</span>
+            </label>
+          </div>
+        </div>
+        <div className="form-actions" style={{ gridColumn: "1 / -1", marginTop: "14px" }}>
+          <Submit pending={update.isPending} text="Save changes" />
+          <button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function CryptoEditModal({
+  holding,
+  onDone,
+  onCancel,
+}: {
+  holding: CryptoHolding;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const { tr, language } = useI18n();
+  const [cryptoDate, setCryptoDate] = useState(holding.purchase_date ?? todayIso());
+  const [symbol, setSymbol] = useState(holding.symbol);
+  const [displayName, setDisplayName] = useState(holding.display_name ?? "");
+  const [quantity, setQuantity] = useState(holding.quantity);
+  const [price, setPrice] = useState(holding.purchase_price ? (fmtMoney(holding.purchase_price) ?? holding.purchase_price) : "");
+  const [totalCost, setTotalCost] = useState(holding.total_cost ? (fmtMoney(holding.total_cost) ?? holding.total_cost) : "");
+  const [excluded, setExcluded] = useState(Boolean(holding.excluded_from_reports));
+
+  const update = useMutation({
+    mutationFn: (data: CryptoUpdateInput) => api.assets.crypto.update(holding.id, data),
+    onSuccess: onDone,
+  });
+
+  function normDecimal(raw: string): string { return raw.trim().replace(",", "."); }
+
+  function handleQtyChange(v: string) {
+    setQuantity(v);
+    const q = Number(normDecimal(v));
+    const p = Number(normDecimal(price));
+    if (q > 0 && p > 0) setTotalCost(String(Math.round(q * p)));
+  }
+  function handlePriceChange(v: string) {
+    setPrice(v);
+    const p = Number(normDecimal(v));
+    const q = Number(normDecimal(quantity));
+    if (q > 0 && p > 0) setTotalCost(String(Math.round(q * p)));
+  }
+  function handleTotalChange(v: string) {
+    setTotalCost(v);
+    const t = Number(normDecimal(v));
+    const q = Number(normDecimal(quantity));
+    if (q > 0 && t > 0) setPrice(String(Math.round(t / q)));
+  }
+
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    update.mutate({
+      symbol,
+      display_name: displayName || undefined,
+      quantity: normDecimal(quantity),
+      purchase_price: normDecimal(price) || undefined,
+      total_cost: normDecimal(totalCost) || undefined,
+      purchase_date: cryptoDate || undefined,
+      excluded_from_reports: excluded,
+    });
+  }
+
+  return (
+    <Modal title="Edit crypto holding" onClose={onCancel} wide>
+      <form onSubmit={submit} className="form">
+        <Error error={update.error} />
+        <div className="account-form-grid" style={{ gridColumn: "1 / -1", width: "100%" }}>
+          <Field label="Coin code">
+            <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())} required />
+          </Field>
+          <Field label="Name">
+            <input value={displayName} onChange={e => setDisplayName(e.target.value)} required />
+          </Field>
+          <Field label="Quantity">
+            <input value={quantity} onChange={e => handleQtyChange(e.target.value)} required inputMode="decimal" />
+          </Field>
+          <Field label="Purchase price">
+            <div className="amount-row"><MoneyInput value={price} onChange={handlePriceChange} placeholder="0" required /><span className="currency-badge">VND</span></div>
+          </Field>
+          <Field label="Total cost">
+            <div className="amount-row"><MoneyInput value={totalCost} onChange={handleTotalChange} placeholder="0" required /><span className="currency-badge">VND</span></div>
+          </Field>
+          <div className="full-span">
+            <Field label="Purchase date">
+              <DateRow value={cryptoDate} onChange={setCryptoDate} language={language} label="Purchase date" />
+            </Field>
+          </div>
+          <div className="full-span">
+            <label className="checkbox-row">
+              <input type="checkbox" checked={excluded} onChange={e => setExcluded(e.target.checked)} />
+              <span>{tr("Exclude from reports")}</span>
+            </label>
+          </div>
+        </div>
+        <div className="form-actions" style={{ gridColumn: "1 / -1", marginTop: "14px" }}>
+          <Submit pending={update.isPending} text="Save changes" />
+          <button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function MetalsHoldingsTable({
+  metals,
+  portfolioRows,
+  onEdit,
+  onDeleted,
+}: {
+  metals: MetalHolding[];
+  portfolioRows: import("../lib/api").PortfolioRow[];
+  onEdit: (m: MetalHolding) => void;
+  onDeleted: () => void;
+}) {
+  const { tr, label } = useI18n();
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.assets.metals.remove(id),
+    onSuccess: onDeleted,
+  });
+
+  return (
+    <div className="holdings-table-wrap">
+      <table className="holdings-table">
+        <thead>
+          <tr>
+            <th>{tr("Product")}</th>
+            <th>{tr("Brand")}</th>
+            <th>{tr("Purity")}</th>
+            <th>{tr("Quantity (chỉ)")}</th>
+            <th>{tr("Grams")}</th>
+            <th>{tr("Purchase price")}</th>
+            <th>{tr("Total cost")}</th>
+            <th>{tr("Date")}</th>
+            <th>{tr("Market price")}</th>
+            <th>{tr("Market value")}</th>
+            <th>{tr("Profit / Loss")}</th>
+            <th>{tr("Edit")} / {tr("Delete")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {metals.length === 0 ? (
+            <tr>
+              <td colSpan={12} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
+                {tr("No precious metals yet.")}
+              </td>
+            </tr>
+          ) : (
+            metals.map(m => {
+              const portRow = portfolioRows.find(r => r.id === m.id);
+              const currentVal = portRow?.value ?? m.total_cost;
+              const chiQty = (Number(m.quantity_grams) / 3.75).toFixed(2);
+              const currentValNum = Number(currentVal);
+              const totalCostNum = Number(m.total_cost);
+              const deltaNum = currentValNum - totalCostNum;
+              const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
+              const marketPricePerChi = chiQty && Number(chiQty) > 0 && currentValNum > 0
+                ? Math.round(currentValNum / Number(chiQty))
+                : null;
+
+              return (
+                <tr key={m.id}>
+                  <td><strong>{m.product_type}</strong></td>
+                  <td>{label(m.brand)}</td>
+                  <td>{m.purity ? `${(Number(m.purity) * 100).toFixed(2)}%` : "99.99%"}</td>
+                  <td><b>{chiQty}</b> chỉ</td>
+                  <td>{m.quantity_grams} g</td>
+                  <td>{fmtMoneyDisplay(m.purchase_price)} đ</td>
+                  <td><b>{fmtMoneyDisplay(m.total_cost)} đ</b></td>
+                  <td>{m.purchase_date}</td>
+                  <td>{marketPricePerChi ? `${fmtMoneyDisplay(String(marketPricePerChi))} đ/chỉ` : "—"}</td>
+                  <td><strong>{fmtMoneyDisplay(currentVal)} đ</strong></td>
+                  <td>
+                    <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
+                      {deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} ({deltaNum > 0 ? "+" : ""}{pnlPct}%)
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button type="button" className="text-button" onClick={() => onEdit(m)}>{tr("Edit")}</button>
+                      <button
+                        type="button"
+                        className="text-button danger"
+                        disabled={deleteMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(`${tr("Confirm delete")}?`)) {
+                            deleteMutation.mutate(m.id);
+                          }
+                        }}
+                      >
+                        {tr("Delete")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CryptoHoldingsTable({
+  crypto,
+  portfolioRows,
+  onEdit,
+  onDeleted,
+}: {
+  crypto: CryptoHolding[];
+  portfolioRows: import("../lib/api").PortfolioRow[];
+  onEdit: (c: CryptoHolding) => void;
+  onDeleted: () => void;
+}) {
+  const { tr } = useI18n();
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.assets.crypto.remove(id),
+    onSuccess: onDeleted,
+  });
+
+  return (
+    <div className="holdings-table-wrap">
+      <table className="holdings-table">
+        <thead>
+          <tr>
+            <th>{tr("Coin code")}</th>
+            <th>{tr("Name")}</th>
+            <th>{tr("Quantity")}</th>
+            <th>{tr("Purchase price")}</th>
+            <th>{tr("Total cost")}</th>
+            <th>{tr("Date")}</th>
+            <th>{tr("Market price")}</th>
+            <th>{tr("Market value")}</th>
+            <th>{tr("Profit / Loss")}</th>
+            <th>{tr("Edit")} / {tr("Delete")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {crypto.length === 0 ? (
+            <tr>
+              <td colSpan={10} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
+                {tr("No crypto yet.")}
+              </td>
+            </tr>
+          ) : (
+            crypto.map(c => {
+              const portRow = portfolioRows.find(r => r.id === c.id);
+              const currentVal = portRow?.value ?? c.total_cost;
+              const currentValNum = Number(currentVal);
+              const totalCostNum = Number(c.total_cost);
+              const qtyNum = Number(c.quantity);
+              const deltaNum = currentValNum - totalCostNum;
+              const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
+              const marketPricePerUnit = qtyNum > 0 && currentValNum > 0
+                ? Math.round(currentValNum / qtyNum)
+                : null;
+
+              return (
+                <tr key={c.id}>
+                  <td><strong>{c.symbol}</strong></td>
+                  <td>{c.display_name}</td>
+                  <td><b>{c.quantity}</b></td>
+                  <td>{fmtMoneyDisplay(c.purchase_price)} đ</td>
+                  <td><b>{fmtMoneyDisplay(c.total_cost)} đ</b></td>
+                  <td>{c.purchase_date}</td>
+                  <td>{marketPricePerUnit ? `${fmtMoneyDisplay(String(marketPricePerUnit))} đ` : "—"}</td>
+                  <td><strong>{fmtMoneyDisplay(currentVal)} đ</strong></td>
+                  <td>
+                    <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
+                      {deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} ({deltaNum > 0 ? "+" : ""}{pnlPct}%)
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button type="button" className="text-button" onClick={() => onEdit(c)}>{tr("Edit")}</button>
+                      <button
+                        type="button"
+                        className="text-button danger"
+                        disabled={deleteMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm(`${tr("Confirm delete")}?`)) {
+                            deleteMutation.mutate(c.id);
+                          }
+                        }}
+                      >
+                        {tr("Delete")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Assets() {
+  const { tr, label, language } = useI18n();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["portfolio"], queryFn: api.portfolio.overview });
+  const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
+  const { balances } = useAccountBalances(accountsQ.data);
+  const savingsQ = useQuery({ queryKey: ["savings"], queryFn: api.assets.savings.list });
+  const metalsQ = useQuery({ queryKey: ["metals"], queryFn: api.assets.metals.list });
+  const cryptoQ = useQuery({ queryKey: ["crypto"], queryFn: api.assets.crypto.list });
+  const brands = useQuery({ queryKey: ["metal-brands"], queryFn: api.assets.metalBrands });
+
+  const [tab, setTab] = useState<"liquid" | "savings" | "metals" | "crypto">("liquid");
+  const [metalQty, setMetalQty] = useState("");
+  const [metalDate, setMetalDate] = useState(todayIso());
+  const [metalPrice, setMetalPrice] = useState("");
+  const [metalTotal, setMetalTotal] = useState("");
+  const [cryptoDate, setCryptoDate] = useState(todayIso());
+  const [cryptoCurrency, setCryptoCurrency] = useState<"VND" | "USD">("VND");
+  const [cryptoQty, setCryptoQty] = useState("");
+  const [cryptoPrice, setCryptoPrice] = useState("");
+  const [cryptoTotal, setCryptoTotal] = useState("");
+
+  const [editingMetal, setEditingMetal] = useState<MetalHolding | null>(null);
+  const [editingCrypto, setEditingCrypto] = useState<CryptoHolding | null>(null);
+
+  const fx = useQuery({ queryKey: ["fx", "usd-vnd"], queryFn: api.fx.usdVnd, enabled: cryptoCurrency === "USD", staleTime: 5 * 60 * 1000 });
+  const metal = useMutation({
+    mutationFn: api.assets.metals.create,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
+      qc.invalidateQueries({ queryKey: ["metals"] });
+      setMetalQty("");
+      setMetalPrice("");
+      setMetalTotal("");
+    },
+  });
+  const crypto = useMutation({
+    mutationFn: api.assets.crypto.create,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
+      qc.invalidateQueries({ queryKey: ["crypto"] });
+      setCryptoQty("");
+      setCryptoPrice("");
+      setCryptoTotal("");
+    },
+  });
+
+  function normDecimal(raw: string): string { return raw.trim().replace(",", "."); }
+  function percentToFraction(raw: string): string {
+    const trimmed = normDecimal(raw);
+    if (!trimmed) return "0.9999";
+    const negative = trimmed.startsWith("-");
+    const [wholeRaw, fracRaw = ""] = trimmed.replace(/^-/, "").split(".");
+    const whole = wholeRaw.replace(/\D/g, "") || "0";
+    const frac = fracRaw.replace(/\D/g, "");
+    const digits = whole + frac;
+    const pointPos = whole.length - 2;
+    const shifted = pointPos <= 0 ? `0.${"0".repeat(-pointPos)}${digits}` : `${digits.slice(0, pointPos)}.${digits.slice(pointPos)}`;
+    const [w, d = ""] = shifted.split(".");
+    return `${negative ? "-" : ""}${w || "0"}.${(d + "0000").slice(0, 4)}`;
+  }
+
+  function handleMetalQtyChange(v: string) {
+    setMetalQty(v);
+    const qNum = Number(normDecimal(v));
+    const pNum = Number(normDecimal(metalPrice));
+    if (qNum > 0 && pNum > 0) setMetalTotal(String(Math.round(qNum * pNum)));
+  }
+  function handleMetalPriceChange(v: string) {
+    setMetalPrice(v);
+    const pNum = Number(normDecimal(v));
+    const qNum = Number(normDecimal(metalQty));
+    if (qNum > 0 && pNum > 0) setMetalTotal(String(Math.round(qNum * pNum)));
+  }
+  function handleMetalTotalChange(v: string) {
+    setMetalTotal(v);
+    const tNum = Number(normDecimal(v));
+    const qNum = Number(normDecimal(metalQty));
+    if (qNum > 0 && tNum > 0) setMetalPrice(String(Math.round(tNum / qNum)));
+  }
+
+  function handleCryptoQtyChange(v: string) {
+    setCryptoQty(v);
+    const qNum = Number(normDecimal(v));
+    if (cryptoCurrency === "VND") {
+      const pNum = Number(normDecimal(cryptoPrice));
+      if (qNum > 0 && pNum > 0) setCryptoTotal(String(Math.round(qNum * pNum)));
+    } else {
+      const pUsd = Number(normDecimal(cryptoPrice));
+      const rate = fx.data?.rate ? Number(fx.data.rate) : 0;
+      if (qNum > 0 && pUsd > 0 && rate > 0) {
+        setCryptoTotal(String(Math.round(qNum * Math.round(pUsd * rate))));
+      }
+    }
+  }
+  function handleCryptoPriceChange(v: string) {
+    setCryptoPrice(v);
+    const qNum = Number(normDecimal(cryptoQty));
+    if (cryptoCurrency === "VND") {
+      const pNum = Number(normDecimal(v));
+      if (qNum > 0 && pNum > 0) setCryptoTotal(String(Math.round(qNum * pNum)));
+    } else {
+      const pUsd = Number(normDecimal(v));
+      const rate = fx.data?.rate ? Number(fx.data.rate) : 0;
+      if (qNum > 0 && pUsd > 0 && rate > 0) {
+        setCryptoTotal(String(Math.round(qNum * Math.round(pUsd * rate))));
+      }
+    }
+  }
+  function handleCryptoTotalChange(v: string) {
+    setCryptoTotal(v);
+    const tNum = Number(normDecimal(v));
+    const qNum = Number(normDecimal(cryptoQty));
+    if (cryptoCurrency === "VND") {
+      if (qNum > 0 && tNum > 0) setCryptoPrice(String(Math.round(tNum / qNum)));
+    } else {
+      const rate = fx.data?.rate ? Number(fx.data.rate) : 0;
+      if (qNum > 0 && tNum > 0 && rate > 0) {
+        const unitVnd = tNum / qNum;
+        setCryptoPrice((unitVnd / rate).toFixed(2));
+      }
+    }
+  }
+
   async function submit(e: FormEvent<HTMLFormElement>, kind: "metal" | "crypto") {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const v = (n: string) => String(f.get(n) ?? "");
     const vd = (n: string) => normDecimal(v(n));
     if (kind === "metal") {
-      const [whole, fraction = ""] = vd("quantity").split(".");
+      const [whole, fraction = ""] = normDecimal(metalQty || vd("quantity")).split(".");
       const scaledChi = BigInt(whole || "0") * BigInt("10000") + BigInt((fraction + "0000").slice(0, 4));
       const scaledGrams = scaledChi * BigInt("375") / BigInt("100");
       const grams = `${scaledGrams / BigInt("10000")}.${String(scaledGrams % BigInt("10000")).padStart(4, "0")}`.replace(/\.?0+$/, "");
-      metal.mutate({ metal_type: v("metal_type") as "GOLD" | "SILVER", brand: v("brand"), product_type: v("product_type"), purity: percentToFraction(v("purity")), quantity_grams: grams, purchase_date: v("date"), purchase_price: vd("price"), total_cost: vd("total"), excluded_from_reports: f.get("excluded_from_reports") === "on" });
+      metal.mutate({
+        metal_type: v("metal_type") as "GOLD" | "SILVER",
+        brand: v("brand"),
+        product_type: v("product_type"),
+        purity: percentToFraction(v("purity")),
+        quantity_grams: grams,
+        purchase_date: metalDate || v("date"),
+        purchase_price: normDecimal(metalPrice) || vd("price"),
+        total_cost: normDecimal(metalTotal) || vd("total"),
+        excluded_from_reports: f.get("excluded_from_reports") === "on",
+      });
       return;
     }
     const code = v("symbol").trim();
     if (!code) return;
-    // BUGFIX guard (user report, 2026-08-26): buying in USD needs the live
-    // FX rate to convert -- if it hasn't loaded yet (still fetching, or the
-    // source is down), there is nothing correct to submit. Rather than
-    // silently sending an unconverted USD number as if it were VND, this
-    // blocks the submit; cryptoTotals()/the disabled Add button below give
-    // the visible reason why.
-    const totals = cryptoPurchaseTotals(vd("quantity"), vd("price"), cryptoCurrency, fx.data?.rate);
-    if (!totals) return;
-    // User correction, 2026-08-26 ("sai rồi, tôi muốn được tự nhập mã của
-    // coin. chỉ tham chiếu giá của coin khi tính giá trị tài sản"): the coin
-    // code is now typed by hand, not picked from a search popover. The
-    // catalog lookup below is only a best-effort background convenience so
-    // a future live-price lookup can still work when the typed code happens
-    // to match a known CoinGecko id/symbol -- it must never block recording
-    // the purchase itself, so any failure or no-match just falls back to
-    // the typed code verbatim.
+    const totals = cryptoPurchaseTotals(normDecimal(cryptoQty), normDecimal(cryptoPrice), cryptoCurrency, fx.data?.rate);
+    const finalTotal = normDecimal(cryptoTotal) || totals?.totalVnd;
+    const finalPrice = totals?.unitPriceVnd || normDecimal(cryptoPrice);
+    if (!finalTotal || !finalPrice) return;
     const identity = await resolveCryptoIdentity(code);
-    crypto.mutate({ coingecko_id: identity.coingecko_id, symbol: identity.symbol, display_name: identity.display_name, quantity: vd("quantity"), purchase_date: v("date"), purchase_price: totals.unitPriceVnd, total_cost: totals.totalVnd, excluded_from_reports: f.get("excluded_from_reports") === "on" });
+    crypto.mutate({
+      coingecko_id: identity.coingecko_id,
+      symbol: identity.symbol,
+      display_name: identity.display_name,
+      quantity: normDecimal(cryptoQty),
+      purchase_date: cryptoDate || v("date"),
+      purchase_price: finalPrice,
+      total_cost: finalTotal,
+      excluded_from_reports: f.get("excluded_from_reports") === "on",
+    });
   }
-  // BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): neither form
-  // below rendered its mutation's error at all, so a rejected submit (e.g.
-  // the purity range validation added in app/api/assets.py) failed
-  // completely silently -- the button just... did nothing, with no
-  // indication anything went wrong.
+
   const decimalPattern = "^\\d+([.,]\\d{1,4})?$";
   const productTypes = ["RING", "BAR", "JEWELRY"] as const;
-  const cryptoTotalsPreview = cryptoPurchaseTotals(normDecimal(cryptoQty), normDecimal(cryptoPrice), cryptoCurrency, fx.data?.rate);
+
   const forms = {
-    metals: <form className="panel form asset-form" onSubmit={e => submit(e, "metal")}><h3>{tr("Precious metals")}</h3><Error error={metal.error} /><select name="metal_type"><option value="GOLD">{tr("Gold")}</option><option value="SILVER">{tr("Silver")}</option></select><select name="brand" aria-label={tr("Product catalog")}>{(brands.data ?? []).map(b => <option value={b} key={b}>{label(b)}</option>)}</select>{/* BUGFIX: the option *value* (not just its label) is what gets sent as
-    product_type and later shown verbatim as the holding's name in
-    AssetSection (which renders row.name directly, with no label()/tr()
-    pass -- see app/api/assets.py list_metals's "name": row.product_type).
-    Submitting the raw code ("RING") would have shown the untranslated code
-    in the asset list forever instead of "Nhẫn" / "Ring" -- using label(x)
-    as the value itself stores the human-readable text the user actually
-    picked, in whichever language was active at the time. */}
-    <select name="product_type" aria-label={tr("Product")} required defaultValue=""><option value="" disabled>{tr("Product")}</option>{productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}</select><input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" pattern={decimalPattern} required /><div className="amount-row purity-row"><input name="purity" placeholder="99.99" title={tr("Leave blank to use 99.99%")} aria-label={tr("Purity")} inputMode="decimal" pattern={decimalPattern} /><span className="currency-badge">%</span></div><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required /><input name="total" placeholder={tr("Total cost")} inputMode="decimal" pattern={decimalPattern} required /><input name="date" type="date" required />
-    {/* User request, 2026-08-26: "không tính vào báo cáo" also applies to newly-added assets. */}
-    <label className="checkbox-row"><input type="checkbox" name="excluded_from_reports" /><span>{tr("Exclude from reports")}</span></label>
-    <button className="primary">+ {tr("Add")}</button></form>,
-    // User correction, 2026-08-26 ("sai rồi, tôi muốn được tự nhập mã của
-    // coin. chỉ tham chiếu giá của coin khi tính giá trị tài sản"): the coin
-    // is now a free-typed code, not a search-then-select popover -- the
-    // CoinGecko catalog is only consulted in the background, via
-    // resolveCryptoIdentity() in submit(), and only to help value the asset
-    // later. Quantity and price are user-typed as before, price has a
-    // VND/USD toggle, and Total cost is no longer typed by hand -- it's
-    // always price * quantity (converting a USD price to VND first via the
-    // live rate), computed by cryptoPurchaseTotals() above and shown
-    // read-only so it can never drift from that formula.
-    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}><h3>{tr("Crypto")}</h3><Error error={crypto.error} /><input name="symbol" placeholder={tr("Coin code")} aria-label={tr("Coin code")} autoCapitalize="characters" required /><input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" pattern={decimalPattern} required value={cryptoQty} onChange={e => setCryptoQty(e.target.value)} /><div className="amount-row crypto-price-row"><input name="price" placeholder={tr("Purchase price")} inputMode="decimal" pattern={decimalPattern} required value={cryptoPrice} onChange={e => setCryptoPrice(e.target.value)} /><select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select></div>{cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoneyDisplay(fx.data.rate)} VND`}</p>}<input name="total" aria-label={tr("Total cost")} placeholder={tr("Total cost")} value={cryptoTotalsPreview ? fmtMoneyDisplay(cryptoTotalsPreview.totalVnd) ?? "" : ""} readOnly disabled /><input name="date" type="date" required />
-    <label className="checkbox-row"><input type="checkbox" name="excluded_from_reports" /><span>{tr("Exclude from reports")}</span></label>
-    <button className="primary" disabled={!cryptoTotalsPreview}>+ {tr("Add")}</button></form>,
-  };
-  const p = q.data;
-  return <Section title="Assets" subtitle="Manage assets, investments, and net worth in one place.">
-    <Loading show={q.isPending} />
-    <Error error={q.error} />
-    {p && <>
-      <div className="portfolio-grid metrics-grid">
-        <article className="panel"><h3>{tr("Net worth")}</h3><p className="metric">{fmtMoneyDisplay(p.net_worth) ?? tr("Valuation incomplete")}</p></article>
-        <article className="panel"><h3>{tr("Accounts in scope")}</h3><p className="metric">{p.account_count}</p></article>
-        <article className="panel"><h3>{tr("Invested assets")}</h3><p className="metric">{fmtMoneyDisplay(p.invested_assets) ?? tr("Valuation incomplete")}</p></article>
+    metals: <form className="panel form asset-form" onSubmit={e => submit(e, "metal")}>
+      <h3>{tr("Precious metals")}</h3>
+      <Error error={metal.error} />
+      <select name="metal_type"><option value="GOLD">{tr("Gold")}</option><option value="SILVER">{tr("Silver")}</option></select>
+      <select name="brand" aria-label={tr("Product catalog")}>{(brands.data ?? []).map(b => <option value={b} key={b}>{label(b)}</option>)}</select>
+      <select name="product_type" aria-label={tr("Product")} required defaultValue="">
+        <option value="" disabled>{tr("Product")}</option>
+        {productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}
+      </select>
+      <input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" required value={metalQty} onChange={e => handleMetalQtyChange(e.target.value)} />
+      <div className="amount-row purity-row">
+        <input name="purity" placeholder="99.99" title={tr("Leave blank to use 99.99%")} aria-label={tr("Purity")} inputMode="decimal" pattern={decimalPattern} />
+        <span className="currency-badge">%</span>
       </div>
-      {!p.valuation_complete && <p className="quote-notice" role="status">{tr("Valuation incomplete: one or more invested assets has no usable quote.")}</p>}
-    </>}
-    <div className="asset-tabs" role="tablist">{([["savings","Savings"],["metals","Precious metals"],["crypto","Crypto"]] as const).map(([id,label])=><button type="button" role="tab" aria-selected={tab===id} className={tab===id?"active":""} onClick={()=>setTab(id)} key={id}>{tr(label)}</button>)}</div>
-    {tab === "savings" ? <SavingsPanel /> : <>{forms[tab]}<div className="asset-sections"><AssetSection title={tab === "metals" ? "Precious metals" : "Crypto"} rows={tab === "metals" ? p?.precious_metals ?? [] : p?.crypto ?? []} kind={tab}/></div></>}
-    {p && <div className="asset-sections asset-sections-secondary"><AssetSection title="Credit cards" rows={p.credit_cards}/></div>}
-  </Section>;
+      <div className="amount-row">
+        <MoneyInput value={metalPrice} onChange={handleMetalPriceChange} placeholder={tr("Purchase price")} required />
+        <span className="currency-badge">VND</span>
+      </div>
+      <div className="amount-row">
+        <MoneyInput value={metalTotal} onChange={handleMetalTotalChange} placeholder={tr("Total cost")} required />
+        <span className="currency-badge">VND</span>
+      </div>
+      <DateRow name="date" value={metalDate} onChange={setMetalDate} language={language} label="Purchase date" />
+      <label className="checkbox-row"><input type="checkbox" name="excluded_from_reports" /><span>{tr("Exclude from reports")}</span></label>
+      <button className="primary">+ {tr("Add")}</button>
+    </form>,
+
+    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}>
+      <h3>{tr("Crypto")}</h3>
+      <Error error={crypto.error} />
+      <input name="symbol" placeholder={tr("Coin code")} aria-label={tr("Coin code")} autoCapitalize="characters" required />
+      <input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" required value={cryptoQty} onChange={e => handleCryptoQtyChange(e.target.value)} />
+      <div className="amount-row crypto-price-row">
+        <MoneyInput value={cryptoPrice} onChange={handleCryptoPriceChange} placeholder={tr("Purchase price")} allowDecimal={cryptoCurrency === "USD"} required />
+        <select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select>
+      </div>
+      {cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoneyDisplay(fx.data.rate)} VND`}</p>}
+      <div className="amount-row">
+        <MoneyInput value={cryptoTotal} onChange={handleCryptoTotalChange} placeholder={tr("Total cost")} required />
+        <span className="currency-badge">VND</span>
+      </div>
+      <DateRow name="date" value={cryptoDate} onChange={setCryptoDate} language={language} label="Purchase date" />
+      <label className="checkbox-row"><input type="checkbox" name="excluded_from_reports" /><span>{tr("Exclude from reports")}</span></label>
+      <button className="primary">+ {tr("Add")}</button>
+    </form>,
+  };
+
+  const p = q.data;
+
+  function refreshHoldings() {
+    qc.invalidateQueries({ queryKey: ["portfolio"] });
+    qc.invalidateQueries({ queryKey: ["metals"] });
+    qc.invalidateQueries({ queryKey: ["crypto"] });
+  }
+
+  const liquidAccounts = (accountsQ.data ?? []).filter(a => a.is_active && a.account_type !== "CREDIT_CARD");
+
+  return (
+    <Section title="Assets" subtitle="Manage assets, investments, and net worth in one place.">
+      <Loading show={q.isPending || accountsQ.isPending} />
+      <Error error={q.error} />
+
+      <AssetDashboard
+        accounts={accountsQ.data ?? []}
+        accountBalances={balances}
+        savings={savingsQ.data ?? []}
+        metals={metalsQ.data ?? []}
+        crypto={cryptoQ.data ?? []}
+        activeTab={tab}
+        onSelectTab={setTab}
+      />
+
+      {tab === "liquid" && (
+        <div className="liquid-accounts-panel">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+            <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>{tr("Cash & Bank accounts")}</h3>
+            <span className="hint">{liquidAccounts.length} {tr("Accounts")}</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {liquidAccounts.length === 0 ? (
+              <Empty show={true} text="No accounts yet." />
+            ) : (
+              liquidAccounts.map(a => {
+                const bal = balances.get(a.id);
+                return (
+                  <div className="liquid-account-row" key={a.id}>
+                    <div className="liquid-account-left">
+                      <AccountLogo name={a.name} accountType={a.account_type} />
+                      <div className="liquid-account-meta">
+                        <span className="liquid-account-name">{a.name}</span>
+                        <span className="liquid-account-type">{label(a.account_type)} · {a.currency}</span>
+                      </div>
+                    </div>
+                    <div className="liquid-account-bal">
+                      {fmtMoneyDisplay(bal) ?? "—"} {a.currency}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "savings" && <SavingsPanel />}
+
+      {tab === "metals" && (
+        <>
+          {forms.metals}
+          <div className="asset-sections" style={{ marginTop: "18px" }}>
+            <MetalsHoldingsTable
+              metals={metalsQ.data ?? []}
+              portfolioRows={p?.precious_metals ?? []}
+              onEdit={m => setEditingMetal(m)}
+              onDeleted={refreshHoldings}
+            />
+          </div>
+        </>
+      )}
+
+      {tab === "crypto" && (
+        <>
+          {forms.crypto}
+          <div className="asset-sections" style={{ marginTop: "18px" }}>
+            <CryptoHoldingsTable
+              crypto={cryptoQ.data ?? []}
+              portfolioRows={p?.crypto ?? []}
+              onEdit={c => setEditingCrypto(c)}
+              onDeleted={refreshHoldings}
+            />
+          </div>
+        </>
+      )}
+
+      {editingMetal && (
+        <MetalEditModal
+          holding={editingMetal}
+          brands={brands.data ?? []}
+          onDone={() => { setEditingMetal(null); refreshHoldings(); }}
+          onCancel={() => setEditingMetal(null)}
+        />
+      )}
+
+      {editingCrypto && (
+        <CryptoEditModal
+          holding={editingCrypto}
+          onDone={() => { setEditingCrypto(null); refreshHoldings(); }}
+          onCancel={() => setEditingCrypto(null)}
+        />
+      )}
+    </Section>
+  );
 }
 
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
@@ -378,6 +1172,148 @@ function fmtMoneyDisplay(value: string | null | undefined): string | null | unde
   return `${negative ? "-" : ""}${groupThousands(whole)}${frac ? "," + frac : ""}`;
 }
 
+function formatMoneyInput(raw: string, allowDecimal = false): string {
+  if (!raw) return "";
+  const isNegative = raw.startsWith("-");
+  if (allowDecimal) {
+    const clean = raw.replace(/[^\d.,]/g, "").replace(",", ".");
+    const parts = clean.split(".");
+    const intPart = parts[0] ? groupThousands(parts[0].replace(/\D/g, "")) : "0";
+    const decPart = parts.length > 1 ? "," + parts.slice(1).join("").replace(/\D/g, "").slice(0, 4) : "";
+    return `${isNegative ? "-" : ""}${intPart}${decPart}`;
+  }
+  // VND money: strictly integer without fractional decimals, grouped with dots every 3 digits
+  const cleanDigits = raw.replace(/\D/g, "");
+  if (!cleanDigits) return isNegative ? "-" : "";
+  const unpadded = cleanDigits.replace(/^0+(?=\d)/, "");
+  return `${isNegative ? "-" : ""}${groupThousands(unpadded)}`;
+}
+
+function parseMoneyInput(formatted: string, allowDecimal = false): string {
+  if (!formatted) return "";
+  const isNegative = formatted.startsWith("-");
+  if (allowDecimal) {
+    const clean = formatted.replace(/[^\d.,]/g, "").replace(",", ".");
+    const parts = clean.split(".");
+    const intPart = (parts[0] ?? "").replace(/\D/g, "");
+    const decPart = parts.length > 1 ? "." + parts.slice(1).join("").replace(/\D/g, "").slice(0, 4) : "";
+    return `${isNegative ? "-" : ""}${intPart}${decPart}`;
+  }
+  // VND money: strictly integer string
+  const cleanDigits = formatted.replace(/\D/g, "");
+  if (!cleanDigits) return "";
+  const unpadded = cleanDigits.replace(/^0+(?=\d)/, "");
+  return `${isNegative ? "-" : ""}${unpadded}`;
+}
+
+function MoneyInput({
+  value,
+  onChange,
+  className = "amount-input",
+  placeholder = "0",
+  required = true,
+  allowDecimal = false,
+  name,
+  id,
+  autoFocus,
+  readOnly,
+  disabled,
+  title,
+}: {
+  value: string;
+  onChange: (unformatted: string) => void;
+  className?: string;
+  placeholder?: string;
+  required?: boolean;
+  allowDecimal?: boolean;
+  name?: string;
+  id?: string;
+  autoFocus?: boolean;
+  readOnly?: boolean;
+  disabled?: boolean;
+  title?: string;
+}) {
+  const displayVal = formatMoneyInput(value, allowDecimal);
+  return (
+    <input
+      type="text"
+      inputMode={allowDecimal ? "decimal" : "numeric"}
+      name={name}
+      id={id}
+      className={className}
+      placeholder={placeholder}
+      required={required}
+      autoFocus={autoFocus}
+      readOnly={readOnly}
+      disabled={disabled}
+      title={title}
+      value={displayVal}
+      onChange={e => {
+        const raw = e.target.value;
+        const unformatted = parseMoneyInput(raw, allowDecimal);
+        onChange(unformatted);
+      }}
+    />
+  );
+}
+
+const QUICK_EXPENSE_CATEGORIES = [
+  { nameVi: "Ăn uống", nameEn: "Food", icon: "Utensils", match: ["ăn uống", "food", "ăn ngoài", "nhà hàng", "eating"] },
+  { nameVi: "Cà phê & Đồ uống", nameEn: "Coffee & Drinks", icon: "Coffee", match: ["cà phê", "coffee", "đồ uống", "cafe", "trà sữa"] },
+  { nameVi: "Đi chợ / Siêu thị", nameEn: "Groceries", icon: "Basket", match: ["đi chợ", "siêu thị", "groceries", "chợ", "market"] },
+  { nameVi: "Mua sắm", nameEn: "Shopping", icon: "ShoppingBag", match: ["mua sắm", "shopping", "quần áo", "clothes"] },
+  { nameVi: "Di chuyển / Xăng xe", nameEn: "Transportation", icon: "Fuel", match: ["di chuyển", "xăng", "transportation", "xe cộ", "fuel"] },
+  { nameVi: "Hóa đơn & Tiện ích", nameEn: "Bills & Utilities", icon: "Bolt", match: ["hóa đơn", "tiện ích", "điện", "nước", "internet", "bills", "utilities"] },
+  { nameVi: "Nhà cửa", nameEn: "Housing", icon: "Home", match: ["nhà cửa", "nhà ở", "tiền nhà", "home", "housing", "rent"] },
+  { nameVi: "Giải trí", nameEn: "Entertainment", icon: "Play", match: ["giải trí", "entertainment", "xem phim", "game", "chơi"] },
+  { nameVi: "Sức khỏe", nameEn: "Healthcare", icon: "Heart", match: ["sức khỏe", "thuốc", "khám", "health", "medical", "bệnh"] },
+  { nameVi: "Học tập", nameEn: "Education", icon: "Book", match: ["học tập", "giáo dục", "sách", "education", "khóa học"] },
+];
+
+function QuickCategoryPills({
+  categories,
+  selectedCategoryId,
+  onSelectCategory,
+  language,
+}: {
+  categories: Category[];
+  selectedCategoryId: string;
+  onSelectCategory: (categoryId: string) => void;
+  language: Language;
+}) {
+  const { tr } = useI18n();
+  return (
+    <div className="quick-categories-container">
+      <span className="quick-categories-label">{tr("Quick categories")}</span>
+      <div className="quick-category-pills" role="toolbar" aria-label={tr("Quick categories")}>
+        {QUICK_EXPENSE_CATEGORIES.map(q => {
+          const target = categories.find(c => {
+            const lower = c.name.toLowerCase();
+            return q.match.some(m => lower.includes(m.toLowerCase()));
+          });
+          const catId = target ? String(target.id) : "";
+          const isActive = Boolean(catId && selectedCategoryId === catId);
+          const labelText = language === "vi" ? q.nameVi : q.nameEn;
+          return (
+            <button
+              key={q.nameVi}
+              type="button"
+              className={`quick-chip ${isActive ? "active" : ""}`}
+              onClick={() => {
+                if (catId) onSelectCategory(catId);
+              }}
+              title={labelText}
+            >
+              <CategoryIconBadge name={q.nameEn} icon={q.icon} size={20} iconSize={12} />
+              <span>{labelText}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** Bulk-fetch every account's balance under one query key, keyed off the id
  * set so it refetches when accounts are added/removed. Used wherever an
  * account list needs to show a live balance (Accounts page, credit-card
@@ -464,9 +1400,10 @@ function SavingsPanel() {
 }
 
 function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccounts: Account[]; onDone: () => void; onCancel: () => void }) {
-  const { tr, label } = useI18n();
+  const { tr, label, language } = useI18n();
   const [openedDate, setOpenedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [termMonths, setTermMonths] = useState("12");
+  const [principal, setPrincipal] = useState("");
   const create = useMutation({ mutationFn: (input: SavingsCreateInput) => api.assets.savings.create(input), onSuccess: onDone });
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -474,7 +1411,7 @@ function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccount
     const v = (n: string) => String(f.get(n) ?? "").trim();
     create.mutate({
       institution: v("institution"), product_name: v("product_name") || undefined, name: v("name"),
-      principal: v("principal"), funding_account_id: Number(v("funding_account_id")), opened_date: v("opened_date"),
+      principal: principal || v("principal"), funding_account_id: Number(v("funding_account_id")), opened_date: openedDate || v("opened_date"),
       term_months: Number(v("term_months")), annual_rate: v("annual_rate"), non_term_rate: v("non_term_rate") || "0",
       interest_payment_method: v("interest_payment_method") as SavingsCreateInput["interest_payment_method"],
       maturity_action: v("maturity_action") as SavingsCreateInput["maturity_action"],
@@ -492,13 +1429,13 @@ function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccount
       <Field label="Savings account name"><input name="name" required /></Field>
     </fieldset>
     <fieldset><legend>{tr("Deposit amount")}</legend>
-      <Field label="Deposit amount"><input name="principal" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" required /></Field>
+      <Field label="Deposit amount"><div className="amount-row"><MoneyInput value={principal} onChange={setPrincipal} placeholder="0" required /><span className="currency-badge">VND</span></div></Field>
       <Field label="Source account"><select name="funding_account_id" required defaultValue="">
         <option value="" disabled>{tr("Select account")}</option>
         {walletAccounts.map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
       </select></Field>
       {walletAccounts.length === 0 && <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p>}
-      <Field label="Deposit date"><input name="opened_date" type="date" required value={openedDate} onChange={e => setOpenedDate(e.target.value)} /></Field>
+      <Field label="Deposit date"><DateRow name="opened_date" value={openedDate} onChange={setOpenedDate} language={language} label="Deposit date" /></Field>
       <Field label="Term (months)"><input name="term_months" type="number" min={1} step={1} required value={termMonths} onChange={e => setTermMonths(e.target.value)} /></Field>
     </fieldset>
     <fieldset><legend>{tr("Interest rate")} &amp; {tr("Maturity date")}</legend>
@@ -522,16 +1459,6 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
   const detail = useQuery({ queryKey: ["savings", id], queryFn: () => api.assets.savings.get(id) });
   const qc = useQueryClient();
   function afterAction() { setAction(null); qc.invalidateQueries({ queryKey: ["savings", id] }); onChanged(); }
-  // User request, 2026-08-26: "không tính vào báo cáo" must be editable
-  // from the asset-edit menu -- unlike every other savings field, this one
-  // is pure reporting metadata, not financial history (see the backend's
-  // update_savings, which deliberately lets this field bypass the
-  // "editable" / edit-before-history gate), so it's toggled here directly
-  // rather than only inside SavingsEditForm (which only ever renders while
-  // row.editable is true).
-  // Optimistic cache update -- see the identical rationale on AssetSection's
-  // `toggle` mutation above: without this, the checkbox only reflects the
-  // click after the PATCH round-trips and ["savings", id] refetches.
   const excludeToggle = useMutation({
     mutationFn: (excluded: boolean) => api.assets.savings.update(id, { excluded_from_reports: excluded }),
     onMutate: async (excluded: boolean) => {
@@ -601,8 +1528,9 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
 }
 
 function SavingsEditForm({ row, onDone, onCancel }: { row: SavingsAccount; onDone: () => void; onCancel: () => void }) {
-  const { tr, label } = useI18n();
+  const { tr, label, language } = useI18n();
   const term = row.current_term;
+  const [openedDate, setOpenedDate] = useState(term?.start_date ?? todayIso());
   const patch = useMutation({ mutationFn: (input: SavingsPatchInput) => api.assets.savings.update(row.id, input), onSuccess: onDone });
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -610,7 +1538,7 @@ function SavingsEditForm({ row, onDone, onCancel }: { row: SavingsAccount; onDon
     const v = (n: string) => String(f.get(n) ?? "").trim();
     patch.mutate({
       institution: v("institution"), product_name: v("product_name"), name: v("name"),
-      opened_date: v("opened_date"), term_months: Number(v("term_months")),
+      opened_date: openedDate || v("opened_date"), term_months: Number(v("term_months")),
       annual_rate: v("annual_rate"), non_term_rate: v("non_term_rate"),
       maturity_action: v("maturity_action") as SavingsPatchInput["maturity_action"],
       notes: v("notes") || null,
@@ -621,7 +1549,7 @@ function SavingsEditForm({ row, onDone, onCancel }: { row: SavingsAccount; onDon
     <Field label="Institution"><input name="institution" defaultValue={row.institution} required /></Field>
     <Field label="Savings product"><input name="product_name" defaultValue={row.product_name} required /></Field>
     <Field label="Savings account name"><input name="name" defaultValue={row.name} required /></Field>
-    <Field label="Deposit date"><input name="opened_date" type="date" defaultValue={term?.start_date} required /></Field>
+    <Field label="Deposit date"><DateRow name="opened_date" value={openedDate} onChange={setOpenedDate} language={language} label="Deposit date" /></Field>
     <Field label="Term (months)"><input name="term_months" type="number" min={1} step={1} defaultValue={term?.term_months} required /></Field>
     <Field label="Annual interest rate (%/year)"><input name="annual_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue={term?.annual_rate} required /></Field>
     <Field label="Demand interest rate (%/year)"><input name="non_term_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue={term?.non_term_rate} /></Field>
@@ -632,7 +1560,10 @@ function SavingsEditForm({ row, onDone, onCancel }: { row: SavingsAccount; onDon
 }
 
 function SavingsCloseForm({ id, kind, walletAccounts, onDone, onCancel }: { id: number; kind: "close" | "early-close"; walletAccounts: Account[]; onDone: () => void; onCancel: () => void }) {
-  const { tr, label } = useI18n();
+  const { tr, label, language } = useI18n();
+  const [closedDate, setClosedDate] = useState(todayIso());
+  const [actualInterest, setActualInterest] = useState("");
+  const [fee, setFee] = useState("");
   const close = useMutation({
     mutationFn: (payload: { closed_date: string; receiving_account_id: number; actual_interest: string; fee?: string }) =>
       kind === "close" ? api.assets.savings.close(id, payload) : api.assets.savings.earlyClose(id, payload),
@@ -642,35 +1573,37 @@ function SavingsCloseForm({ id, kind, walletAccounts, onDone, onCancel }: { id: 
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const v = (n: string) => String(f.get(n) ?? "").trim();
-    close.mutate({ closed_date: v("closed_date"), receiving_account_id: Number(v("receiving_account_id")), actual_interest: v("actual_interest") || "0", fee: kind === "early-close" ? (v("fee") || "0") : undefined });
+    close.mutate({ closed_date: closedDate || v("closed_date"), receiving_account_id: Number(v("receiving_account_id")), actual_interest: actualInterest || "0", fee: kind === "early-close" ? (fee || "0") : undefined });
   }
   return <form className="form savings-form" onSubmit={submit}>
     <Error error={close.error} />
-    <Field label="Settlement date"><input name="closed_date" type="date" required /></Field>
+    <Field label="Settlement date"><DateRow name="closed_date" value={closedDate} onChange={setClosedDate} language={language} label="Settlement date" /></Field>
     <Field label="Receiving account"><select name="receiving_account_id" required defaultValue="">
       <option value="" disabled>{tr("Select account")}</option>
       {walletAccounts.map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
     </select></Field>
-    <Field label="Actual interest received"><input name="actual_interest" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" required /></Field>
-    {kind === "early-close" && <Field label="Fee (optional)"><input name="fee" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue="0" /></Field>}
+    <Field label="Actual interest received"><div className="amount-row"><MoneyInput value={actualInterest} onChange={setActualInterest} placeholder="0" required /><span className="currency-badge">VND</span></div></Field>
+    {kind === "early-close" && <Field label="Fee (optional)"><div className="amount-row"><MoneyInput value={fee} onChange={setFee} placeholder="0" required={false} /><span className="currency-badge">VND</span></div></Field>}
     <div className="form-actions"><Submit pending={close.isPending} text={kind === "close" ? "Settle" : "Early settle"} /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
   </form>;
 }
 
 function SavingsRenewForm({ id, walletAccounts, onDone, onCancel }: { id: number; walletAccounts: Account[]; onDone: () => void; onCancel: () => void }) {
-  const { tr, label } = useI18n();
+  const { tr, label, language } = useI18n();
+  const [startDate, setStartDate] = useState(todayIso());
+  const [actualInterest, setActualInterest] = useState("");
   const renew = useMutation({ mutationFn: (payload: { start_date: string; actual_interest: string; receiving_account_id?: number }) => api.assets.savings.renew(id, payload), onSuccess: onDone });
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const v = (n: string) => String(f.get(n) ?? "").trim();
     const receiving = v("receiving_account_id");
-    renew.mutate({ start_date: v("start_date"), actual_interest: v("actual_interest") || "0", receiving_account_id: receiving ? Number(receiving) : undefined });
+    renew.mutate({ start_date: startDate || v("start_date"), actual_interest: actualInterest || "0", receiving_account_id: receiving ? Number(receiving) : undefined });
   }
   return <form className="form savings-form" onSubmit={submit}>
     <Error error={renew.error} />
-    <Field label="Renewal start date"><input name="start_date" type="date" required /></Field>
-    <Field label="Actual interest received"><input name="actual_interest" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue="0" /></Field>
+    <Field label="Renewal start date"><DateRow name="start_date" value={startDate} onChange={setStartDate} language={language} label="Renewal start date" /></Field>
+    <Field label="Actual interest received"><div className="amount-row"><MoneyInput value={actualInterest} onChange={setActualInterest} placeholder="0" /><span className="currency-badge">VND</span></div></Field>
     <Field label="Receiving account"><select name="receiving_account_id" defaultValue="">
       <option value="">{tr("None")}</option>
       {walletAccounts.map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
@@ -706,8 +1639,11 @@ function DataPage() {
   // still exports everything, same as before.
   const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const [exportAccountId, setExportAccountId] = useState("");
-  const [exportStart, setExportStart] = useState("");
-  const [exportEnd, setExportEnd] = useState("");
+  const [exportStart, setExportStart] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`;
+  });
+  const [exportEnd, setExportEnd] = useState(() => todayIso());
   function exportUrl(kind: "csv" | "xlsx"): string {
     const params = new URLSearchParams();
     if (exportAccountId) params.set("account_id", exportAccountId);
@@ -799,59 +1735,287 @@ function Review() {
   return <Section title="Import & reconciliation review" subtitle="Persisted import batches and reconciliation candidates."><div className="review-grid"><article className="panel"><h3>{tr("Import batches")}</h3><Loading show={imports.isPending}/><Error error={imports.error}/><Empty show={!imports.isPending && imports.data?.length === 0} text="No import batches yet."/>{imports.data?.map(x => <div className="review-row" key={x.id}><div><strong>{x.original_filename}</strong><small>{x.source} · {x.row_count} {tr("rows")} · {x.applied_row_count >= x.row_count ? tr("Applied") : `${x.applied_row_count}/${x.row_count} ${tr("applied")}`}</small>{applyStatus[x.id] && <small className="hint">{applyStatus[x.id]}</small>}</div><div className="review-row-actions"><small>{x.imported_at}</small><button type="button" className="secondary" disabled={apply.isPending && apply.variables === x.id} onClick={() => apply.mutate(x.id)}>{apply.isPending && apply.variables === x.id ? tr("Applying...") : x.applied_row_count >= x.row_count ? tr("Re-apply") : tr("Apply")}</button></div></div>)}</article><article className="panel"><h3>{tr("Reconciliation candidates")}</h3><Loading show={reconciliation.isPending}/><Error error={reconciliation.error}/><Empty show={!reconciliation.isPending && reconciliation.data?.length === 0} text="No reconciliation candidates yet."/>{reconciliation.data?.map(x => <div className="review-row" key={x.id}><div><strong>{tr("Raw row")} #{x.source_row_number}</strong><small>{x.transaction_date} · {label(x.event_type)} · {tr("Event")} #{x.financial_event_id}</small></div><span className="badge warning">{label(x.state)}</span></div>)}</article></div></Section>;
 }
 
-// User request, 2026-08-26: "không tính vào báo cáo" also applies to newly
-// added assets, and must be editable afterwards via the asset-edit menu --
-// precious metals and crypto have no other edit UI at all today (see
-// app/api/assets.py: no PATCH endpoint existed for either before this
-// feature), so this inline checkbox is the only place to toggle it for
-// those two asset kinds. `kind` is optional and left unset for rows that
-// don't carry the field at all (credit cards), which simply render without
-// the toggle, matching today's behavior exactly.
-function AssetSection({ title, rows, kind }: { title: string; rows: import("../lib/api").PortfolioRow[]; kind?: "metals" | "crypto" }) {
-  const { label, tr } = useI18n();
-  const qc = useQueryClient();
-  // Optimistic cache update: the checkbox is controlled by react-query's
-  // ["portfolio"] cache (row.excluded_from_reports), which otherwise only
-  // reflects the toggle after the PATCH round-trips and the query
-  // refetches -- a visible one-beat flicker (and, under Playwright, a flaky
-  // "clicking the checkbox did not change its state" failure) between the
-  // native click and that refetch. Writing the new value into the cache in
-  // onMutate makes the checkbox reflect the click immediately; onError
-  // rolls it back if the PATCH actually fails, and onSettled reconciles
-  // with the server regardless of outcome.
-  const toggle = useMutation({
-    mutationFn: ({ id, excluded }: { id: number; excluded: boolean }) =>
-      kind === "metals" ? api.assets.metals.update(id, { excluded_from_reports: excluded }) : api.assets.crypto.update(id, { excluded_from_reports: excluded }),
-    onMutate: async ({ id, excluded }) => {
-      await qc.cancelQueries({ queryKey: ["portfolio"] });
-      const previous = qc.getQueryData<import("../lib/api").PortfolioOverview>(["portfolio"]);
-      if (previous && kind) {
-        const listKey = kind === "metals" ? "precious_metals" : "crypto";
-        qc.setQueryData(["portfolio"], { ...previous, [listKey]: previous[listKey].map(r => r.id === id ? { ...r, excluded_from_reports: excluded } : r) });
-      }
-      return { previous };
-    },
-    onError: (_err, _vars, context) => { if (context?.previous) qc.setQueryData(["portfolio"], context.previous); },
-    onSettled: () => qc.invalidateQueries({ queryKey: ["portfolio"] }),
-  });
-  return <article className="panel asset-panel">
-    <h3>{tr(title)}</h3>
-    <Empty show={rows.length === 0} text={`No ${title.toLowerCase()} yet.`}/>
-    <Error error={toggle.error} />
-    <div className="asset-list">{rows.map(row => <div className="asset-row" key={row.id}>
-      <div><strong>{row.name}</strong><small>{fmtMoneyDisplay(row.value) ?? tr("Valuation unavailable")}</small></div>
-      {row.quote && <div><span className="provider">{row.quote.provider ?? tr("No provider")}</span><span className="quote-state">{label(row.quote.state)}</span><small>{row.quote.quoted_at ?? tr("No quote timestamp")}</small></div>}
-      {kind && <label className="checkbox-row asset-row-toggle">
-        <input
-          type="checkbox"
-          checked={row.excluded_from_reports ?? false}
-          disabled={toggle.isPending}
-          onChange={e => toggle.mutate({ id: row.id, excluded: e.target.checked })}
-        />
-        <span>{tr("Exclude from reports")}</span>
-      </label>}
-    </div>)}</div>
-  </article>;
+type TimeScope = "ALL" | "YEAR" | "QUARTER" | "MONTH" | "WEEK" | "DAY" | "CUSTOM";
+
+function AccountPeriodTransactionsModal({
+  account,
+  onClose,
+}: {
+  account: Account;
+  onClose: () => void;
+}) {
+  const { tr, language } = useI18n();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const currentQuarter = Math.ceil(currentMonth / 3);
+
+  const [scope, setScope] = useState<TimeScope>("YEAR");
+  const [selectedYear, setSelectedYear] = useState<number>(currentYear);
+  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
+  const [selectedQuarter, setSelectedQuarter] = useState<number>(currentQuarter);
+  const [selectedWeek, setSelectedWeek] = useState<number>(Math.min(5, Math.ceil(now.getDate() / 7)));
+  const [selectedDay, setSelectedDay] = useState<string>(todayIso());
+  const [customStart, setCustomStart] = useState<string>(`${currentYear}-${pad2(currentMonth)}-01`);
+  const [customEnd, setCustomEnd] = useState<string>(todayIso());
+
+  const eventsQuery = useQuery({ queryKey: ["events"], queryFn: api.events.list });
+  const categoriesQuery = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
+
+  const { start, end } = (() => {
+    if (scope === "ALL") return { start: "1970-01-01", end: "2099-12-31" };
+    if (scope === "YEAR") return { start: `${selectedYear}-01-01`, end: `${selectedYear}-12-31` };
+    if (scope === "QUARTER") {
+      const startM = (selectedQuarter - 1) * 3 + 1;
+      const endM = selectedQuarter * 3;
+      const lastD = new Date(selectedYear, endM, 0).getDate();
+      return {
+        start: `${selectedYear}-${pad2(startM)}-01`,
+        end: `${selectedYear}-${pad2(endM)}-${pad2(lastD)}`,
+      };
+    }
+    if (scope === "MONTH") {
+      const lastD = new Date(selectedYear, selectedMonth, 0).getDate();
+      return {
+        start: `${selectedYear}-${pad2(selectedMonth)}-01`,
+        end: `${selectedYear}-${pad2(selectedMonth)}-${pad2(lastD)}`,
+      };
+    }
+    if (scope === "WEEK") {
+      const startD = (selectedWeek - 1) * 7 + 1;
+      const maxD = new Date(selectedYear, selectedMonth, 0).getDate();
+      const endD = Math.min(selectedWeek * 7, maxD);
+      return {
+        start: `${selectedYear}-${pad2(selectedMonth)}-${pad2(startD)}`,
+        end: `${selectedYear}-${pad2(selectedMonth)}-${pad2(endD)}`,
+      };
+    }
+    if (scope === "DAY") {
+      return { start: selectedDay, end: selectedDay };
+    }
+    return { start: customStart || "1970-01-01", end: customEnd || "2099-12-31" };
+  })();
+
+  const filteredEvents = (eventsQuery.data ?? [])
+    .filter(
+      ev =>
+        ev.transaction_date >= start &&
+        ev.transaction_date <= end &&
+        ev.entries.some(e => e.account_id === account.id),
+    )
+    .sort((a, b) => b.transaction_date.localeCompare(a.transaction_date) || b.id - a.id);
+
+  let totalIn = "0";
+  let totalOut = "0";
+  let net = "0";
+
+  for (const ev of filteredEvents) {
+    const entry = ev.entries.find(e => e.account_id === account.id);
+    if (!entry) continue;
+    net = sumMoney([net, entry.amount]);
+    if (entry.amount.startsWith("-")) {
+      totalOut = sumMoney([totalOut, negateMoney(entry.amount)]);
+    } else {
+      totalIn = sumMoney([totalIn, entry.amount]);
+    }
+  }
+
+  const scopes: { id: TimeScope; labelVi: string; labelEn: string }[] = [
+    { id: "ALL", labelVi: "Tất cả", labelEn: "All" },
+    { id: "YEAR", labelVi: "Năm", labelEn: "Year" },
+    { id: "QUARTER", labelVi: "Quý", labelEn: "Quarter" },
+    { id: "MONTH", labelVi: "Tháng", labelEn: "Month" },
+    { id: "WEEK", labelVi: "Tuần", labelEn: "Week" },
+    { id: "DAY", labelVi: "Ngày", labelEn: "Day" },
+    { id: "CUSTOM", labelVi: "Khoảng thời gian", labelEn: "Custom range" },
+  ];
+
+  const yearsList = [currentYear, currentYear - 1, currentYear - 2, currentYear - 3, currentYear - 4, currentYear - 5];
+
+  return (
+    <Modal title={`${account.name} — ${tr("All transactions in")}`} onClose={onClose} wide>
+      <div className="account-year-modal">
+        <div className="time-filter-section">
+          <div className="time-scope-row">
+            {scopes.map(s => {
+              const isSel = scope === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`time-scope-chip ${isSel ? "active" : ""}`}
+                  onClick={() => setScope(s.id)}
+                >
+                  <span style={{ fontSize: "0.85em" }}>{isSel ? "✓" : "○"}</span>
+                  <span>{language === "vi" ? s.labelVi : s.labelEn}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {scope === "YEAR" && (
+            <div className="time-period-tabs-wrap">
+              {yearsList.map(y => (
+                <button
+                  key={y}
+                  type="button"
+                  className={`time-period-tab ${selectedYear === y ? "active" : ""}`}
+                  onClick={() => setSelectedYear(y)}
+                >
+                  {y}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {scope === "QUARTER" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button type="button" className="date-nav" onClick={() => setSelectedYear(y => y - 1)}>‹</button>
+                <strong style={{ fontSize: "0.9rem" }}>{selectedYear}</strong>
+                <button type="button" className="date-nav" onClick={() => setSelectedYear(y => y + 1)}>›</button>
+              </div>
+              <div className="time-period-tabs-wrap">
+                {[1, 2, 3, 4].map(q => (
+                  <button
+                    key={q}
+                    type="button"
+                    className={`time-period-tab ${selectedQuarter === q ? "active" : ""}`}
+                    onClick={() => setSelectedQuarter(q)}
+                  >
+                    {language === "vi" ? `Quý ${q}` : `Q${q}`} ({`${(q - 1) * 3 + 1}-${q * 3}`})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {scope === "MONTH" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button type="button" className="date-nav" onClick={() => setSelectedYear(y => y - 1)}>‹</button>
+                <strong style={{ fontSize: "0.9rem" }}>{selectedYear}</strong>
+                <button type="button" className="date-nav" onClick={() => setSelectedYear(y => y + 1)}>›</button>
+              </div>
+              <div className="time-period-tabs-wrap">
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`time-period-tab ${selectedMonth === m ? "active" : ""}`}
+                    onClick={() => setSelectedMonth(m)}
+                  >
+                    {language === "vi" ? `Thg ${m}` : `M${m}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {scope === "WEEK" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button type="button" className="date-nav" onClick={() => setSelectedYear(y => y - 1)}>‹</button>
+                <strong style={{ fontSize: "0.9rem" }}>{selectedYear} - Thg {selectedMonth}</strong>
+                <button type="button" className="date-nav" onClick={() => setSelectedYear(y => y + 1)}>›</button>
+              </div>
+              <div className="time-period-tabs-wrap">
+                {[1, 2, 3, 4, 5].map(w => (
+                  <button
+                    key={w}
+                    type="button"
+                    className={`time-period-tab ${selectedWeek === w ? "active" : ""}`}
+                    onClick={() => setSelectedWeek(w)}
+                  >
+                    {language === "vi" ? `Tuần ${w}` : `W${w}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {scope === "DAY" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div className="time-period-tabs-wrap">
+                <button
+                  type="button"
+                  className={`time-period-tab ${selectedDay === todayIso() ? "active" : ""}`}
+                  onClick={() => setSelectedDay(todayIso())}
+                >
+                  {language === "vi" ? "Hôm nay" : "Today"}
+                </button>
+                <button
+                  type="button"
+                  className={`time-period-tab ${selectedDay === shiftIsoDate(todayIso(), -1) ? "active" : ""}`}
+                  onClick={() => setSelectedDay(shiftIsoDate(todayIso(), -1))}
+                >
+                  {language === "vi" ? "Hôm qua" : "Yesterday"}
+                </button>
+              </div>
+              <DateRow value={selectedDay} onChange={setSelectedDay} language={language} label="Choose date" />
+            </div>
+          )}
+
+          {scope === "CUSTOM" && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", width: "100%" }}>
+              <div className="field">
+                <label style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: "4px", display: "block", color: "var(--text)" }}>{tr("Start date")}</label>
+                <DateRow value={customStart} onChange={setCustomStart} language={language} label="Start date" />
+              </div>
+              <div className="field">
+                <label style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: "4px", display: "block", color: "var(--text)" }}>{tr("End date")}</label>
+                <DateRow value={customEnd} onChange={setCustomEnd} language={language} label="End date" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="account-year-stats">
+          <div className="account-year-stat">
+            <span>{tr("Total income")}</span>
+            <strong className="positive">+{fmtMoneyDisplay(totalIn)} {account.currency}</strong>
+          </div>
+          <div className="account-year-stat">
+            <span>{tr("Total expense")}</span>
+            <strong className="negative">-{fmtMoneyDisplay(totalOut)} {account.currency}</strong>
+          </div>
+          <div className="account-year-stat">
+            <span>{tr("Net change")}</span>
+            <strong className={net.startsWith("-") ? "negative" : "positive"}>
+              {net.startsWith("-") ? "" : "+"}{fmtMoneyDisplay(net)} {account.currency}
+            </strong>
+          </div>
+        </div>
+
+        <Loading show={eventsQuery.isPending} />
+        <Empty show={!eventsQuery.isPending && filteredEvents.length === 0} text="No transactions in this period." />
+
+        <div className="account-year-list">
+          {filteredEvents.map(ev => {
+            const entry = ev.entries.find(e => e.account_id === account.id);
+            if (!entry) return null;
+            const cat = categoriesQuery.data?.find(c => c.id === ev.category_id);
+            const isNeg = entry.amount.startsWith("-");
+            return (
+              <div className="account-year-row" key={ev.id}>
+                <div className="account-year-row-left">
+                  <CategoryIconBadge name={cat?.name ?? ev.event_type} icon={cat?.icon} size={34} />
+                  <div className="account-year-row-meta">
+                    <span className="account-year-row-cat">{cat ? categoryLabel(language, cat.name) : tr(ev.event_type)}</span>
+                    <span className="account-year-row-date">{ev.transaction_date}</span>
+                    {ev.note && <span className="account-year-row-note">{ev.note}</span>}
+                  </div>
+                </div>
+                <div className={`account-year-row-amount ${isNeg ? "negative" : "positive"}`}>
+                  {isNeg ? "" : "+"}{fmtMoneyDisplay(entry.amount)} {account.currency}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 function Accounts() {
@@ -859,6 +2023,7 @@ function Accounts() {
   const qc = useQueryClient();
   const [formTarget, setFormTarget] = useState<"new" | Account | null>(null);
   const [adjusting, setAdjusting] = useState<Account | null>(null);
+  const [selectedAccountForTxns, setSelectedAccountForTxns] = useState<Account | null>(null);
   const query = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const balances = useAccountBalances(query.data);
   const toggle = useMutation({ mutationFn: (account: Account) => api.accounts.update(account.id, { is_active: !account.is_active }), onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }) });
@@ -878,104 +2043,466 @@ function Accounts() {
     <Error error={query.error ?? toggle.error ?? balances.error ?? move.error} />
     <Loading show={query.isPending} />
     <Empty show={!query.isPending && query.data?.length === 0} text="No accounts yet." />
-    <div className="cards">{query.data?.map((x, i) => <article className={!x.is_active ? "inactive" : ""} key={x.id}>
-      <div><span className="account-name"><AccountLogo name={x.name} accountType={x.account_type} /><strong>{x.name}</strong></span><Status active={x.is_active} /></div>
-      <span>{label(x.account_type)} · {x.currency}</span>
-      <p className="account-balance">{tr("Current balance")}: <strong>{fmtMoneyDisplay(balances.balances.get(x.id)) ?? (balances.isPending ? "…" : "—")}</strong></p>
-      <div className="card-actions">
-        <button type="button" className="text-button" aria-label={tr("Move up")} disabled={move.isPending || i === 0} onClick={() => moveBy(i, -1)}>↑</button>
-        <button type="button" className="text-button" aria-label={tr("Move down")} disabled={move.isPending || i === (query.data?.length ?? 0) - 1} onClick={() => moveBy(i, 1)}>↓</button>
-        <button type="button" className="text-button" onClick={() => setFormTarget(x)}>{tr("Edit")}</button>
-        <button type="button" className="text-button" onClick={() => setAdjusting(x)}>{tr("Adjust balance")}</button>
-        <button type="button" className="text-button" disabled={toggle.isPending} onClick={() => toggle.mutate(x)}>{tr(x.is_active ? "Deactivate" : "Activate")}</button>
-      </div>
-    </article>)}</div>
+    <div className="cards">{query.data?.map((x, i) => {
+      const bal = balances.balances.get(x.id);
+      const isCreditCard = x.account_type === "CREDIT_CARD";
+      const brand = getAccountBrand(x.name, x.account_type);
+      return <article
+        className={`account-card-clickable ${isCreditCard ? "account-card-credit" : "account-card-bank"} ${!x.is_active ? "inactive" : ""}`}
+        key={x.id}
+        style={{
+          "--brand-color": brand.primaryColor,
+          "--brand-gradient": brand.gradient,
+          "--brand-tint": brand.cardBgTint,
+          borderTop: `4px solid ${brand.primaryColor}`,
+        } as React.CSSProperties}
+        onClick={e => {
+          if ((e.target as HTMLElement).closest("button")) return;
+          setSelectedAccountForTxns(x);
+        }}
+        title="Bấm để xem toàn bộ giao dịch của tài khoản"
+      >
+        <div className="account-card-brand-bar" style={{ background: brand.gradient }} />
+        <div className="account-card-header">
+          <span className="account-name">
+            <AccountLogo name={x.name} accountType={x.account_type} size={36} />
+            <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+              <strong style={{ fontSize: "0.95rem" }}>{x.name}</strong>
+              <span className="account-card-type-tag" style={{ color: brand.primaryColor }}>
+                {label(x.account_type)} · {x.currency}
+              </span>
+            </div>
+          </span>
+          <Status active={x.is_active} />
+        </div>
+
+        <p className="account-balance" style={{ marginTop: "4px" }}>
+          {tr(isCreditCard ? "Initial debt" : "Current balance")}:{" "}
+          <strong style={{ color: isCreditCard ? "#dc2626" : undefined }}>
+            {fmtMoneyDisplay(bal) ?? (balances.isPending ? "…" : "—")} {x.currency}
+          </strong>
+        </p>
+
+        {isCreditCard && x.credit_limit && <div className="account-credit-info">
+          <div className="account-credit-row">
+            <span>{tr("Credit limit")}:</span>
+            <strong>{fmtMoneyDisplay(x.credit_limit)} VND</strong>
+          </div>
+          {bal != null && <div className="account-credit-row">
+            <span>{tr("Available credit")}:</span>
+            <strong className="positive">{fmtMoneyDisplay(sumMoney([x.credit_limit, bal]))} VND</strong>
+          </div>}
+        </div>}
+
+        <div className="card-actions" onClick={e => e.stopPropagation()}>
+          <button type="button" className="text-button" aria-label={tr("Move up")} disabled={move.isPending || i === 0} onClick={() => moveBy(i, -1)}>↑</button>
+          <button type="button" className="text-button" aria-label={tr("Move down")} disabled={move.isPending || i === (query.data?.length ?? 0) - 1} onClick={() => moveBy(i, 1)}>↓</button>
+          <button type="button" className="text-button" onClick={() => setFormTarget(x)}>{tr("Edit")}</button>
+          <button type="button" className="text-button" onClick={() => setAdjusting(x)}>{tr("Adjust balance")}</button>
+          <button type="button" className="text-button" disabled={toggle.isPending} onClick={() => toggle.mutate(x)}>{tr(x.is_active ? "Deactivate" : "Activate")}</button>
+        </div>
+      </article>;
+    })}</div>
     {formTarget != null && <Modal title={formTarget === "new" ? "Add account" : "Edit account"} onClose={() => setFormTarget(null)}>
       <AccountFormDialog editing={formTarget === "new" ? null : formTarget} onDone={() => { setFormTarget(null); refresh(); }} onCancel={() => setFormTarget(null)} />
     </Modal>}
     {adjusting && <Modal title="Adjust balance" onClose={() => setAdjusting(null)}>
       <AccountAdjustForm account={adjusting} currentBalance={balances.balances.get(adjusting.id) ?? "0"} onDone={() => { setAdjusting(null); refresh(); }} onCancel={() => setAdjusting(null)} />
     </Modal>}
+    {selectedAccountForTxns && <AccountPeriodTransactionsModal account={selectedAccountForTxns} onClose={() => setSelectedAccountForTxns(null)} />}
   </Section>;
 }
 
-// BUGFIX (user report, 2026-08-26): three changes to account creation.
-// 1) "Điền số dư ban đầu" -- a brand-new account had no way to start from a
-//    non-zero balance except the separate "Adjust balance" action after the
-//    fact. Reused that same mechanism (a single ADJUSTMENT ledger event,
-//    see AccountAdjustForm below) fired right after account creation when
-//    an initial balance is entered, instead of inventing a new balance
-//    column on Account (there isn't one -- balances are always derived from
-//    ledger entries, see app/models/account.py's docstring).
-// 2) "đối với loại tài khoản ngân hàng hoặc thẻ tín dụng thì chọn ngân hàng
-//    theo list, ko tự điền" -- the old "Bank template" control only ever
-//    *suggested* a name into the free-text Name input; nothing stopped
-//    typing anything else, for any account type. For new BANK/CREDIT_CARD
-//    accounts the Name input is now replaced entirely by a required
-//    <select> built from bankCatalog (grouped by category) plus an optional
-//    nickname suffix -- the bank itself can no longer be freely typed.
-//    Deliberately scoped to *new* accounts only: forcing a re-pick on edit
-//    risked silently mangling an existing account's name.
-// 3) "Loại tiền tệ là vnd mặc định theo sau số tiền (ko cho nhập)" -- the
-//    free-text 3-letter currency input is gone; currency is always VND now
-//    (this app has no other currency support anywhere else -- transactions,
-//    savings, and assets are all VND-only already), shown as a fixed,
-//    non-editable value.
+function BankPickerDropdown({
+  selected,
+  onSelect,
+  accountType = "BANK",
+}: {
+  selected: string;
+  onSelect: (name: string) => void;
+  accountType?: AccountType;
+}) {
+  const { tr } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const otherBank = bankCatalog[bankCatalog.length - 1];
+  const query = search.trim().toLowerCase();
+
+  const filtered = bankCatalog.filter(b => {
+    if (!query) return true;
+    return (
+      b.name.toLowerCase().includes(query) ||
+      b.key.toLowerCase().includes(query) ||
+      b.aliases.some(a => a.toLowerCase().includes(query))
+    );
+  });
+
+  return (
+    <div ref={ref} style={{ position: "relative", width: "100%" }}>
+      <button
+        type="button"
+        className="bank-picker-trigger"
+        onClick={() => setOpen(o => !o)}
+      >
+        {selected ? (
+          <>
+            <AccountLogo name={selected} accountType={accountType} size={24} />
+            <strong>{selected}</strong>
+          </>
+        ) : (
+          <span style={{ color: "var(--muted)", fontSize: "0.86rem" }}>{tr("Choose bank")}...</span>
+        )}
+        <span className="caret">▾</span>
+      </button>
+
+      {open && (
+        <div className="bank-picker-popover">
+          <div className="bank-picker-search">
+            <input
+              type="text"
+              placeholder="Tìm ngân hàng (VD: VCB, Techcom, MB)..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="bank-picker-list">
+            {bankCategoryOrder.map(cat => {
+              const banksInCat = filtered.filter(b => b.category === cat && b.key !== "other");
+              if (banksInCat.length === 0) return null;
+              return (
+                <div key={cat}>
+                  <div className="bank-picker-group-title">{bankCategoryLabel[cat]}</div>
+                  {banksInCat.map(b => {
+                    const isSel = selected === b.name;
+                    return (
+                      <button
+                        key={b.key}
+                        type="button"
+                        className={`bank-picker-item ${isSel ? "selected" : ""}`}
+                        onClick={() => {
+                          onSelect(b.name);
+                          setOpen(false);
+                          setSearch("");
+                        }}
+                      >
+                        <AccountLogo name={b.name} accountType={accountType} size={24} />
+                        <div className="bank-picker-item-info">
+                          <span className="bank-picker-item-name">{b.name}</span>
+                        </div>
+                        {isSel && <span className="bank-picker-check">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {(query ? filtered.some(b => b.key === "other") : true) && (
+              <div>
+                <div className="bank-picker-group-title">Khác</div>
+                <button
+                  type="button"
+                  className={`bank-picker-item ${selected === otherBank.name ? "selected" : ""}`}
+                  onClick={() => {
+                    onSelect(otherBank.name);
+                    setOpen(false);
+                    setSearch("");
+                  }}
+                >
+                  <AccountLogo name={otherBank.name} accountType={accountType} size={24} />
+                  <div className="bank-picker-item-info">
+                    <span className="bank-picker-item-name">{otherBank.name}</span>
+                  </div>
+                  {selected === otherBank.name && <span className="bank-picker-check">✓</span>}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EWalletPickerDropdown({
+  selected,
+  onSelect,
+}: {
+  selected: string;
+  onSelect: (name: string) => void;
+}) {
+  const { tr } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const query = search.trim().toLowerCase();
+  const filtered = ewalletCatalog.filter(w => {
+    if (!query) return true;
+    return w.name.toLowerCase().includes(query) || w.key.toLowerCase().includes(query);
+  });
+
+  return (
+    <div ref={ref} style={{ position: "relative", width: "100%" }}>
+      <button
+        type="button"
+        className="bank-picker-trigger"
+        onClick={() => setOpen(o => !o)}
+      >
+        {selected ? (
+          <>
+            <AccountLogo name={selected} accountType="EWALLET" size={24} />
+            <strong>{selected}</strong>
+          </>
+        ) : (
+          <span style={{ color: "var(--muted)", fontSize: "0.86rem" }}>{tr("Choose e-wallet")}...</span>
+        )}
+        <span className="caret">▾</span>
+      </button>
+
+      {open && (
+        <div className="bank-picker-popover">
+          <div className="bank-picker-search">
+            <input
+              type="text"
+              placeholder="Tìm ví (VD: MoMo, ZaloPay, Viettel)..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="bank-picker-list">
+            {filtered.map(w => {
+              const isSel = selected === w.name;
+              return (
+                <button
+                  key={w.key}
+                  type="button"
+                  className={`bank-picker-item ${isSel ? "selected" : ""}`}
+                  onClick={() => {
+                    onSelect(w.name);
+                    setOpen(false);
+                    setSearch("");
+                  }}
+                >
+                  <AccountLogo name={w.name} accountType="EWALLET" size={24} />
+                  <div className="bank-picker-item-info">
+                    <span className="bank-picker-item-name">{w.name}</span>
+                  </div>
+                  {isSel && <span className="bank-picker-check">✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function parseAccountInfo(account: Account | null) {
+  if (!account) {
+    return {
+      type: "CASH" as AccountType,
+      bankName: "Techcombank",
+      walletName: "MoMo",
+      nickname: "",
+      customName: "",
+      creditLimit: "",
+    };
+  }
+
+  const type = account.account_type;
+  const name = account.name;
+  let bankName = "";
+  let walletName = "";
+  let nickname = "";
+  const customName = name;
+
+  if (type === "BANK" || type === "CREDIT_CARD") {
+    const match = name.match(/^(.+?)\s*\((.+)\)$/);
+    if (match) {
+      const bCandidate = match[1].trim();
+      nickname = match[2].trim();
+      const found = bankCatalog.find(b => b.name.toLowerCase() === bCandidate.toLowerCase() || b.key.toLowerCase() === bCandidate.toLowerCase());
+      bankName = found ? found.name : bCandidate;
+    } else {
+      const brand = getAccountBrand(name, type);
+      const found = bankCatalog.find(b => b.key.toLowerCase() === brand.key.toLowerCase() || b.name.toLowerCase() === brand.name.toLowerCase());
+      if (found) {
+        bankName = found.name;
+        const clean = name.replace(new RegExp(found.name, "i"), "").replace(new RegExp(brand.shortLabel, "i"), "").trim();
+        nickname = clean;
+      } else {
+        bankName = name;
+      }
+    }
+  } else if (type === "EWALLET") {
+    const match = name.match(/^(.+?)\s*\((.+)\)$/);
+    if (match) {
+      const wCandidate = match[1].trim();
+      nickname = match[2].trim();
+      const found = ewalletCatalog.find(w => w.name.toLowerCase() === wCandidate.toLowerCase() || w.key.toLowerCase() === wCandidate.toLowerCase());
+      walletName = found ? found.name : wCandidate;
+    } else {
+      const brand = getAccountBrand(name, type);
+      const found = ewalletCatalog.find(w => w.key.toLowerCase() === brand.key.toLowerCase() || w.name.toLowerCase() === brand.name.toLowerCase());
+      if (found) {
+        walletName = found.name;
+        nickname = name.replace(new RegExp(found.name, "i"), "").trim();
+      } else {
+        walletName = name;
+      }
+    }
+  }
+
+  return {
+    type,
+    bankName: bankName || "Techcombank",
+    walletName: walletName || "MoMo",
+    nickname,
+    customName,
+    creditLimit: account.credit_limit ? fmtMoney(account.credit_limit) ?? "" : "",
+  };
+}
+
 function AccountFormDialog({ editing, onDone, onCancel }: { editing: Account | null; onDone: () => void; onCancel: () => void }) {
   const { tr, label } = useI18n();
-  const [type, setType] = useState<AccountType>(editing?.account_type ?? "CASH");
-  const needsBankSelect = !editing && (type === "BANK" || type === "CREDIT_CARD");
-  const otherBank = bankCatalog[bankCatalog.length - 1];
+  const initial = useMemo(() => parseAccountInfo(editing), [editing]);
+  const [type, setType] = useState<AccountType>(initial.type);
+  const [initialBalance, setInitialBalance] = useState("");
+  const [creditLimit, setCreditLimit] = useState(initial.creditLimit);
+  const [selectedBankName, setSelectedBankName] = useState(initial.bankName);
+  const [selectedWallet, setSelectedWallet] = useState(initial.walletName);
+  const [nickname, setNickname] = useState(initial.nickname);
+  const [customName, setCustomName] = useState(initial.customName);
+  const needsBankSelect = type === "BANK" || type === "CREDIT_CARD";
+  const isEWallet = type === "EWALLET";
+
+  const previewName = needsBankSelect
+    ? (nickname.trim() ? `${selectedBankName} (${nickname.trim()})` : selectedBankName)
+    : isEWallet
+    ? (nickname.trim() ? `${selectedWallet} (${nickname.trim()})` : selectedWallet)
+    : (customName || "Tiền mặt");
+  const previewBrand = getAccountBrand(previewName, type);
+
   const save = useMutation({
-    mutationFn: async (input: { id?: number; name: string; account_type: AccountType; currency: string; initialBalance?: string }) => {
-      if (input.id) return api.accounts.update(input.id, { name: input.name, account_type: input.account_type, currency: input.currency });
-      const account = await api.accounts.create({ name: input.name, account_type: input.account_type, currency: input.currency });
+    mutationFn: async (input: { id?: number; name: string; account_type: AccountType; currency: string; initialBalance?: string; credit_limit?: string | null }) => {
+      if (input.id) {
+        return api.accounts.update(input.id, {
+          name: input.name,
+          account_type: input.account_type,
+          currency: input.currency,
+          credit_limit: input.credit_limit,
+        });
+      }
+      const account = await api.accounts.create({
+        name: input.name,
+        account_type: input.account_type,
+        currency: input.currency,
+        credit_limit: input.credit_limit,
+      });
       if (input.initialBalance && !isZeroMoney(input.initialBalance)) {
-        await api.events.create({ event_type: "ADJUSTMENT", transaction_date: todayIso(), note: tr("Initial balance"), entries: [{ account_id: account.id, amount: input.initialBalance }] });
+        const signedAmount = input.account_type === "CREDIT_CARD" ? negateMoney(input.initialBalance.replace(/^-/, "")) : input.initialBalance;
+        const noteText = input.account_type === "CREDIT_CARD" ? tr("Initial debt") : tr("Initial balance");
+        await api.events.create({
+          event_type: "ADJUSTMENT",
+          transaction_date: todayIso(),
+          note: noteText,
+          entries: [{ account_id: account.id, amount: signedAmount }],
+        });
       }
       return account;
     },
     onSuccess: onDone,
   });
+
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const v = (n: string) => String(f.get(n) ?? "").trim();
-    const name = needsBankSelect ? (v("nickname") ? `${v("bank_name")} (${v("nickname")})` : v("bank_name")) : v("name");
-    save.mutate({ id: editing?.id, name, account_type: type, currency: "VND", initialBalance: editing ? undefined : v("initial_balance") });
+    let name = customName.trim();
+    if (needsBankSelect) {
+      name = nickname.trim() ? `${selectedBankName} (${nickname.trim()})` : selectedBankName;
+    } else if (isEWallet) {
+      name = nickname.trim() ? `${selectedWallet} (${nickname.trim()})` : selectedWallet;
+    }
+    save.mutate({
+      id: editing?.id,
+      name,
+      account_type: type,
+      currency: "VND",
+      initialBalance: editing ? undefined : initialBalance,
+      credit_limit: type === "CREDIT_CARD" ? (creditLimit.trim() || undefined) : undefined,
+    });
   }
+
   return <form onSubmit={submit} className="form">
     <Error error={save.error} />
-    <Field label="Type"><select value={type} onChange={e => setType(e.target.value as AccountType)}>{accountTypes.map(x => <option value={x} key={x}>{label(x)}</option>)}</select></Field>
-    {needsBankSelect ? <>
-      <Field label="Choose bank"><select name="bank_name" required defaultValue="">
-        <option value="" disabled>{tr("Choose bank")}</option>
-        {bankCategoryOrder.map(cat => <optgroup label={bankCategoryLabel[cat]} key={cat}>
-          {bankCatalog.filter(b => b.category === cat && b.key !== "other").map(b => <option value={b.name} key={b.key}>{b.name}</option>)}
-        </optgroup>)}
-        <option value={otherBank.name}>{otherBank.name}</option>
-      </select></Field>
-      <Field label="Nickname (optional)"><input name="nickname" /></Field>
-    </> : <Field label="Name"><input name="name" defaultValue={editing?.name} required /></Field>}
-    <Field label="Currency"><input value="VND" disabled readOnly /></Field>
-    {!editing && <Field label="Initial balance"><div className="amount-row"><input name="initial_balance" inputMode="decimal" pattern="^-?\d+(\.\d{1,4})?$" placeholder="0" /><span className="currency-badge">VND</span></div></Field>}
-    {/* BUGFIX: this modal now has up to 5 fields (Type, bank-select-or-Name,
-        Currency, Initial balance, +Nickname for bank accounts), enough to
-        fully fill the shared `.form` grid's 4 column tracks (see
-        .form{grid-template-columns:repeat(3,minmax(0,1fr)) auto} in
-        styles.css) on its own -- form-actions used to then wrap onto its
-        own row inside just the first 1fr track, squeezing "Thêm tài khoản"
-        into ~3 lines of text. Forcing it to span every column (same as the
-        ≤820px/≤560px responsive rules already do) keeps the buttons full
-        width regardless of how many fields preceded them, without touching
-        the shared .form-actions rule other, shorter forms rely on looking
-        inline on desktop. */}
-    <div className="form-actions" style={{ gridColumn: "1 / -1" }}><Submit pending={save.isPending} text={editing ? "Save changes" : "Add account"} /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
+    <div className="account-form-grid" style={{ gridColumn: "1 / -1", width: "100%" }}>
+      <Field label="Type"><select value={type} onChange={e => setType(e.target.value as AccountType)}>{accountTypes.map(x => <option value={x} key={x}>{label(x)}</option>)}</select></Field>
+      <Field label="Currency"><input value="VND" disabled readOnly /></Field>
+      {needsBankSelect ? <>
+        <Field label="Choose bank">
+          <BankPickerDropdown selected={selectedBankName} onSelect={setSelectedBankName} accountType={type} />
+        </Field>
+        <Field label="Nickname (optional)"><input value={nickname} onChange={e => setNickname(e.target.value)} placeholder="VD: Thẻ chi tiêu" /></Field>
+      </> : isEWallet ? <>
+        <Field label="Choose e-wallet">
+          <EWalletPickerDropdown selected={selectedWallet} onSelect={setSelectedWallet} />
+        </Field>
+        <Field label="Nickname (optional)"><input value={nickname} onChange={e => setNickname(e.target.value)} placeholder="VD: Ví chính" /></Field>
+      </> : <div className="full-span"><Field label="Name"><input value={customName} onChange={e => setCustomName(e.target.value)} required placeholder="VD: Tiền mặt" /></Field></div>}
+      {type === "CREDIT_CARD" && <Field label="Credit limit">
+        <div className="amount-row">
+          <MoneyInput value={creditLimit} onChange={setCreditLimit} placeholder="0" required={false} />
+          <span className="currency-badge">VND</span>
+        </div>
+      </Field>}
+      {!editing && <Field label={type === "CREDIT_CARD" ? "Initial debt" : "Initial balance"}>
+        <div className="amount-row">
+          <MoneyInput value={initialBalance} onChange={setInitialBalance} placeholder="0" required={false} />
+          <span className="currency-badge">VND</span>
+        </div>
+      </Field>}
+
+      {previewName && (
+        <div className="full-span" style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 14px", background: previewBrand.cardBgTint || "#f8f9fa", borderRadius: "10px", border: `1px solid ${previewBrand.primaryColor}40` }}>
+          <AccountLogo name={previewName} accountType={type} size={32} />
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ fontSize: "0.86rem", fontWeight: 700, color: "var(--text)" }}>{previewName}</span>
+            <span style={{ fontSize: "0.74rem", color: previewBrand.primaryColor, fontWeight: 650 }}>{previewBrand.name} · {label(type)}</span>
+          </div>
+        </div>
+      )}
+    </div>
+    <div className="form-actions" style={{ gridColumn: "1 / -1", marginTop: "14px" }}><Submit pending={save.isPending} text={editing ? "Save changes" : "Add account"} /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
   </form>;
 }
 
 function AccountAdjustForm({ account, currentBalance, onDone, onCancel }: { account: Account; currentBalance: string; onDone: () => void; onCancel: () => void }) {
-  const { tr } = useI18n();
+  const { tr, language } = useI18n();
+  const [adjustDate, setAdjustDate] = useState(todayIso());
   const [target, setTarget] = useState(fmtMoney(currentBalance) ?? currentBalance);
   const delta = sumMoney([target, negateMoney(currentBalance)]);
   const noChange = isZeroMoney(delta);
@@ -987,14 +2514,19 @@ function AccountAdjustForm({ account, currentBalance, onDone, onCancel }: { acco
     e.preventDefault();
     if (noChange) return;
     const f = new FormData(e.currentTarget);
-    adjust.mutate({ transaction_date: String(f.get("date")), note: String(f.get("note") ?? "").trim() || undefined });
+    adjust.mutate({ transaction_date: adjustDate || String(f.get("date")), note: String(f.get("note") ?? "").trim() || undefined });
   }
   return <form onSubmit={submit} className="form savings-form">
     <Error error={adjust.error} />
     <p className="hint">{tr("Current balance")}: <strong>{fmtMoneyDisplay(currentBalance)}</strong> {account.currency}</p>
-    <Field label="New balance"><input inputMode="decimal" pattern="^-?\d+(\.\d{1,4})?$" value={target} onChange={e => setTarget(e.target.value)} required /></Field>
+    <Field label="New balance">
+      <div className="amount-row">
+        <MoneyInput value={target} onChange={setTarget} placeholder="0" required />
+        <span className="currency-badge">{account.currency}</span>
+      </div>
+    </Field>
     <p className="hint">{tr("Difference")}: <strong>{fmtMoneyDisplay(delta)}</strong>{noChange && ` — ${tr("No change to save.")}`}</p>
-    <Field label="Adjustment date"><input name="date" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} /></Field>
+    <Field label="Adjustment date"><DateRow name="date" value={adjustDate} onChange={setAdjustDate} language={language} label="Adjustment date" /></Field>
     <Field label="Notes"><input name="note" /></Field>
     <div className="form-actions"><Submit pending={adjust.isPending} text="Save changes" /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
   </form>;
@@ -1004,23 +2536,131 @@ function Categories() {
   const { language, tr } = useI18n();
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Category | null>(null);
+  const [editName, setEditName] = useState("");
   const [parentId, setParentId] = useState<number | null>(null);
   const [iconKey, setIconKey] = useState<string | null>(null);
-  const [search, setSearch] = useState(""); const [group, setGroup] = useState<"ALL" | "EXPENSE" | "INCOME">("ALL");
+  const [search, setSearch] = useState("");
+  const [group, setGroup] = useState<"ALL" | "EXPENSE" | "INCOME">("ALL");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const query = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
+
   useEffect(() => {
-    // TASK-031 §4.2: root sections start expanded.
     if (query.data) setExpanded(new Set(query.data.filter(c => c.parent_id == null).map(c => c.id)));
   }, [query.data]);
-  const save = useMutation({ mutationFn: (input: { id?: number; name: string; parent_id: number | null; icon: string | null }) => input.id ? api.categories.update(input.id, input) : api.categories.create(input), onSuccess: () => { setEditing(null); setParentId(null); setIconKey(null); qc.invalidateQueries({ queryKey: ["categories"] }); } });
-  const toggle = useMutation({ mutationFn: (category: Category) => api.categories.update(category.id, { is_active: !category.is_active }), onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }) });
-  function startEdit(node: Category | null) { setEditing(node); setParentId(node?.parent_id ?? null); setIconKey(node?.icon ?? null); }
-  function submit(e: FormEvent<HTMLFormElement>) { e.preventDefault(); const f = new FormData(e.currentTarget); if (editing?.id && !canMoveCategory(editing.id, parentId, query.data ?? [])) return; save.mutate({ id: editing?.id, name: String(f.get("name")).trim(), parent_id: parentId, icon: iconKey }); }
-  const all = query.data ?? []; const filtered = filterCategoryTree(all, search, n => categoryLabel(language, n)).filter(c => group === "ALL" || (categoryRoot(c, all)?.name === (group === "EXPENSE" ? "Expenses" : "Income")));
+
+  const save = useMutation({
+    mutationFn: (input: { id?: number; name: string; parent_id: number | null; icon: string | null }) =>
+      input.id ? api.categories.update(input.id, input) : api.categories.create(input),
+    onSuccess: () => {
+      setEditing(null);
+      setEditName("");
+      setParentId(null);
+      setIconKey(null);
+      qc.invalidateQueries({ queryKey: ["categories"] });
+    },
+  });
+  const toggle = useMutation({
+    mutationFn: (category: Category) => api.categories.update(category.id, { is_active: !category.is_active }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
+  });
+
+  function startEdit(node: Category | null) {
+    setEditing(node);
+    setEditName(node?.name ? categoryLabel(language, node.name) : "");
+    setParentId(node?.parent_id ?? null);
+    setIconKey(node?.icon ?? null);
+  }
+
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (editing?.id && !canMoveCategory(editing.id, parentId, query.data ?? [])) return;
+    save.mutate({ id: editing?.id, name: editName.trim(), parent_id: parentId, icon: iconKey });
+  }
+
+  const all = query.data ?? [];
+  const filtered = filterCategoryTree(all, search, n => categoryLabel(language, n)).filter(c => group === "ALL" || (categoryRoot(c, all)?.name === (group === "EXPENSE" ? "Expenses" : "Income")));
   const roots = buildCategoryTree(filtered);
-  const render = (node: ReturnType<typeof buildCategoryTree>[number], level = 1): React.ReactNode => { const has = node.children.length > 0; const open = search ? true : expanded.has(node.id); return <div key={node.id} className={`category-tree-row level-${level}`}><div className="category-row-main"><button type="button" className="disclosure" disabled={!has} aria-expanded={has ? open : undefined} aria-label={tr(open ? "Collapse" : "Expand")} onClick={() => setExpanded(x => toggleCategoryExpansion(x, node.id))}>{has ? (open ? "▾" : "▸") : "·"}</button><span className="category-icon"><CategoryIcon name={node.name} icon={node.icon} size={16} /></span><strong>{categoryLabel(language, node.name)}</strong>{node.orphan && <span className="badge warning">{tr("Other / Unclassified")}</span>}<Status active={node.is_active} /><div className="card-actions"><button type="button" className="text-button" onClick={() => startEdit(node)}>{tr("Edit")}</button>{level < 3 && <button type="button" className="text-button" onClick={() => startEdit({ id: 0, name: "", parent_id: node.id, is_active: true, icon: null })}>+ {tr("Add child category")}</button>}<button type="button" className="text-button" onClick={() => toggle.mutate(node)}>{tr(node.is_active ? "Deactivate" : "Activate")}</button></div></div>{open && node.children.map(child => render(child, level + 1))}</div>; };
-  return <Section title="Categories" subtitle="Organize events into an optional hierarchy."><div className="category-toolbar"><input aria-label={tr("Search category")} placeholder={tr("Search category")} value={search} onChange={e => setSearch(e.target.value)} /><div className="segmented">{([["ALL","All"],["EXPENSE","Expenses"],["INCOME","Income"]] as const).map(([id,label]) => <button type="button" className={group === id ? "active" : ""} onClick={() => setGroup(id)} key={id}>{tr(label)}</button>)}</div></div><form onSubmit={submit} className="form category-form" key={`${editing?.id ?? "new"}-${editing?.parent_id ?? ""}`}><Field label="Name"><input name="name" defaultValue={editing?.id ? editing.name : ""} required /></Field><Field label="Parent"><ParentPicker categories={all} editingId={editing?.id || undefined} selectedParentId={parentId} onChange={setParentId} language={language} /></Field><Field label="Icon"><IconPicker value={iconKey} onChange={setIconKey} language={language} /></Field><div className="form-actions"><Submit pending={save.isPending} text={editing?.id ? "Save changes" : "Add category"} />{editing && <button type="button" className="secondary" onClick={() => startEdit(null)}>{tr("Cancel")}</button>}</div></form><Error error={query.error ?? save.error ?? toggle.error} /><Loading show={query.isPending} /><Empty show={!query.isPending && roots.length === 0} text={search ? "No categories found." : "No categories yet."} /><div className="category-tree" role="tree">{roots.map(node => render(node))}</div></Section>;
+
+  const render = (node: ReturnType<typeof buildCategoryTree>[number], level = 1): React.ReactNode => {
+    const has = node.children.length > 0;
+    const open = search ? true : expanded.has(node.id);
+    return (
+      <div key={node.id} className="category-tree-node">
+        <div className="category-tree-row" style={{ paddingLeft: `${(level - 1) * 26 + 10}px` }}>
+          <div className="category-tree-left">
+            <button
+              type="button"
+              className="disclosure"
+              disabled={!has}
+              aria-expanded={has ? open : undefined}
+              aria-label={tr(open ? "Collapse" : "Expand")}
+              onClick={() => setExpanded(x => toggleCategoryExpansion(x, node.id))}
+            >
+              {has ? (open ? "▾" : "▸") : "·"}
+            </button>
+            <CategoryIconBadge name={node.name} icon={node.icon} size={32} />
+            <strong className="category-tree-name">{categoryLabel(language, node.name)}</strong>
+            {node.orphan && <span className="badge warning">{tr("Other / Unclassified")}</span>}
+            <Status active={node.is_active} />
+          </div>
+          <div className="category-tree-actions">
+            <button type="button" className="text-button" onClick={() => startEdit(node)}>{tr("Edit")}</button>
+            {level < 3 && (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => startEdit({ id: 0, name: "", parent_id: node.id, is_active: true, icon: null })}
+              >
+                + {tr("Add child category")}
+              </button>
+            )}
+            <button type="button" className="text-button" onClick={() => toggle.mutate(node)}>
+              {tr(node.is_active ? "Deactivate" : "Activate")}
+            </button>
+          </div>
+        </div>
+        {open && has && (
+          <div className="category-children">
+            {node.children.map(child => render(child, level + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <Section title="Categories" subtitle="Organize events into an optional hierarchy.">
+      <div className="category-toolbar">
+        <input aria-label={tr("Search category")} placeholder={tr("Search category")} value={search} onChange={e => setSearch(e.target.value)} />
+        <div className="segmented">
+          {([["ALL", "All"], ["EXPENSE", "Expenses"], ["INCOME", "Income"]] as const).map(([id, labelText]) => (
+            <button type="button" className={group === id ? "active" : ""} onClick={() => setGroup(id)} key={id}>
+              {tr(labelText)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <form onSubmit={submit} className="form category-form" key={`${editing?.id ?? "new"}-${editing?.parent_id ?? ""}`}>
+        <Field label="Name">
+          <input name="name" value={editName} onChange={e => setEditName(e.target.value)} required />
+        </Field>
+        <Field label="Parent">
+          <ParentPicker categories={all} editingId={editing?.id || undefined} selectedParentId={parentId} onChange={setParentId} language={language} />
+        </Field>
+        <Field label="Icon">
+          <IconPicker value={iconKey} onChange={setIconKey} language={language} />
+        </Field>
+        <div className="form-actions">
+          <Submit pending={save.isPending} text={editing?.id ? "Save changes" : "Add category"} />
+          {editing && <button type="button" className="secondary" onClick={() => startEdit(null)}>{tr("Cancel")}</button>}
+        </div>
+      </form>
+      <Error error={query.error ?? save.error ?? toggle.error} />
+      <Loading show={query.isPending} />
+      <Empty show={!query.isPending && roots.length === 0} text={search ? "No categories found." : "No categories yet."} />
+      <div className="category-tree category-tree-list" role="tree">{roots.map(node => render(node))}</div>
+    </Section>
+  );
 }
 
 function ParentPicker({ categories, editingId, selectedParentId, onChange, language }: { categories: Category[]; editingId?: number; selectedParentId: number | null; onChange: (id: number | null) => void; language: Language }) {
@@ -1187,6 +2827,7 @@ function Transactions() {
     },
   });
   const accountNames = new Map(accounts.data?.map(x => [x.id, x.name]));
+  const categoriesMap = new Map(categories.data?.map(c => [c.id, c]));
   const categoryNames = new Map(categories.data?.map(x => [x.id, categoryLabel(language, x.name)]));
   const validCategories = categoriesForEventType(type, categories.data ?? []).filter(x => x.is_active);
   const activeAccounts = accounts.data?.filter(x => x.is_active) ?? [];
@@ -1272,14 +2913,7 @@ function Transactions() {
   const amountCurrency = (type === "TRANSFER" ? activeAccounts.find(a => String(a.id) === transferFrom)
     : type === "CREDIT_CARD_PAYMENT" ? activeAccounts.find(a => String(a.id) === fundingAccountId)
     : activeAccounts.find(a => String(a.id) === entries[0]?.accountId))?.currency ?? "VND";
-  const dateRow = <div className="date-row">
-    <button type="button" className="date-nav" aria-label={tr("Previous day")} onClick={() => setDate(d => shiftIsoDate(d, -1))}>‹</button>
-    <label className="date-center">
-      <span>{formatIsoDateLabel(language, date)}</span>
-      <input type="date" aria-label={tr("Choose date")} value={date} onChange={e => setDate(e.target.value || todayIso())} required className="date-native" />
-    </label>
-    <button type="button" className="date-nav" aria-label={tr("Next day")} onClick={() => setDate(d => shiftIsoDate(d, 1))}>›</button>
-  </div>;
+  const dateRow = <DateRow value={date} onChange={setDate} language={language} />;
   {/* TASK-037: 26px matches AccountLogo/CategoryIcon in the other .row-icon slots below (32px container, ~26px content) so every composer row reads at the same visual weight. */}
   const noteRow = <div className="note-row"><span className="row-icon" aria-hidden="true"><IconGlyph iconKey="Notebook" size={26} /></span><input name="note" placeholder={tr("Add a note")} defaultValue={editingEvent?.note ?? ""} className="note-input" /></div>;
   // User request, 2026-08-26 (UI redesign): "Đưa danh sách các giao dịch
@@ -1314,29 +2948,22 @@ function Transactions() {
             {type === "TRANSFER" ? <>
               <AccountRow label="From account" accounts={activeAccounts} value={transferFrom} onChange={setTransferFrom} balances={balances} />
               <AccountRow label="To account" accounts={activeAccounts} value={transferTo} onChange={setTransferTo} balances={balances} />
-              <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={transferAmount} onChange={e => setTransferAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
+              <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><MoneyInput className="amount-input" value={transferAmount} onChange={setTransferAmount} placeholder="0" required /></div>
               {formError && <p className="error" role="alert">{formError}</p>}
             </> : type === "CREDIT_CARD_PAYMENT" ? <>
               {creditCardAccounts.length === 0 ? <p className="hint">{tr("No credit card accounts available. Create one first.")}</p> : fundingAccounts.length === 0 ? <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p> : <>
                 <AccountRow label="Credit card" accounts={creditCardAccounts} value={cardAccountId} onChange={setCardAccountId} balances={balances} />
                 <AccountRow label="From account" accounts={fundingAccounts} value={fundingAccountId} onChange={setFundingAccountId} balances={balances} />
-                <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
+                <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><MoneyInput className="amount-input" value={paymentAmount} onChange={setPaymentAmount} placeholder="0" required /></div>
               </>}
               {formError && <p className="error" role="alert">{formError}</p>}
             </> : <>
               <AccountRow label="Select account" accounts={activeAccounts} value={entries[0]?.accountId ?? ""} onChange={v => updateEntry(0, "accountId", v)} balances={balances} />
-              <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={entries[0]?.amount ?? ""} onChange={e => updateEntry(0, "amount", e.target.value)} inputMode="decimal" pattern={moneyPattern} placeholder="0" required /></div>
+              <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><MoneyInput className="amount-input" value={entries[0]?.amount ?? ""} onChange={v => updateEntry(0, "amount", v)} placeholder="0" required /></div>
               {formError && <p className="error" role="alert">{formError}</p>}
             </>}
-            {/* BUGFIX (found via E2E, see docs/qa/QA_STATE.md Batch #2): CategoryPicker's
-                expanded-node state used to be computed once at mount from whichever
-                root (Expenses/Income) was current then, so switching the composer's
-                Type after the picker had already mounted (e.g. Expense -> Income)
-                left the new root's children collapsed with no visual affordance
-                that a click was needed -- `key={type}` forces a remount so the
-                picker's default-expanded state is always derived from the type
-                that's actually selected. */}
             {validCategories.length > 0 && <CategoryPicker key={type} categories={validCategories} selected={categoryId} onChange={setCategoryId} language={language} />}
+            {type === "EXPENSE" && <QuickCategoryPills categories={categories.data ?? []} selectedCategoryId={categoryId} onSelectCategory={(catId) => { setType("EXPENSE"); setCategoryId(catId); }} language={language} />}
             {noteRow}
             {dateRow}
           </div>
@@ -1362,11 +2989,23 @@ function Transactions() {
           {/* TASK-042: same click-to-open-details behavior as the old full
               table, just in a compact recency-ranked list instead of every
               row -- tabIndex + onKeyDown keep it keyboard-reachable. */}
-          <div className="recent-list">{recentEvents.map(x => <div className="recent-row" tabIndex={0} key={x.id} onClick={() => setDetailEvent(x)} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailEvent(x); } }}>
-            <div className="recent-row-main"><span className="event-type">{label(x.event_type)}{x.category_id && <small> · {categoryNames.get(x.category_id) ?? `${tr("Category")} #${x.category_id}`}</small>}{x.excluded_from_reports && <span className="badge muted" title={tr("This transaction won't be counted in income/expense summary reports.")}>{tr("Excluded from reports")}</span>}</span><small>{x.transaction_date}</small></div>
-            <div className="recent-row-detail"><small>{x.payee_text ?? x.trip_event_text ?? x.note ?? tr("None")}</small></div>
-            <div className="recent-row-entries">{x.entries.map(e => <span className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</span>)}</div>
-          </div>)}</div>
+          <div className="recent-list">{recentEvents.map(x => {
+            const parentCategoryName = (() => {
+              if (!x.category_id) return undefined;
+              const cat = categoriesMap.get(x.category_id);
+              if (!cat?.parent_id) return undefined;
+              const parent = categoriesMap.get(cat.parent_id);
+              if (!parent || parent.parent_id == null || parent.name === "Expenses" || parent.name === "Income") return undefined;
+              return categoryLabel(language, parent.name);
+            })();
+            const noteOrDetail = x.payee_text ?? x.trip_event_text ?? x.note;
+            const subtitle = parentCategoryName ? (noteOrDetail ? `${parentCategoryName} · ${noteOrDetail}` : parentCategoryName) : noteOrDetail;
+            return <div className="recent-row" tabIndex={0} key={x.id} onClick={() => setDetailEvent(x)} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailEvent(x); } }}>
+              <div className="recent-row-main"><span className="event-type">{label(x.event_type)}{x.category_id && <small> · {categoryNames.get(x.category_id) ?? `${tr("Category")} #${x.category_id}`}</small>}{x.excluded_from_reports && <span className="badge muted" title={tr("This transaction won't be counted in income/expense summary reports.")}>{tr("Excluded from reports")}</span>}</span><small>{x.transaction_date}</small></div>
+              {subtitle && <div className="recent-row-detail"><small>{subtitle}</small></div>}
+              <div className="recent-row-entries">{x.entries.map(e => <span className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</span>)}</div>
+            </div>;
+          })}</div>
         </div>
       </aside>
     </div>
@@ -1416,7 +3055,7 @@ function TransactionDetailModal({ event, accounts, categories, language, onClose
       <div className="detail-entries">{event.entries.map(e => <div className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</div>)}</div>
       <Error error={remove.error} />
       {editable ? <div className="form-actions">
-        <button type="button" className="secondary" onClick={onEdit}>{tr("Edit")}</button>
+        <button type="button" className="text-button" onClick={onEdit}>{tr("Edit")}</button>
         {!confirmingDelete
           ? <button type="button" className="text-button danger" onClick={() => setConfirmingDelete(true)}>{tr("Delete")}</button>
           : <>
@@ -1455,11 +3094,11 @@ function splitTransferEntries(event: FinancialEvent) {
  * user answer, 2026-08-26: "Mở lại form nhập, điền sẵn dữ liệu để xem/sửa
  * trước khi lưu", i.e. duplicate copies everything for review, not just a
  * blank form) from `duplicateFrom` when duplicating. */
-function LedgerComposerForm({ accounts, categories, defaultAccountId, duplicateFrom, onClose, onSaved }: {
-  accounts: Account[]; categories: Category[]; defaultAccountId: number; duplicateFrom: FinancialEvent | null; onClose: () => void; onSaved: () => void;
+function LedgerComposerForm({ accounts, categories, defaultAccountId, editingEvent, onClose, onSaved }: {
+  accounts: Account[]; categories: Category[]; defaultAccountId: number; editingEvent: FinancialEvent | null; onClose: () => void; onSaved: () => void;
 }) {
   const { label, language, tr } = useI18n();
-  const initial = duplicateFrom;
+  const initial = editingEvent;
   const isTransferLike = !!initial && (initial.event_type === "TRANSFER" || initial.event_type === "CREDIT_CARD_PAYMENT");
   const initialTransfer = initial && isTransferLike ? splitTransferEntries(initial) : null;
   const [type, setType] = useState<EventType>(initial && composerEventTypes.includes(initial.event_type) ? initial.event_type : "EXPENSE");
@@ -1481,7 +3120,10 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, duplicateF
   const [detailsOpen, setDetailsOpen] = useState(Boolean(initial?.payee_text || initial?.trip_event_text));
   const [formError, setFormError] = useState("");
   const [excludedFromReports, setExcludedFromReports] = useState(initial?.excluded_from_reports ?? false);
-  const mutation = useMutation({ mutationFn: (input: EventInput) => api.events.create(input), onSuccess: onSaved });
+  const mutation = useMutation({
+    mutationFn: (input: EventInput) => editingEvent ? api.events.update(editingEvent.id, input) : api.events.create(input),
+    onSuccess: onSaved,
+  });
 
   function updateEntry(index: number, field: keyof EntryDraft, value: string) { setEntries(current => current.map((entry, i) => i === index ? { ...entry, [field]: value } : entry)); }
   function changeType(next: EventType) { setType(next); setFormError(""); if (!categoryIsValidForEventType(next, categoryId, categories)) setCategoryId(""); }
@@ -1514,14 +3156,7 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, duplicateF
   const amountCurrency = (type === "TRANSFER" ? accounts.find(a => String(a.id) === transferFrom)
     : type === "CREDIT_CARD_PAYMENT" ? accounts.find(a => String(a.id) === fundingAccountId)
     : accounts.find(a => String(a.id) === entries[0]?.accountId))?.currency ?? "VND";
-  const dateRow = <div className="date-row">
-    <button type="button" className="date-nav" aria-label={tr("Previous day")} onClick={() => setDate(d => shiftIsoDate(d, -1))}>‹</button>
-    <label className="date-center">
-      <span>{formatIsoDateLabel(language, date)}</span>
-      <input type="date" aria-label={tr("Choose date")} value={date} onChange={e => setDate(e.target.value || todayIso())} required className="date-native" />
-    </label>
-    <button type="button" className="date-nav" aria-label={tr("Next day")} onClick={() => setDate(d => shiftIsoDate(d, 1))}>›</button>
-  </div>;
+  const dateRow = <DateRow value={date} onChange={setDate} language={language} />;
   const noteRow = <div className="note-row"><span className="row-icon" aria-hidden="true"><IconGlyph iconKey="Notebook" size={26} /></span><input name="note" placeholder={tr("Add a note")} defaultValue={initial?.note ?? ""} className="note-input" /></div>;
 
   return <form onSubmit={submit} className="event-form composer">
@@ -1530,21 +3165,22 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, duplicateF
       {type === "TRANSFER" ? <>
         <AccountRow label="From account" accounts={accounts} value={transferFrom} onChange={setTransferFrom} />
         <AccountRow label="To account" accounts={accounts} value={transferTo} onChange={setTransferTo} />
-        <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={transferAmount} onChange={e => setTransferAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
+        <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><MoneyInput className="amount-input" value={transferAmount} onChange={setTransferAmount} placeholder="0" required /></div>
         {formError && <p className="error" role="alert">{formError}</p>}
       </> : type === "CREDIT_CARD_PAYMENT" ? <>
         {creditCardAccounts.length === 0 ? <p className="hint">{tr("No credit card accounts available. Create one first.")}</p> : fundingAccounts.length === 0 ? <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p> : <>
           <AccountRow label="Credit card" accounts={creditCardAccounts} value={cardAccountId} onChange={setCardAccountId} />
           <AccountRow label="From account" accounts={fundingAccounts} value={fundingAccountId} onChange={setFundingAccountId} />
-          <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" placeholder="0" required /></div>
+          <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><MoneyInput className="amount-input" value={paymentAmount} onChange={setPaymentAmount} placeholder="0" required /></div>
         </>}
         {formError && <p className="error" role="alert">{formError}</p>}
       </> : <>
         <AccountRow label="Select account" accounts={accounts} value={entries[0]?.accountId ?? ""} onChange={v => updateEntry(0, "accountId", v)} />
-        <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><input className="amount-input" value={entries[0]?.amount ?? ""} onChange={e => updateEntry(0, "amount", e.target.value)} inputMode="decimal" pattern={moneyPattern} placeholder="0" required /></div>
+        <div className="amount-row"><span className="currency-badge">{amountCurrency}</span><MoneyInput className="amount-input" value={entries[0]?.amount ?? ""} onChange={v => updateEntry(0, "amount", v)} placeholder="0" required /></div>
         {formError && <p className="error" role="alert">{formError}</p>}
       </>}
       {validCategories.length > 0 && <CategoryPicker key={type} categories={validCategories} selected={categoryId} onChange={setCategoryId} language={language} />}
+      {type === "EXPENSE" && <QuickCategoryPills categories={categories} selectedCategoryId={categoryId} onSelectCategory={(catId) => { setType("EXPENSE"); setCategoryId(catId); }} language={language} />}
       {noteRow}
       {dateRow}
     </div>
@@ -1559,22 +3195,12 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, duplicateF
       <p className="hint">{tr("This transaction won't be counted in income/expense summary reports.")}</p>
     </div>}
     <Error error={mutation.error} />
-    <div className="form-actions"><Submit pending={mutation.isPending} text="Record transaction" /><button type="button" className="secondary" onClick={onClose}>{tr("Cancel")}</button></div>
+    <div className="form-actions"><Submit pending={mutation.isPending} text={editingEvent ? "Save changes" : "Record transaction"} /><button type="button" className="secondary" onClick={onClose}>{tr("Cancel")}</button></div>
   </form>;
 }
 
-/** User request, 2026-08-26 (UI redesign, new "Sổ giao dịch" page): the
- * inline right-side detail panel for a transaction selected in the ledger
- * list -- deliberately a plain panel, not the <Modal>-wrapped
- * TransactionDetailModal above, since the reference layout shows details
- * beside the list rather than over it. Offers "Sao chép" (Duplicate, per
- * the user's own answer: reopens the composer pre-filled for review rather
- * than saving instantly) and "Xóa giao dịch" (Delete) for the same
- * composer-owned event types TransactionDetailModal already restricts
- * Edit/Delete to -- everything else (ADJUSTMENT, INTEREST, SAVINGS_*,
- * ASSET_*) is read-only here too, for the same reason. */
-function LedgerDetailPanel({ event, accountNames, categories, language, onDuplicate, onDeleted }: {
-  event: FinancialEvent; accountNames: Map<number, string>; categories: Category[]; language: Language; onDuplicate: () => void; onDeleted: () => void;
+function LedgerDetailPanel({ event, accountNames, categories, language, onEdit, onDeleted }: {
+  event: FinancialEvent; accountNames: Map<number, string>; categories: Category[]; language: Language; onEdit: () => void; onDeleted: () => void;
 }) {
   const { label, tr } = useI18n();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -1595,7 +3221,7 @@ function LedgerDetailPanel({ event, accountNames, categories, language, onDuplic
     <div className="detail-entries">{event.entries.map(e => <div className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</div>)}</div>
     <Error error={remove.error} />
     {editable ? <div className="form-actions">
-      <button type="button" className="secondary" onClick={onDuplicate}>{tr("Duplicate")}</button>
+      <button type="button" className="text-button" onClick={onEdit}>{tr("Edit")}</button>
       {!confirmingDelete
         ? <button type="button" className="text-button danger" onClick={() => setConfirmingDelete(true)}>{tr("Delete")}</button>
         : <>
@@ -1624,10 +3250,15 @@ function Ledger() {
   const eventsQ = useQuery({ queryKey: ["events"], queryFn: api.events.list });
   const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
   const activeAccounts = (accountsQ.data ?? []).filter(a => a.is_active);
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const { balances } = useAccountBalances(activeAccounts);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | "ALL" | null>(null);
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [detailEventId, setDetailEventId] = useState<number | null>(null);
-  const [composerOpen, setComposerOpen] = useState<"new" | "duplicate" | null>(null);
+  const [composerOpen, setComposerOpen] = useState<"new" | "edit" | null>(null);
+  const [selectedEventIds, setSelectedEventIds] = useState<Set<number>>(new Set());
+  const [confirmModal, setConfirmModal] = useState<"bulk" | "all" | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   // User answer (AskUserQuestion, 2026-08-26): default selected account =
   // "Tài khoản đầu tiên theo thứ tự sắp xếp hiện có (giống trang Tài
@@ -1639,14 +3270,31 @@ function Ledger() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccounts.length, selectedAccountId]);
 
+  const isAllAccounts = selectedAccountId === "ALL";
+
   const balanceQ = useQuery({
     queryKey: ["account-balance", selectedAccountId],
     queryFn: () => api.accounts.balance(selectedAccountId as number),
-    enabled: selectedAccountId != null,
+    enabled: typeof selectedAccountId === "number",
   });
 
-  const accountEvents = selectedAccountId == null ? [] : (eventsQ.data ?? []).filter(e => e.entries.some(en => en.account_id === selectedAccountId));
+  const allAccountsBalance = sumMoney(Array.from(balances.values()));
+  const currentBalance = isAllAccounts ? allAccountsBalance : balanceQ.data?.balance;
+
+  const accountEvents = selectedAccountId == null
+    ? []
+    : isAllAccounts
+    ? (eventsQ.data ?? [])
+    : (eventsQ.data ?? []).filter(e => e.entries.some(en => en.account_id === selectedAccountId));
+
   function entryAmountFor(event: FinancialEvent): string {
+    if (isAllAccounts) {
+      if (event.event_type === "TRANSFER" || event.event_type === "CREDIT_CARD_PAYMENT") {
+        const split = splitTransferEntries(event);
+        return split ? split.posEntry.amount : "0";
+      }
+      return sumMoney(event.entries.map(e => e.amount));
+    }
     const entry = event.entries.find(e => e.account_id === selectedAccountId);
     return entry ? entry.amount : "0";
   }
@@ -1677,6 +3325,7 @@ function Ledger() {
   }
   const lastMonthKey = shiftMonthKey(currentMonthKey, -1);
   function monthLabel(key: string): string {
+    if (key === "FUTURE") return tr("Future");
     if (key === currentMonthKey) return tr("This month");
     if (key === lastMonthKey) return tr("Last month");
     const [y, m] = key.split("-");
@@ -1684,11 +3333,16 @@ function Ledger() {
   }
 
   // Defaults to (and resets to, on every account switch) the current month
-  // -- there's no user instruction covering what should happen to the
-  // month selection when the account changes, and carrying over a
-  // selection that might not even exist in the new account's month list
-  // would be worse than this simple, predictable reset.
-  useEffect(() => { setSelectedMonthKey(currentMonthKey); }, [selectedAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setSelectedMonthKey(currentMonthKey);
+    setSelectedEventIds(new Set());
+    setConfirmModal(null);
+  }, [selectedAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setSelectedEventIds(new Set());
+    setConfirmModal(null);
+  }, [selectedMonthKey]);
 
   const activeMonthKey = selectedMonthKey ?? currentMonthKey;
   const isFutureBucket = activeMonthKey === "FUTURE";
@@ -1698,6 +3352,9 @@ function Ledger() {
     : (() => { const [y, m] = activeMonthKey.split("-").map(Number); return new Date(y, m, 0).toISOString().slice(0, 10); })();
 
   function balanceAsOf(cutoffIso: string): string {
+    if (isAllAccounts) {
+      return sumMoney(accountEvents.filter(e => e.transaction_date <= cutoffIso).flatMap(e => e.entries.map(en => en.amount)));
+    }
     return sumMoney(accountEvents.filter(e => e.transaction_date <= cutoffIso).map(e => entryAmountFor(e)));
   }
   const openingBalance = balanceAsOf(shiftIsoDate(periodStart, -1));
@@ -1714,6 +3371,29 @@ function Ledger() {
     groupedByDay.set(e.transaction_date, list);
   }
 
+  const allPeriodEventIds = periodEvents.map(e => e.id);
+  const allSelected = periodEvents.length > 0 && allPeriodEventIds.every(id => selectedEventIds.has(id));
+  const someSelected = selectedEventIds.size > 0;
+
+  function toggleSelect(id: number, ev: React.MouseEvent) {
+    ev.stopPropagation();
+    setSelectedEventIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelectedEventIds(new Set());
+    } else {
+      setSelectedEventIds(new Set(allPeriodEventIds));
+    }
+  }
+
+  const categoriesMap = new Map((categoriesQ.data ?? []).map(c => [c.id, c]));
   const categoryNames = new Map((categoriesQ.data ?? []).map(x => [x.id, categoryLabel(language, x.name)]));
   const accountNames = new Map((accountsQ.data ?? []).map(x => [x.id, x.name]));
   const detailEvent = detailEventId != null ? (eventsQ.data ?? []).find(e => e.id === detailEventId) ?? null : null;
@@ -1728,10 +3408,22 @@ function Ledger() {
   if (accountsQ.isPending) return <section className="ledger-page"><Loading show /></section>;
   if (!accountsQ.isPending && (accountsQ.data ?? []).length === 0) return <section className="ledger-page"><Empty show text="No accounts yet. Create one first." /></section>;
 
+  const composerDefaultAccountId = typeof selectedAccountId === "number" ? selectedAccountId : (activeAccounts[0]?.id ?? 1);
+
   return <section className="ledger-page">
     <div className="ledger-header">
-      <AccountRow label="Select account" accounts={activeAccounts} value={selectedAccountId != null ? String(selectedAccountId) : ""} onChange={v => setSelectedAccountId(Number(v))} />
-      <div className="ledger-balance"><span>{tr("Current balance")}</span><strong>{fmtMoneyDisplay(balanceQ.data?.balance) ?? (balanceQ.isPending ? "…" : "—")}</strong></div>
+      <AccountRow
+        label="Select account"
+        accounts={activeAccounts}
+        value={selectedAccountId != null ? String(selectedAccountId) : ""}
+        onChange={v => setSelectedAccountId(v === "ALL" ? "ALL" : Number(v))}
+        balances={balances}
+        allowAll
+      />
+      <div className="ledger-balance">
+        <span>{tr("Current balance")}</span>
+        <strong>{fmtMoneyDisplay(currentBalance) ?? (balanceQ.isPending ? "…" : "—")}</strong>
+      </div>
     </div>
     <div className="ledger-months" role="tablist">
       {months.map(key => <button type="button" role="tab" aria-selected={activeMonthKey === key} className={activeMonthKey === key ? "active" : ""} onClick={() => setSelectedMonthKey(key)} key={key}>{monthLabel(key)}</button>)}
@@ -1746,15 +3438,107 @@ function Ledger() {
       <div className="ledger-list">
         <Loading show={eventsQ.isPending} />
         <Empty show={!eventsQ.isPending && periodEvents.length === 0} text="No transactions in this period." />
+        {periodEvents.length > 0 && <div className="ledger-toolbar">
+          <div className="ledger-toolbar-left">
+            <label className="ledger-select-all" onClick={e => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                onChange={toggleSelectAll}
+                aria-label={tr("Select all")}
+              />
+              <span>{tr("Select all")}</span>
+            </label>
+            {someSelected && <span className="ledger-selected-count">{tr("Selected")}: {selectedEventIds.size}/{periodEvents.length}</span>}
+          </div>
+          <div className="ledger-toolbar-right">
+            {someSelected && <button
+              type="button"
+              className="text-button danger"
+              onClick={() => { setDeleteError(""); setConfirmModal("bulk"); }}
+            >
+              {tr("Delete selected")} ({selectedEventIds.size})
+            </button>}
+            {someSelected && <button
+              type="button"
+              className="text-button"
+              onClick={() => setSelectedEventIds(new Set())}
+            >
+              {tr("Deselect all")}
+            </button>}
+            <button
+              type="button"
+              className="text-button danger"
+              onClick={() => { setDeleteError(""); setConfirmModal("all"); }}
+            >
+              {tr("Delete all")}
+            </button>
+          </div>
+        </div>}
         {[...groupedByDay.entries()].map(([dateIso, dayEvents]) => {
-          const daySubtotal = sumMoney(dayEvents.map(e => entryAmountFor(e)));
+          const daySubtotal = isAllAccounts
+            ? sumMoney(dayEvents.flatMap(e => e.entries.map(en => en.amount)))
+            : sumMoney(dayEvents.map(e => entryAmountFor(e)));
           return <div className="ledger-day" key={dateIso}>
-            <div className="ledger-day-heading"><span>{formatIsoDateLabel(language, dateIso)}</span><b className={daySubtotal.startsWith("-") ? "negative" : "positive"}>{fmtMoneyDisplay(daySubtotal)}</b></div>
-            {dayEvents.map(e => <div className={`ledger-row${detailEventId === e.id ? " selected" : ""}`} tabIndex={0} key={e.id} onClick={() => setDetailEventId(e.id)} onKeyDown={ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setDetailEventId(e.id); } }}>
-              <span className="event-type">{label(e.event_type)}{e.category_id && <small> · {categoryNames.get(e.category_id) ?? `${tr("Category")} #${e.category_id}`}</small>}</span>
-              <small>{e.payee_text ?? e.trip_event_text ?? e.note ?? tr("None")}</small>
-              <b className={entryAmountFor(e).startsWith("-") ? "negative" : "positive"}>{fmtMoneyDisplay(entryAmountFor(e))}</b>
-            </div>)}
+            <div className="ledger-day-heading">
+              <span>{formatIsoDateLabel(language, dateIso)}</span>
+              <b className={daySubtotal.startsWith("-") ? "negative" : "positive"}>{fmtMoneyDisplay(daySubtotal)}</b>
+            </div>
+            {dayEvents.map(e => {
+              const isSelected = selectedEventIds.has(e.id);
+              const isDetail = detailEventId === e.id;
+              const parentCategoryName = (() => {
+                if (!e.category_id) return undefined;
+                const cat = categoriesMap.get(e.category_id);
+                if (!cat?.parent_id) return undefined;
+                const parent = categoriesMap.get(cat.parent_id);
+                if (!parent || parent.parent_id == null || parent.name === "Expenses" || parent.name === "Income") return undefined;
+                return categoryLabel(language, parent.name);
+              })();
+              return <div
+                className={`ledger-row${isDetail ? " selected" : ""}`}
+                tabIndex={0}
+                key={e.id}
+                onClick={() => setDetailEventId(e.id)}
+                onKeyDown={ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setDetailEventId(e.id); } }}
+              >
+                <input
+                  type="checkbox"
+                  className="ledger-checkbox"
+                  checked={isSelected}
+                  onClick={ev => toggleSelect(e.id, ev)}
+                  onChange={() => {}}
+                  aria-label={`${tr("Select")} #${e.id}`}
+                />
+                <span className="event-type">
+                  {label(e.event_type)}
+                  {e.category_id && <small> · {categoryNames.get(e.category_id) ?? `${tr("Category")} #${e.category_id}`}</small>}
+                </span>
+                <small>
+                  {isAllAccounts ? (
+                    <span className="ledger-row-account">
+                      {e.event_type === "TRANSFER" || e.event_type === "CREDIT_CARD_PAYMENT" ? (() => {
+                        const split = splitTransferEntries(e);
+                        return split ? `${accountNames.get(split.negEntry.account_id) ?? "—"} → ${accountNames.get(split.posEntry.account_id) ?? "—"}` : "";
+                      })() : (
+                        accountNames.get(e.entries[0]?.account_id) ?? ""
+                      )}
+                      {(e.payee_text || e.trip_event_text || e.note) && " · "}
+                    </span>
+                  ) : parentCategoryName ? (
+                    <span className="ledger-row-parent-category">
+                      {parentCategoryName}
+                      {(e.payee_text || e.trip_event_text || e.note) && " · "}
+                    </span>
+                  ) : null}
+                  {e.payee_text ?? e.trip_event_text ?? e.note ?? ""}
+                </small>
+                <b className={entryAmountFor(e).startsWith("-") ? "negative" : "positive"}>
+                  {fmtMoneyDisplay(entryAmountFor(e))}
+                </b>
+              </div>;
+            })}
           </div>;
         })}
       </div>
@@ -1764,21 +3548,111 @@ function Ledger() {
           accountNames={accountNames}
           categories={categoriesQ.data ?? []}
           language={language}
-          onDuplicate={() => setComposerOpen("duplicate")}
-          onDeleted={() => { setDetailEventId(null); refresh(); }}
+          onEdit={() => setComposerOpen("edit")}
+          onDeleted={() => {
+            setSelectedEventIds(prev => {
+              const next = new Set(prev);
+              next.delete(detailEvent.id);
+              return next;
+            });
+            setDetailEventId(null);
+            refresh();
+          }}
         /> : <p className="hint">{tr("Select a transaction to see its details.")}</p>}
       </aside>
     </div>
     <button type="button" className="ledger-fab" onClick={() => setComposerOpen("new")}>+ {tr("Add transaction")}</button>
-    {composerOpen && selectedAccountId != null && <Modal title={composerOpen === "duplicate" ? "New transaction" : "Add transaction"} onClose={() => setComposerOpen(null)}>
+    {composerOpen && <Modal title={composerOpen === "edit" ? "Edit transaction" : "Add transaction"} onClose={() => setComposerOpen(null)}>
       <LedgerComposerForm
         accounts={activeAccounts}
         categories={categoriesQ.data ?? []}
-        defaultAccountId={selectedAccountId}
-        duplicateFrom={composerOpen === "duplicate" ? detailEvent : null}
+        defaultAccountId={composerDefaultAccountId}
+        editingEvent={composerOpen === "edit" ? detailEvent : null}
         onClose={() => setComposerOpen(null)}
         onSaved={() => { setComposerOpen(null); refresh(); }}
       />
+    </Modal>}
+    {confirmModal != null && <Modal
+      title={confirmModal === "bulk" ? "Confirm delete transactions" : "Delete all transactions"}
+      onClose={() => { if (!isDeleting) { setConfirmModal(null); setDeleteError(""); } }}
+    >
+      <div className="delete-confirm-body">
+        {confirmModal === "bulk" ? <>
+          <p>
+            {tr("Are you sure you want to delete")} <strong>{selectedEventIds.size}</strong> {tr("transactions? This action cannot be undone.")}
+          </p>
+          {(() => {
+            const selectedEvents = periodEvents.filter(e => selectedEventIds.has(e.id));
+            const protectedCount = selectedEvents.filter(e => !composerEventTypes.includes(e.event_type)).length;
+            return protectedCount > 0 ? (
+              <p className="hint warning-text">
+                {tr("Note: System-managed transactions (Savings, Assets, Adjustments) will be preserved.")}
+              </p>
+            ) : null;
+          })()}
+        </> : <>
+          <p>
+            {tr("Are you sure you want to delete all transactions in this period? This action cannot be undone.")}
+          </p>
+          <p className="hint">
+            {tr("Period")}: <strong>{monthLabel(activeMonthKey)}</strong> ({periodEvents.length} {tr("transactions")})
+          </p>
+          {(() => {
+            const protectedCount = periodEvents.filter(e => !composerEventTypes.includes(e.event_type)).length;
+            return protectedCount > 0 ? (
+              <p className="hint warning-text">
+                {tr("Note: System-managed transactions (Savings, Assets, Adjustments) will be preserved.")}
+              </p>
+            ) : null;
+          })()}
+        </>}
+        {deleteError && <p className="error" role="alert">{deleteError}</p>}
+        <div className="form-actions">
+          <button
+            type="button"
+            className="text-button danger"
+            disabled={isDeleting}
+            onClick={async () => {
+              setIsDeleting(true);
+              setDeleteError("");
+              try {
+                const targetIds = confirmModal === "bulk"
+                  ? Array.from(selectedEventIds)
+                  : periodEvents.map(e => e.id);
+                const targetEvents = (eventsQ.data ?? []).filter(e => targetIds.includes(e.id));
+                const editableEvents = targetEvents.filter(e => composerEventTypes.includes(e.event_type));
+                if (editableEvents.length === 0) {
+                  setDeleteError(tr("No editable transactions selected."));
+                  setIsDeleting(false);
+                  return;
+                }
+                await Promise.all(editableEvents.map(e => api.events.remove(e.id)));
+                setSelectedEventIds(new Set());
+                setConfirmModal(null);
+                if (detailEventId && targetIds.includes(detailEventId)) {
+                  setDetailEventId(null);
+                }
+                refresh();
+              } catch (err: unknown) {
+                const message = err instanceof globalThis.Error ? err.message : tr("Load failed");
+                setDeleteError(message || tr("Load failed"));
+              } finally {
+                setIsDeleting(false);
+              }
+            }}
+          >
+            {isDeleting ? tr("Deleting...") : confirmModal === "bulk" ? tr("Confirm delete") : tr("Confirm delete all")}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={isDeleting}
+            onClick={() => { setConfirmModal(null); setDeleteError(""); }}
+          >
+            {tr("Cancel")}
+          </button>
+        </div>
+      </div>
     </Modal>}
   </section>;
 }
@@ -1786,14 +3660,7 @@ function Ledger() {
 /** TASK-036: a tappable row (icon + name + chevron) that opens a popover
  * list of accounts -- the same interaction shape Moneylover uses for its
  * account/category rows -- instead of a plain <select>. */
-// User request, 2026-08-26: "hiển thị số dư của tài khoản bên cạnh luôn" --
-// balances is an optional account_id -> balance map (from
-// useAccountBalances); when supplied, the chosen account's balance is shown
-// next to its name in the trigger, and each popover option shows its own
-// account's balance too, so the balance is visible both collapsed and while
-// picking. Optional (not required) because Ledger()'s own account-switcher
-// AccountRow already renders balance separately via .ledger-balance.
-function AccountRow({ label: labelText, accounts, value, onChange, balances }: { label: string; accounts: Account[]; value: string; onChange: (value: string) => void; balances?: Map<number, string> }) {
+function AccountRow({ label: labelText, accounts, value, onChange, balances, allowAll }: { label: string; accounts: Account[]; value: string; onChange: (value: string) => void; balances?: Map<number, string>; allowAll?: boolean }) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -1804,17 +3671,23 @@ function AccountRow({ label: labelText, accounts, value, onChange, balances }: {
     document.addEventListener("mousedown", close); document.addEventListener("keydown", escape);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [open]);
-  const chosen = accounts.find(a => String(a.id) === value);
-  const chosenBalance = chosen ? balances?.get(chosen.id) : undefined;
+  const isAll = allowAll && value === "ALL";
+  const chosen = isAll ? null : accounts.find(a => String(a.id) === value);
+  const totalBalance = allowAll && balances ? sumMoney(Array.from(balances.values())) : undefined;
+  const chosenBalance = isAll ? totalBalance : chosen ? balances?.get(chosen.id) : undefined;
   return <div className="row-picker" ref={root}>
     <button type="button" className="row-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(x => !x)}>
-      <span className="row-icon" aria-hidden="true">{chosen ? <AccountLogo name={chosen.name} accountType={chosen.account_type} size={26} /> : <IconGlyph iconKey="Wallet" size={26} />}</span>
-      <span className="row-label">{chosen ? chosen.name : tr(labelText)}</span>
+      <span className="row-icon" aria-hidden="true">{isAll ? <IconGlyph iconKey="Wallet" size={26} /> : chosen ? <AccountLogo name={chosen.name} accountType={chosen.account_type} size={26} /> : <IconGlyph iconKey="Wallet" size={26} />}</span>
+      <span className="row-label">{isAll ? tr("All accounts") : chosen ? chosen.name : tr(labelText)}</span>
       {chosenBalance != null && <span className="row-balance">{fmtMoneyDisplay(chosenBalance)}</span>}
       <span className="row-chevron" aria-hidden="true">›</span>
     </button>
     {open && <div className="row-popover" role="listbox">
-      {accounts.length === 0 && <p className="hint">{tr("No accounts yet.")}</p>}
+      {allowAll && <button type="button" role="option" aria-selected={value === "ALL"} className={`row-option${value === "ALL" ? " selected" : ""}`} onClick={() => { onChange("ALL"); setOpen(false); }}>
+        <IconGlyph iconKey="Wallet" size={26} /> <span>{tr("All accounts")}</span>
+        {totalBalance != null && <span className="row-balance">{fmtMoneyDisplay(totalBalance)}</span>}
+      </button>}
+      {accounts.length === 0 && !allowAll && <p className="hint">{tr("No accounts yet.")}</p>}
       {accounts.map(a => <button type="button" key={a.id} role="option" aria-selected={String(a.id) === value} className={`row-option${String(a.id) === value ? " selected" : ""}`} onClick={() => { onChange(String(a.id)); setOpen(false); }}>
         <AccountLogo name={a.name} accountType={a.account_type} size={26} /> <span>{a.name}</span>
         {balances?.get(a.id) != null && <span className="row-balance">{fmtMoneyDisplay(balances.get(a.id)!)}</span>}

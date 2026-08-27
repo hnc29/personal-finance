@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
 @router.post(
     "",
     response_model=AccountRead,
+    response_model_exclude_none=True,
     status_code=status.HTTP_201_CREATED,
 )
 def create_account(data: AccountCreate, db: DbSession) -> Account:
@@ -32,13 +33,13 @@ def create_account(data: AccountCreate, db: DbSession) -> Account:
     return account_service.create_account(db, data)
 
 
-@router.get("", response_model=list[AccountRead])
+@router.get("", response_model=list[AccountRead], response_model_exclude_none=True)
 def list_accounts(db: DbSession) -> list[Account]:
     """Return every account ordered by its user-controlled sort_order."""
     return account_service.list_accounts(db)
 
 
-@router.get("/{account_id}", response_model=AccountRead)
+@router.get("/{account_id}", response_model=AccountRead, response_model_exclude_none=True)
 def get_account(account_id: int, db: DbSession) -> Account:
     """Return a single account or 404 if it does not exist."""
     account = account_service.get_account(db, account_id)
@@ -62,7 +63,7 @@ def get_account_balance(account_id: int, db: DbSession) -> AccountBalanceRead:
     return AccountBalanceRead(account_id=account_id, balance=balance)
 
 
-@router.patch("/{account_id}", response_model=AccountRead)
+@router.patch("/{account_id}", response_model=AccountRead, response_model_exclude_none=True)
 def update_account(
     account_id: int, data: AccountUpdate, db: DbSession
 ) -> Account:

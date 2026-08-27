@@ -45,3 +45,7 @@ node_modules/
 # Locally generated AI context dump (regenerable, ~4MB, duplicates
 # tracked source -- not meant to be version-controlled)
 project-context.md
+
+# Project local backups and temp archives
+backup/
+_to_delete/

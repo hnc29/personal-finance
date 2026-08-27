@@ -1,6 +1,8 @@
 import csv
 import datetime
 import io
+import re
+import unicodedata
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
@@ -9,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.account import Account
 from app.models.ledger import AccountEntry, FinancialEvent
 from app.schemas.read_models import ImportApplyRead
 from app.services.moneylover_apply import (
@@ -64,6 +67,25 @@ def _apply_result_dict(result: ApplyResult) -> dict:
     }
 
 
+def _format_export_filename(
+    db: Session,
+    account_id: int | None,
+    start_date: datetime.date | None,
+    end_date: datetime.date | None,
+    ext: str,
+) -> str:
+    account_name = "Tat-ca-tai-khoan"
+    if account_id is not None:
+        acc = db.get(Account, account_id)
+        if acc:
+            normalized = unicodedata.normalize("NFKD", acc.name).encode("ascii", "ignore").decode("ascii")
+            sanitized = re.sub(r"[^\w\-]+", "_", normalized.strip())
+            account_name = sanitized or f"Tai-khoan-{account_id}"
+    start_str = start_date.isoformat() if start_date else "tu-dau"
+    end_str = end_date.isoformat() if end_date else "den-nay"
+    return f"{account_name}_{start_str}_{end_str}.{ext}"
+
+
 @router.get("/exports/events.csv")
 def export_csv(
     db: Session = Depends(get_db),  # noqa: B008
@@ -84,10 +106,11 @@ def export_csv(
                 entry.amount,
             ]
         )
+    filename = _format_export_filename(db, account_id, start_date, end_date, "csv")
     return StreamingResponse(
         iter([out.getvalue().encode()]),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=financial-events.csv"},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -116,10 +139,11 @@ def export_xlsx(
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
+    filename = _format_export_filename(db, account_id, start_date, end_date, "xlsx")
     return StreamingResponse(
         out,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=financial-events.xlsx"},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

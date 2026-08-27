@@ -128,3 +128,25 @@ export const bankForName = (name: string) => {
   const matches = bankCatalog.filter(b => b.key !== "other" && b.aliases.some(a => new RegExp(`(^| )${a.toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim()}($| )`).test(normalized)));
   return matches.length === 1 ? matches[0] : undefined;
 };
+
+export interface EWalletCatalogEntry {
+  key: string;
+  name: string;
+  aliases: string[];
+}
+
+export const ewalletCatalog: EWalletCatalogEntry[] = [
+  { key: "momo", name: "MoMo (Ví MoMo)", aliases: ["momo", "ví momo", "vi momo"] },
+  { key: "zalopay", name: "ZaloPay", aliases: ["zalopay", "ví zalopay", "vi zalopay", "zalo"] },
+  { key: "viettelmoney", name: "Viettel Money (ViettelPay)", aliases: ["viettel money", "viettelpay", "viettel"] },
+  { key: "vnpay", name: "VNPay (Ví VNPAY)", aliases: ["vnpay", "ví vnpay", "vi vnpay"] },
+  { key: "shopeepay", name: "ShopeePay (AirPay)", aliases: ["shopeepay", "shopee pay", "airpay", "ví shopeepay"] },
+  { key: "moca", name: "Moca (GrabPay)", aliases: ["moca", "grabpay", "grab"] },
+  { key: "payoo", name: "Payoo", aliases: ["payoo", "ví payoo"] },
+  { key: "9pay", name: "9Pay", aliases: ["9pay", "ví 9pay"] },
+  { key: "foxpay", name: "Foxpay", aliases: ["foxpay", "ví foxpay"] },
+  { key: "appotapay", name: "AppotaPay", aliases: ["appotapay", "appota", "ví appotapay"] },
+  { key: "vnptmoney", name: "VNPT Money (VNPT Pay)", aliases: ["vnpt money", "vnpt pay", "vnpt"] },
+  { key: "other", name: "Ví điện tử khác", aliases: ["khac", "other"] },
+];
+

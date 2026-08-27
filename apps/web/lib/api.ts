@@ -1,12 +1,12 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 export type AccountType = "CASH" | "BANK" | "CREDIT_CARD" | "EWALLET";
 export type EventType = "EXPENSE" | "INCOME" | "TRANSFER" | "CREDIT_CARD_PAYMENT" | "INTEREST" | "SAVINGS_DEPOSIT" | "SAVINGS_WITHDRAWAL" | "ASSET_PURCHASE" | "ASSET_SALE" | "ADJUSTMENT";
-export interface Account { id: number; name: string; account_type: AccountType; currency: string; is_active: boolean; sort_order: number }
+export interface Account { id: number; name: string; account_type: AccountType; currency: string; is_active: boolean; sort_order: number; credit_limit?: string | null }
 export interface AccountBalance { account_id: number; balance: string }
 export interface Category { id: number; name: string; parent_id: number | null; is_active: boolean; icon: string | null }
 export interface Entry { id: number; account_id: number; amount: string }
 export interface FinancialEvent { id: number; event_type: EventType; transaction_date: string; occurred_at: string | null; category_id: number | null; payee_text: string | null; trip_event_text: string | null; note: string | null; excluded_from_reports: boolean; entries: Entry[] }
-export interface AccountInput { name: string; account_type: AccountType; currency?: string; is_active?: boolean; sort_order?: number }
+export interface AccountInput { name: string; account_type: AccountType; currency?: string; is_active?: boolean; sort_order?: number; credit_limit?: string | null }
 export interface CategoryInput { name: string; parent_id?: number | null; is_active?: boolean; icon?: string | null }
 export type AccountUpdate = Partial<AccountInput>;
 export type CategoryUpdate = Partial<CategoryInput>;
@@ -55,8 +55,33 @@ export type SavingsPatchInput = Partial<Omit<SavingsCreateInput, "funding_accoun
 export interface SavingsCloseInput { closed_date: string; receiving_account_id: number; actual_interest: string }
 export interface SavingsEarlyCloseInput extends SavingsCloseInput { fee?: string }
 export interface SavingsRenewInput { start_date: string; actual_interest?: string; receiving_account_id?: number }
-export interface MetalInput { metal_type: "GOLD" | "SILVER"; brand: string; product_type: string; purity: string; quantity_grams: string; purchase_date: string; purchase_price: string; total_cost: string; pricing_instrument?: string; excluded_from_reports?: boolean }
-export interface CryptoInput { coingecko_id: string; symbol: string; display_name?: string; quantity: string; purchase_date: string; purchase_price: string; total_cost: string; pricing_instrument?: string; excluded_from_reports?: boolean }
+
+export interface MetalHolding {
+  id: number; name: string; product_type: string; brand: string;
+  metal_type: "GOLD" | "SILVER"; purity: string; quantity_grams: string;
+  purchase_price: string; total_cost: string; purchase_date: string | null;
+  excluded_from_reports: boolean;
+}
+export interface MetalInput {
+  metal_type: "GOLD" | "SILVER"; brand: string; product_type: string;
+  purity: string; quantity_grams: string; purchase_date: string;
+  purchase_price: string; total_cost: string; pricing_instrument?: string;
+  excluded_from_reports?: boolean;
+}
+export type MetalUpdateInput = Partial<MetalInput>;
+
+export interface CryptoHolding {
+  id: number; coingecko_id: string; symbol: string; display_name: string | null;
+  quantity: string; purchase_price: string; total_cost: string;
+  purchase_date: string | null; excluded_from_reports: boolean;
+}
+export interface CryptoInput {
+  coingecko_id: string; symbol: string; display_name?: string;
+  quantity: string; purchase_date: string; purchase_price: string;
+  total_cost: string; pricing_instrument?: string; excluded_from_reports?: boolean;
+}
+export type CryptoUpdateInput = Partial<CryptoInput>;
+
 export interface CoinSummary { id: string; symbol: string; name: string }
 // User report, 2026-08-26: crypto purchase price can be entered in USD, and
 // must auto-convert to VND (the app's one storage currency) using a rate
@@ -91,17 +116,16 @@ export const api = {
     },
     metalBrands: () => request<string[]>("/assets/metal-brands"),
     metals: {
-      list: () => request<unknown[]>("/assets/metals"),
-      create: (input: MetalInput) => request<unknown>("/assets/metals", { method: "POST", body: JSON.stringify(input) }),
-      // User request, 2026-08-26: allow editing "không tính vào báo cáo"
-      // from the asset-edit menu -- this is the only patchable field for
-      // metal holdings today, so the payload is deliberately narrow.
-      update: (id: number, input: { excluded_from_reports: boolean }) => request<unknown>(`/assets/metals/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+      list: () => request<MetalHolding[]>("/assets/metals"),
+      create: (input: MetalInput) => request<MetalHolding>("/assets/metals", { method: "POST", body: JSON.stringify(input) }),
+      update: (id: number, input: MetalUpdateInput) => request<MetalHolding>(`/assets/metals/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+      remove: (id: number) => request<{ id: number; deleted: boolean }>(`/assets/metals/${id}`, { method: "DELETE" }),
     },
     crypto: {
-      list: () => request<unknown[]>("/assets/crypto"),
-      create: (input: CryptoInput) => request<unknown>("/assets/crypto", { method: "POST", body: JSON.stringify(input) }),
-      update: (id: number, input: { excluded_from_reports: boolean }) => request<unknown>(`/assets/crypto/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+      list: () => request<CryptoHolding[]>("/assets/crypto"),
+      create: (input: CryptoInput) => request<CryptoHolding>("/assets/crypto", { method: "POST", body: JSON.stringify(input) }),
+      update: (id: number, input: CryptoUpdateInput) => request<CryptoHolding>(`/assets/crypto/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+      remove: (id: number) => request<{ id: number; deleted: boolean }>(`/assets/crypto/${id}`, { method: "DELETE" }),
       searchCoins: (q: string) => request<CoinSummary[]>(`/assets/crypto/coins?q=${encodeURIComponent(q)}`),
     },
   },
