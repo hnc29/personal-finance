@@ -326,3 +326,185 @@ def test_patch_crypto_unknown_id_returns_404(client: TestClient) -> None:
         "/api/v1/assets/crypto/999999", json={"excluded_from_reports": True}
     )
     assert response.status_code == 404
+
+
+def test_create_metal_with_funding_account_debits_balance(client: TestClient) -> None:
+    # 1. Create a bank account with 10,000,000 balance
+    acc = client.post(
+        "/api/v1/accounts",
+        json={"name": "Checking Account", "account_type": "BANK", "currency": "VND"},
+    ).json()
+    acc_id = acc["id"]
+    client.post(
+        "/api/v1/financial-events",
+        json={
+            "event_type": "INCOME",
+            "transaction_date": "2026-08-01",
+            "note": "Initial funds",
+            "entries": [{"account_id": acc_id, "amount": "10000000"}],
+        },
+    )
+    bal_before = client.get(f"/api/v1/accounts/{acc_id}/balance").json()["balance"]
+    assert bal_before == "10000000.0000"
+
+    # 2. Buy gold for 7,500,000 deducting from checking account
+    res = client.post(
+        "/api/v1/assets/metals",
+        json={
+            "metal_type": "GOLD",
+            "brand": "SJC",
+            "product_type": "Vàng nhẫn 1 chỉ",
+            "purity": "0.9999",
+            "quantity_grams": "3.75",
+            "purchase_date": "2026-08-02",
+            "purchase_price": "7500000",
+            "total_cost": "7500000",
+            "funding_account_id": acc_id,
+        },
+    )
+    assert res.status_code == 201
+
+    # 3. Balance must now be 2,500,000
+    bal_after = client.get(f"/api/v1/accounts/{acc_id}/balance").json()["balance"]
+    assert bal_after == "2500000.0000"
+
+
+def test_create_crypto_with_funding_account_debits_balance(client: TestClient) -> None:
+    # 1. Create a bank account with 50,000,000 balance
+    acc = client.post(
+        "/api/v1/accounts",
+        json={"name": "Savings Wallet", "account_type": "BANK", "currency": "VND"},
+    ).json()
+    acc_id = acc["id"]
+    client.post(
+        "/api/v1/financial-events",
+        json={
+            "event_type": "INCOME",
+            "transaction_date": "2026-08-01",
+            "note": "Initial funds",
+            "entries": [{"account_id": acc_id, "amount": "50000000"}],
+        },
+    )
+
+    # 2. Buy BTC for 30,000,000 deducting from wallet
+    res = client.post(
+        "/api/v1/assets/crypto",
+        json={
+            "coingecko_id": "bitcoin",
+            "symbol": "btc",
+            "quantity": "0.02",
+            "purchase_date": "2026-08-02",
+            "purchase_price": "1500000000",
+            "total_cost": "30000000",
+            "funding_account_id": acc_id,
+        },
+    )
+    assert res.status_code == 201
+
+    # 3. Balance must now be 20,000,000
+    bal_after = client.get(f"/api/v1/accounts/{acc_id}/balance").json()["balance"]
+    assert bal_after == "20000000.0000"
+
+
+def test_sync_crypto_prices_endpoint(client: TestClient) -> None:
+    client.post(
+        "/api/v1/assets/crypto",
+        json={
+            "coingecko_id": "bitcoin",
+            "symbol": "btc",
+            "quantity": "0.1",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "2000000000",
+            "total_cost": "200000000",
+        },
+    )
+
+    import datetime
+    from decimal import Decimal
+    from unittest.mock import patch
+
+    from app.models.pricing import (
+        PriceQuote,
+        PricingProvider,
+        QuoteMatchLevel,
+        QuoteState,
+    )
+
+    mock_quote = PriceQuote(
+        provider=PricingProvider(code="COINMARKETCAP", name="CoinMarketCap"),
+        product_code="BTC/USD",
+        match_level=QuoteMatchLevel.EXACT,
+        state=QuoteState.LIVE,
+        quoted_at=datetime.datetime.now(datetime.UTC),
+        observed_at=datetime.datetime.now(datetime.UTC),
+    )
+    mock_quote.buy_price = Decimal("2080000000.0000")
+    mock_quote.sell_price = Decimal("2080000000.0000")
+
+    with patch(
+        "app.services.crypto_pricing.CoinMarketCapPriceAdapter.fetch_all_quotes",
+        return_value={"BTC": (Decimal(80000), Decimal("2080000000.0000"), mock_quote)},
+    ), patch(
+        "app.services.crypto_pricing.CoinMarketCapPriceAdapter.get_usd_vnd_rate",
+        return_value=Decimal("26000.0000"),
+    ):
+        res = client.post("/api/v1/assets/crypto/sync-prices")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["updated_count"] == 1
+        assert data["usd_vnd_rate"] == "26000.0000"
+        assert len(data["items"]) == 1
+        assert data["items"][0]["symbol"] == "BTC"
+
+
+def test_sync_metal_prices_endpoint(client: TestClient) -> None:
+    client.post(
+        "/api/v1/assets/metals",
+        json={
+            "metal_type": "GOLD",
+            "brand": "SJC",
+            "product_type": "Vàng miếng SJC 1 lượng",
+            "purity": "0.9999",
+            "quantity_grams": "3.75",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "7500000",
+            "total_cost": "7500000",
+        },
+    )
+
+    import datetime
+    from decimal import Decimal
+    from unittest.mock import patch
+
+    from app.models.pricing import (
+        PriceQuote,
+        PricingProvider,
+        QuoteMatchLevel,
+        QuoteState,
+    )
+
+    mock_quote = PriceQuote(
+        provider=PricingProvider(code="BTMC", name="Bảo Tín Minh Châu"),
+        product_code="SJC_GOLD_BAR_9999",
+        match_level=QuoteMatchLevel.EXACT,
+        state=QuoteState.LIVE,
+        quoted_at=datetime.datetime.now(datetime.UTC),
+        observed_at=datetime.datetime.now(datetime.UTC),
+    )
+    mock_quote.buy_price = Decimal("14700000.0000")
+    mock_quote.sell_price = Decimal("15000000.0000")
+
+    with patch(
+        "app.api.assets.get_or_refresh_metal_quote",
+        return_value=mock_quote,
+    ):
+        res = client.post("/api/v1/assets/metals/sync-prices")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["updated_count"] == 1
+        assert len(data["items"]) == 1
+        assert data["items"][0]["brand"] == "SJC"
+        assert data["items"][0]["valuation_price"] == "14700000.0000"
+
+
+

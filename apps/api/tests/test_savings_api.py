@@ -455,3 +455,62 @@ def test_portfolio_overview_counts_savings_principal_exactly_once(
     assert savings_component_total == Decimal(100000000)
     # Net worth = remaining bank cash (100M) + savings principal (100M).
     assert Decimal(overview["net_worth"]) == Decimal(200000000)
+
+
+def test_delete_savings_account(client: TestClient) -> None:
+    bank_id = _make_bank_account(client)
+    client.post(
+        "/api/v1/financial-events",
+        json={
+            "event_type": "INCOME",
+            "transaction_date": "2026-01-01",
+            "entries": [{"account_id": bank_id, "amount": "200000000"}],
+        },
+    )
+    # Balance before savings = 200M
+    bal_before = Decimal(client.get(f"/api/v1/accounts/{bank_id}/balance").json()["balance"])
+    assert bal_before == Decimal(200000000)
+
+    savings = _open_savings(
+        client, funding_account_id=bank_id, principal="100000000"
+    )
+    savings_id = savings["id"]
+
+    # Balance during savings = 100M (debited)
+    bal_during = Decimal(client.get(f"/api/v1/accounts/{bank_id}/balance").json()["balance"])
+    assert bal_during == Decimal(100000000)
+
+    # Delete savings account
+    res = client.delete(f"/api/v1/assets/savings/{savings_id}")
+    assert res.status_code == 200, res.text
+    assert res.json()["deleted_account_id"] == savings_id
+
+    # Check 404 after deletion
+    res404 = client.get(f"/api/v1/assets/savings/{savings_id}")
+    assert res404.status_code == 404
+
+    # Balance after delete must be restored/refunded back to 200M!
+    bal_after = Decimal(client.get(f"/api/v1/accounts/{bank_id}/balance").json()["balance"])
+    assert bal_after == Decimal(200000000)
+
+
+def test_create_savings_without_funding_account(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/assets/savings",
+        json={
+            "institution": "Vietcombank",
+            "product_name": "Tiết kiệm có kỳ hạn",
+            "name": "Sổ tiết kiệm không trích ví",
+            "principal": "50000000",
+            "term_months": 6,
+            "annual_rate": "5.0",
+            "opened_date": "2026-01-01",
+        },
+    )
+    assert response.status_code == 201, response.text
+    data = response.json()
+    assert data["name"] == "Sổ tiết kiệm không trích ví"
+    assert data["funding_account_id"] is None
+    assert Decimal(data["principal"]) == Decimal(50000000)
+
+

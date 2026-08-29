@@ -11,34 +11,97 @@ CategoryNode = tuple[str, Sequence["CategoryNode"]]
 
 DEFAULT_CATEGORIES: Sequence[CategoryNode] = (
     ("Expenses", (
-        ("Food & Drinks", (("Groceries", ()), ("Eating Out", ()), ("Coffee & Drinks", ()))),
-        ("Bills & Utilities", (("Electricity", ()), ("Water", ()), ("Internet", ()), ("Mobile Phone", ()), ("Rent", ()), ("Gas", ()))),
-        ("Transportation", (("Fuel", ()), ("Parking", ()), ("Taxi & Ride-hailing", ()), ("Public Transport", ()), ("Vehicle Maintenance", ()))),
-        ("Shopping", (("Clothing", ()), ("Electronics", ()), ("Personal Items", ()), ("Household", ()))),
-        ("Home & Family", (("Home Maintenance", ()), ("Family", ()), ("Children", ()), ("Pets", ()))),
-        ("Health & Fitness", (("Medical", ()), ("Pharmacy", ()), ("Fitness", ()))),
-        ("Entertainment", (("Movies & Events", ()), ("Games", ()), ("Subscriptions", ()), ("Hobbies", ()))),
-        ("Education", (("Tuition", ()), ("Books", ()), ("Courses", ()))),
-        ("Travel", (("Flights", ()), ("Accommodation", ()), ("Local Transport", ()), ("Activities", ()))),
-        ("Gifts & Donations", (("Gifts", ()), ("Charity", ()))),
-        ("Insurance", ()), ("Taxes & Fees", ()),
-        # TASK-035: added while reconciling the seed taxonomy against a real
-        # Moneylover export -- these three showed up as materially large,
-        # recurring categories with no good existing fit (debt/loan cash
-        # flow, crypto investment outflow, and large pay-on-behalf transfers).
-        ("Debt Repayment", ()), ("Loans Given", ()),
-        ("Investments", (("Crypto", ()),)),
-        ("Paid on Behalf", ()),
-        ("Other Expense", ()),
+        ("Ăn uống", (
+            ("Ăn sáng", ()),
+            ("Ăn trưa", ()),
+            ("Ăn nhậu", ()),
+            ("Cafe Trà", ()),
+        )),
+        ("Gia đình", (
+            ("Ck vợ", ()),
+            ("Ck mẹ", ()),
+            ("Mua đồ dùng gđ", ()),
+            ("Chợ Siêu thị", ()),
+        )),
+        ("Giáo dục", (
+            ("TIT HP", ()),
+            ("NHÍM HP", ()),
+            ("BON HP", ()),
+        )),
+        ("CON CÁI", (
+            ("Tiêu vặt Tít", ()),
+            ("Đồng phục", ()),
+            ("Tit ngoại khoá", ()),
+            ("Sách vở", ()),
+            ("Tiêu vặt Nhím", ()),
+            ("Tiêu vặt Bon", ()),
+        )),
+        ("Di chuyển", (
+            ("Xăng cr", ()),
+            ("Bảo dưỡng xe", ()),
+            ("Taxi Thuê xe", ()),
+            ("Xăng lead", ()),
+            ("Phí Cầu đường", ()),
+            ("Xăng dr", ()),
+            ("Gửi xe", ()),
+            ("Rửa xe", ()),
+            ("BUS", ()),
+        )),
+        ("Hoá đơn & Tiện ích", (
+            ("Hoá đơn điện", ()),
+            ("Hoá đơn nước", ()),
+            ("Thuế đất", ()),
+            ("Hoá đơn điện thoại", ()),
+        )),
+        ("Mua sắm", (
+            ("Quần áo", ()),
+            ("Mua đồ điện tử, đt", ()),
+            ("Làm đẹp", ()),
+            ("Đồ gia dụng", ()),
+            ("Phần mềm, AI", ()),
+            ("Đồ dùng cá nhân", ()),
+        )),
+        ("Sức khỏe", (
+            ("Khám sức khoẻ", ()),
+            ("Thuốc men", ()),
+            ("Cắt tóc", ()),
+        )),
+        ("Đầu tư", (
+            ("Ack", ()),
+            ("NN", ()),
+            ("Đầu tư coin", ()),
+        )),
+        ("Thăm hỏi", (
+            ("Hiếu hỉ", ()),
+        )),
+        ("Chi hộ", (
+            ("Chi hộ thẻ TD", ()),
+        )),
+        ("ĐIỀU CHỈNH SỐ DƯ", ()),
+        ("Trả nợ", ()),
+        ("Cho vay", ()),
+        ("Cho tặng từ thiện", ()),
+        ("Phí Ck", ()),
+        ("Trả lãi", ()),
+        ("Giải trí", (
+            ("Vui - chơi", ()),
+        )),
+        ("RT", ()),
+        ("Tilo Pp", ()),
+        ("Các chi phí khác", ()),
+        ("Chưa phân loại", ()),
     )),
     ("Income", (
-        ("Salary", ()), ("Bonus", ()), ("Business Income", ()),
-        ("Investment Income", (("Crypto Gains", ()),)),
-        ("Interest", ()), ("Gifts Received", ()), ("Refunds", ()),
-        # TASK-035: income-side counterparts of the debt/loan and
-        # pay-on-behalf additions above.
-        ("Loans & Debt Collection", ()), ("Collected on Behalf", ()),
-        ("Other Income", ()),
+        ("Lương", ()),
+        ("Thu hộ", ()),
+        ("Thu coin", ()),
+        ("Thu nợ", ()),
+        ("Cho tặng", ()),
+        ("RT thẻ", ()),
+        ("Thanh lý", ()),
+        ("Tiền hoàn Bank", ()),
+        ("Thu lãi", ()),
+        ("Chưa phân loại", ()),
     )),
 )
 
@@ -54,7 +117,7 @@ def merge_default_categories(db: Session) -> dict[str, int]:
             category = db.scalar(select(Category).where(Category.name == name, Category.parent_id == parent_id))
             if category is None:
                 conflict = db.scalar(select(Category).where(Category.name == name))
-                if conflict is not None:
+                if conflict is not None and name != "Chưa phân loại":
                     conflicts += 1
                     existing += 1
                     add(children, conflict)

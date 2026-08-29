@@ -147,6 +147,58 @@ def export_xlsx(
     )
 
 
+@router.get("/exports/statement/data")
+def export_statement_json(
+    db: Session = Depends(get_db),  # noqa: B008
+    account_id: int | None = Query(None),
+    start_date: datetime.date | None = Query(None),  # noqa: B008
+    end_date: datetime.date | None = Query(None),  # noqa: B008
+):
+    from app.services.statement_export import get_statement_data
+
+    return get_statement_data(db, account_id, start_date, end_date)
+
+
+@router.get("/exports/statement.xlsx")
+def export_statement_xlsx(
+    db: Session = Depends(get_db),  # noqa: B008
+    account_id: int | None = Query(None),
+    start_date: datetime.date | None = Query(None),  # noqa: B008
+    end_date: datetime.date | None = Query(None),  # noqa: B008
+):
+    from app.services.statement_export import generate_statement_xlsx
+
+    out = generate_statement_xlsx(db, account_id, start_date, end_date)
+    filename = _format_export_filename(db, account_id, start_date, end_date, "xlsx")
+    filename = f"sao_ke_{filename}"
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/exports/statement.csv")
+def export_statement_csv(
+    db: Session = Depends(get_db),  # noqa: B008
+    account_id: int | None = Query(None),
+    start_date: datetime.date | None = Query(None),  # noqa: B008
+    end_date: datetime.date | None = Query(None),  # noqa: B008
+):
+    from app.services.statement_export import generate_statement_csv
+
+    out = generate_statement_csv(db, account_id, start_date, end_date)
+    filename = _format_export_filename(db, account_id, start_date, end_date, "csv")
+    filename = f"sao_ke_{filename}"
+    # Prepend UTF-8 BOM for Excel compatibility
+    csv_bytes = b"\xef\xbb\xbf" + out.getvalue().encode("utf-8")
+    return StreamingResponse(
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/imports/money-lover")
 def import_money_lover(
     payload: bytes = Body(...),

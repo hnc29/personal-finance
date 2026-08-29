@@ -1093,11 +1093,11 @@ function BrandVectorIcon({ type, size }: { type?: string; size: number }) {
 
 export function AccountLogo({
   name,
-  accountType,
+  accountType = "BANK",
   size = 32,
 }: {
   name: string;
-  accountType: AccountType;
+  accountType?: AccountType;
   size?: number;
 }) {
   const brand = getAccountBrand(name, accountType);

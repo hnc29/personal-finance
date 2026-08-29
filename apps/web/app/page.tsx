@@ -9,7 +9,7 @@ import { CategoryIcon, CategoryIconBadge, IconGlyph, ICON_GROUPS, iconLabel } fr
 import { bankCatalog, bankCategoryLabel, bankCategoryOrder, ewalletCatalog } from "../lib/bank-catalog";
 import { AccountLogo, getAccountBrand } from "../lib/account-logos";
 
-type View = "transactions" | "ledger" | "accounts" | "categories" | "review" | "assets" | "data";
+type View = "transactions" | "ledger" | "reports" | "accounts" | "categories" | "assets" | "data";
 // User request, 2026-08-26 (UI redesign to a Money-Lover-style layout):
 // the 6 original nav tabs plus the new "Sổ giao dịch" (Ledger) tab now live
 // in a vertical sidebar (see the <aside className="sidebar"> in Home())
@@ -20,11 +20,11 @@ type View = "transactions" | "ledger" | "accounts" | "categories" | "review" | "
 const navItems: { view: View; icon: string }[] = [
   { view: "transactions", icon: "Wallet" },
   { view: "ledger", icon: "Book" },
+  { view: "reports", icon: "BarChart" },
   { view: "accounts", icon: "CreditCard" },
   { view: "categories", icon: "Grid" },
   { view: "assets", icon: "PiggyBank" },
   { view: "data", icon: "Folder" },
-  { view: "review", icon: "BarChart" },
 ];
 type EntryDraft = { accountId: string; amount: string };
 const accountTypes: AccountType[] = ["CASH", "BANK", "CREDIT_CARD", "EWALLET"];
@@ -36,6 +36,13 @@ function shiftIsoDate(iso: string, deltaDays: number): string {
   if (!y || !m || !d) return todayIso();
   const shifted = new Date(Date.UTC(y, m - 1, d + deltaDays));
   return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+}
+function shiftMonthKey(key: string, delta: number): string {
+  const [y, m] = key.split("-").map(Number);
+  const total = (m - 1) + delta;
+  const year = y + Math.floor(total / 12);
+  const month = ((total % 12) + 12) % 12;
+  return `${year}-${String(month + 1).padStart(2, "0")}`;
 }
 function formatIsoDateLabel(language: Language, iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -51,6 +58,20 @@ function formatIsoDateLabel(language: Language, iso: string): string {
 // when read next to the strict <select> in AccountFormDialog, which builds
 // its options straight from bankCatalog instead of this list.
 const bankTemplates = bankCatalog.map(x => x.name);
+
+function invalidateAllFinancialQueries(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["events"] });
+  qc.invalidateQueries({ queryKey: ["account-balance"] });
+  qc.invalidateQueries({ queryKey: ["account-balances"] });
+  qc.invalidateQueries({ queryKey: ["accounts"] });
+  qc.invalidateQueries({ queryKey: ["portfolio"] });
+  qc.invalidateQueries({ queryKey: ["savings"] });
+  qc.invalidateQueries({ queryKey: ["metals"] });
+  qc.invalidateQueries({ queryKey: ["crypto"] });
+  qc.invalidateQueries({ queryKey: ["reconciliation"] });
+  qc.invalidateQueries({ queryKey: ["imports"] });
+}
+
 const LanguageContext = createContext<Language>("vi");
 function useI18n() {
   const language = useContext(LanguageContext);
@@ -61,32 +82,56 @@ export default function Home() {
   const [view, setView] = useState<View>("transactions");
   const [language, setLanguage] = useLanguage();
   const t = copy[language];
-  // User request, 2026-08-26 (UI redesign): the eyebrow ("SỔ CÁI LƯU TRỮ
-  // CỤC BỘ") and h1 title ("Tài chính cá nhân") that used to open every
-  // page are gone -- the sidebar's own branding now stands in for both.
-  // The horizontal <nav> is now a vertical sidebar column (styled in
-  // styles.css's .sidebar rules) holding all 7 tabs (the new "Sổ giao
-  // dịch" tab is navItems' 2nd entry, see its definition above); the
-  // language switcher moves to a slim top bar next to the page content.
   return <LanguageContext.Provider value={language}><div className="app-shell">
     <aside className="sidebar">
-      <div className="sidebar-brand" aria-hidden="true"><IconGlyph iconKey="Wallet" size={24} /><span>{language === "vi" ? "Sổ cái" : "Ledger"}</span></div>
+      <button
+        type="button"
+        className="sidebar-add-btn"
+        onClick={() => setView("transactions")}
+        title={language === "vi" ? "Thêm ghi chép" : "Add record"}
+      >
+        <span className="sidebar-add-btn-main">
+          <IconGlyph iconKey="Plus" size={18} />
+          <span>{language === "vi" ? "Thêm ghi chép" : "Add record"}</span>
+        </span>
+        <span className="sidebar-add-btn-arrow" aria-hidden="true">
+          <IconGlyph iconKey="ChevronDown" size={16} />
+        </span>
+      </button>
       <nav aria-label={ui(language, "Main navigation")}>{navItems.map(({ view: item, icon }) => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} onClick={() => setView(item)} key={item}><span className="nav-icon" aria-hidden="true"><IconGlyph iconKey={icon} size={20} /></span><span>{t[item as keyof typeof t] ?? item}</span></button>)}</nav>
     </aside>
     <div className="app-content">
       <header className="topbar"><div className="header-tools"><div className="language" role="group" aria-label={t.language}><button type="button" aria-pressed={language === "vi"} className={language === "vi" ? "active" : ""} onClick={() => setLanguage("vi")}>🇻🇳 <span>Tiếng Việt</span></button><button type="button" aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>🇺🇸 <span>English</span></button></div></div></header>
-      <main>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "review" ? <Review /> : view === "assets" ? <Assets /> : view === "data" ? <DataPage /> : view === "ledger" ? <Ledger /> : <Transactions />}</main>
+      <main>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "reports" ? <Reports /> : view === "assets" ? <Assets /> : view === "data" ? <DataPage /> : view === "ledger" ? <Ledger /> : <Transactions />}</main>
     </div>
   </div></LanguageContext.Provider>;
 }
 
 function DateRow({ value, onChange, language, label: labelText, name }: { value: string; onChange: (v: string) => void; language: Language; label?: string; name?: string }) {
   const { tr } = useI18n();
+  const inputRef = useRef<HTMLInputElement>(null);
   return <div className="date-row">
     <button type="button" className="date-nav" aria-label={tr("Previous day")} onClick={() => onChange(shiftIsoDate(value, -1))}>‹</button>
-    <label className="date-center">
+    <label
+      className="date-center"
+      onClick={() => {
+        try { inputRef.current?.showPicker?.(); } catch {}
+      }}
+      style={{ cursor: "pointer" }}
+    >
       <span>{formatIsoDateLabel(language, value)}</span>
-      <input type="date" name={name} aria-label={labelText ? tr(labelText) : tr("Choose date")} value={value} onChange={e => onChange(e.target.value || todayIso())} required className="date-native" />
+      <input
+        ref={inputRef}
+        type="date"
+        name={name}
+        aria-label={labelText ? tr(labelText) : tr("Choose date")}
+        value={value}
+        onChange={e => onChange(e.target.value || todayIso())}
+        onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }}
+        required
+        className="date-native"
+        style={{ cursor: "pointer" }}
+      />
     </label>
     <button type="button" className="date-nav" aria-label={tr("Next day")} onClick={() => onChange(shiftIsoDate(value, 1))}>›</button>
   </div>;
@@ -98,6 +143,8 @@ function AssetDashboard({
   savings,
   metals,
   crypto,
+  portfolioMetals,
+  portfolioCrypto,
   activeTab,
   onSelectTab,
 }: {
@@ -106,6 +153,8 @@ function AssetDashboard({
   savings: SavingsAccount[];
   metals: MetalHolding[];
   crypto: CryptoHolding[];
+  portfolioMetals?: import("../lib/api").PortfolioRow[];
+  portfolioCrypto?: import("../lib/api").PortfolioRow[];
   activeTab: "liquid" | "savings" | "metals" | "crypto";
   onSelectTab: (tab: "liquid" | "savings" | "metals" | "crypto") => void;
 }) {
@@ -129,14 +178,27 @@ function AssetDashboard({
   let metalsTotal = "0";
   for (const m of metals) {
     if (!m.excluded_from_reports) {
-      metalsTotal = sumMoney([metalsTotal, m.total_cost]);
+      const portRow = portfolioMetals?.find(r => r.id === m.id);
+      const currentUnitPrice = portRow?.quote?.valuation_price;
+      const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
+      const chiQtyExact = (Number(m.quantity_grams) / 3.75).toFixed(4);
+      const mVal = hasLiveQuote && currentUnitPrice
+        ? sumMoney([mulDecimal(currentUnitPrice, chiQtyExact)])
+        : (portRow?.value ?? m.total_cost);
+      metalsTotal = sumMoney([metalsTotal, mVal]);
     }
   }
 
   let cryptoTotal = "0";
   for (const c of crypto) {
     if (!c.excluded_from_reports) {
-      cryptoTotal = sumMoney([cryptoTotal, c.total_cost]);
+      const portRow = portfolioCrypto?.find(r => r.id === c.id);
+      const currentUnitPrice = portRow?.quote?.valuation_price;
+      const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
+      const cVal = hasLiveQuote && currentUnitPrice
+        ? sumMoney([mulDecimal(currentUnitPrice, c.quantity)])
+        : (portRow?.value ?? c.total_cost);
+      cryptoTotal = sumMoney([cryptoTotal, cVal]);
     }
   }
 
@@ -524,12 +586,9 @@ function MetalsHoldingsTable({
           <tr>
             <th>{tr("Product")}</th>
             <th>{tr("Brand")}</th>
-            <th>{tr("Purity")}</th>
             <th>{tr("Quantity (chỉ)")}</th>
-            <th>{tr("Grams")}</th>
             <th>{tr("Purchase price")}</th>
             <th>{tr("Total cost")}</th>
-            <th>{tr("Date")}</th>
             <th>{tr("Market price")}</th>
             <th>{tr("Market value")}</th>
             <th>{tr("Profit / Loss")}</th>
@@ -539,34 +598,55 @@ function MetalsHoldingsTable({
         <tbody>
           {metals.length === 0 ? (
             <tr>
-              <td colSpan={12} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
+              <td colSpan={9} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
                 {tr("No precious metals yet.")}
               </td>
             </tr>
           ) : (
             metals.map(m => {
               const portRow = portfolioRows.find(r => r.id === m.id);
-              const currentVal = portRow?.value ?? m.total_cost;
+              // Giá hiện tại bằng giá cập nhật mới nhất từ BTMC (đ/chỉ)
+              const currentUnitPrice = portRow?.quote?.valuation_price ?? null;
+              const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
               const chiQty = (Number(m.quantity_grams) / 3.75).toFixed(2);
+              const chiQtyExact = (Number(m.quantity_grams) / 3.75).toFixed(4);
+
+              // Giá trị thị trường bằng số lượng nhân giá hiện tại
+              const currentVal = hasLiveQuote && currentUnitPrice
+                ? sumMoney([mulDecimal(currentUnitPrice, chiQtyExact)])
+                : (portRow?.value ?? m.total_cost);
+
               const currentValNum = Number(currentVal);
               const totalCostNum = Number(m.total_cost);
               const deltaNum = currentValNum - totalCostNum;
               const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
-              const marketPricePerChi = chiQty && Number(chiQty) > 0 && currentValNum > 0
-                ? Math.round(currentValNum / Number(chiQty))
-                : null;
 
               return (
                 <tr key={m.id}>
                   <td><strong>{m.product_type}</strong></td>
                   <td>{label(m.brand)}</td>
-                  <td>{m.purity ? `${(Number(m.purity) * 100).toFixed(2)}%` : "99.99%"}</td>
                   <td><b>{chiQty}</b> chỉ</td>
-                  <td>{m.quantity_grams} g</td>
                   <td>{fmtMoneyDisplay(m.purchase_price)} đ</td>
                   <td><b>{fmtMoneyDisplay(m.total_cost)} đ</b></td>
-                  <td>{m.purchase_date}</td>
-                  <td>{marketPricePerChi ? `${fmtMoneyDisplay(String(marketPricePerChi))} đ/chỉ` : "—"}</td>
+                  <td>
+                    {hasLiveQuote && currentUnitPrice ? (
+                      <div>
+                        <div><strong>{fmtMoneyDisplay(currentUnitPrice)} đ/chỉ</strong></div>
+                        {portRow?.quote?.provider && (
+                          <span className="badge" style={{ fontSize: "0.68rem", display: "inline-block", marginTop: "2px", background: "#e0f2fe", color: "#0369a1" }}>
+                            {portRow.quote.provider}
+                          </span>
+                        )}
+                        {portRow?.quote?.state === "STALE" && (
+                          <span className="badge muted" style={{ fontSize: "0.68rem", display: "inline-block", marginTop: "2px", marginLeft: "4px" }}>
+                            STALE
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ color: "var(--muted)" }}>—</span>
+                    )}
+                  </td>
                   <td><strong>{fmtMoneyDisplay(currentVal)} đ</strong></td>
                   <td>
                     <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
@@ -644,25 +724,47 @@ function CryptoHoldingsTable({
           ) : (
             crypto.map(c => {
               const portRow = portfolioRows.find(r => r.id === c.id);
-              const currentVal = portRow?.value ?? c.total_cost;
+              // Giá hiện tại bằng giá cập nhật mới nhất từ CoinMarketCap
+              const currentUnitPrice = portRow?.quote?.valuation_price ?? null;
+              const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
+
+              // Giá trị thị trường bằng số lượng nhân giá hiện tại
+              const currentVal = hasLiveQuote && currentUnitPrice
+                ? sumMoney([mulDecimal(currentUnitPrice, c.quantity)])
+                : (portRow?.value ?? c.total_cost);
+
               const currentValNum = Number(currentVal);
               const totalCostNum = Number(c.total_cost);
-              const qtyNum = Number(c.quantity);
               const deltaNum = currentValNum - totalCostNum;
               const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
-              const marketPricePerUnit = qtyNum > 0 && currentValNum > 0
-                ? Math.round(currentValNum / qtyNum)
-                : null;
 
               return (
                 <tr key={c.id}>
-                  <td><strong>{c.symbol}</strong></td>
-                  <td>{c.display_name}</td>
+                  <td><strong>{c.symbol.toUpperCase()}</strong></td>
+                  <td>{c.display_name || c.symbol.toUpperCase()}</td>
                   <td><b>{c.quantity}</b></td>
                   <td>{fmtMoneyDisplay(c.purchase_price)} đ</td>
                   <td><b>{fmtMoneyDisplay(c.total_cost)} đ</b></td>
                   <td>{c.purchase_date}</td>
-                  <td>{marketPricePerUnit ? `${fmtMoneyDisplay(String(marketPricePerUnit))} đ` : "—"}</td>
+                  <td>
+                    {hasLiveQuote && currentUnitPrice ? (
+                      <div>
+                        <div><strong>{fmtMoneyDisplay(currentUnitPrice)} đ</strong></div>
+                        {portRow?.quote?.provider && (
+                          <span className="badge" style={{ fontSize: "0.68rem", display: "inline-block", marginTop: "2px", background: "#e0f2fe", color: "#0369a1" }}>
+                            {portRow.quote.provider}
+                          </span>
+                        )}
+                        {portRow?.quote?.state === "STALE" && (
+                          <span className="badge muted" style={{ fontSize: "0.68rem", display: "inline-block", marginTop: "2px", marginLeft: "4px" }}>
+                            STALE
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ color: "var(--muted)" }}>—</span>
+                    )}
+                  </td>
                   <td><strong>{fmtMoneyDisplay(currentVal)} đ</strong></td>
                   <td>
                     <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
@@ -696,6 +798,337 @@ function CryptoHoldingsTable({
   );
 }
 
+const PIE_COLORS = [
+  "#3b82f6", // Blue
+  "#10b981", // Emerald
+  "#f59e0b", // Amber
+  "#ef4444", // Red
+  "#8b5cf6", // Purple
+  "#ec4899", // Pink
+  "#06b6d4", // Cyan
+  "#14b8a6", // Teal
+  "#f97316", // Orange
+  "#6366f1", // Indigo
+  "#84cc16", // Lime
+  "#64748b", // Slate
+];
+
+function polarToCartesian(cx: number, cy: number, r: number, angleDegrees: number) {
+  const rad = ((angleDegrees - 90) * Math.PI) / 180.0;
+  return {
+    x: cx + r * Math.cos(rad),
+    y: cy + r * Math.sin(rad),
+  };
+}
+
+function describeArc(cx: number, cy: number, rOuter: number, rInner: number, startAngle: number, endAngle: number) {
+  const angleDiff = endAngle - startAngle;
+  if (angleDiff >= 359.99) {
+    return `M ${cx} ${cy - rOuter} A ${rOuter} ${rOuter} 0 1 0 ${cx} ${cy + rOuter} A ${rOuter} ${rOuter} 0 1 0 ${cx} ${cy - rOuter} M ${cx} ${cy - rInner} A ${rInner} ${rInner} 0 1 1 ${cx} ${cy + rInner} A ${rInner} ${rInner} 0 1 1 ${cx} ${cy - rInner} Z`;
+  }
+  const outerStart = polarToCartesian(cx, cy, rOuter, startAngle);
+  const outerEnd = polarToCartesian(cx, cy, rOuter, endAngle);
+  const innerStart = polarToCartesian(cx, cy, rInner, endAngle);
+  const innerEnd = polarToCartesian(cx, cy, rInner, startAngle);
+  const largeArcFlag = angleDiff <= 180 ? "0" : "1";
+
+  return [
+    `M ${outerStart.x} ${outerStart.y}`,
+    `A ${rOuter} ${rOuter} 0 ${largeArcFlag} 1 ${outerEnd.x} ${outerEnd.y}`,
+    `L ${innerStart.x} ${innerStart.y}`,
+    `A ${rInner} ${rInner} 0 ${largeArcFlag} 0 ${innerEnd.x} ${innerEnd.y}`,
+    "Z"
+  ].join(" ");
+}
+
+interface PieSliceData {
+  label: string;
+  value: number;
+  color?: string;
+  formattedValue?: string;
+}
+
+function ReportDonutChart({
+  title,
+  data,
+  totalLabel,
+  totalValueFormatted,
+  height = 300,
+  legendPosition = "bottom",
+}: {
+  title?: string;
+  data: PieSliceData[];
+  totalLabel?: string;
+  totalValueFormatted?: string;
+  height?: number;
+  legendPosition?: "bottom" | "right";
+}) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  const total = useMemo(() => data.reduce((acc, d) => acc + (d.value > 0 ? d.value : 0), 0), [data]);
+
+  const slices = useMemo(() => {
+    if (total <= 0) return [];
+    let currentAngle = 0;
+    return data
+      .filter(d => d.value > 0)
+      .map((d, i) => {
+        const angle = (d.value / total) * 360;
+        const start = currentAngle;
+        const end = currentAngle + angle;
+        currentAngle = end;
+        const color = d.color || PIE_COLORS[i % PIE_COLORS.length];
+        const pct = ((d.value / total) * 100).toFixed(1);
+        return { ...d, startAngle: start, endAngle: end, color, pct, index: i };
+      });
+  }, [data, total]);
+
+  if (total <= 0 || slices.length === 0) {
+    return (
+      <div className="report-chart-box" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: height }}>
+        {title && <h4 style={{ margin: "0 0 12px", fontSize: "0.95rem", fontWeight: 700, color: "var(--text)" }}>{title}</h4>}
+        <p style={{ color: "var(--muted)", fontSize: "0.84rem" }}>Chưa có dữ liệu</p>
+      </div>
+    );
+  }
+
+  const activeSlice = hoveredIdx !== null ? slices.find(s => s.index === hoveredIdx) : null;
+  const isRightLegend = legendPosition === "right";
+  const size = isRightLegend ? 170 : 190;
+  const center = size / 2;
+  const rOuter = isRightLegend ? 72 : 82;
+  const rInner = isRightLegend ? 44 : 50;
+
+  return (
+    <div className="report-chart-box" style={isRightLegend ? { width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center" } : undefined}>
+      {title && <h4 style={{ margin: "0 0 14px", fontSize: "0.95rem", fontWeight: 700, color: "var(--text)" }}>{title}</h4>}
+      <div style={{
+        display: "flex",
+        flexDirection: isRightLegend ? "row" : "column",
+        alignItems: "center",
+        justifyContent: isRightLegend ? "space-around" : "center",
+        gap: isRightLegend ? "16px" : "14px",
+        width: "100%",
+      }}>
+        <div style={{ position: "relative", flexShrink: 0 }}>
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow: "visible" }}>
+            {slices.map((slice) => {
+              const isHovered = hoveredIdx === slice.index;
+              const path = describeArc(center, center, isHovered ? rOuter + 4 : rOuter, isHovered ? rInner - 2 : rInner, slice.startAngle, slice.endAngle);
+              return (
+                <path
+                  key={slice.index}
+                  d={path}
+                  fill={slice.color}
+                  opacity={hoveredIdx === null || isHovered ? 1 : 0.4}
+                  style={{
+                    cursor: "pointer",
+                    transition: "all 0.18s ease",
+                  }}
+                  onMouseEnter={() => setHoveredIdx(slice.index)}
+                  onMouseLeave={() => setHoveredIdx(null)}
+                />
+              );
+            })}
+            <text
+              x={center}
+              y={activeSlice ? center - 6 : center - 4}
+              textAnchor="middle"
+              style={{ fontSize: isRightLegend ? "0.68rem" : "0.72rem", fill: "var(--muted)", fontWeight: 600, pointerEvents: "none" }}
+            >
+              {activeSlice ? (activeSlice.label.length > 12 ? activeSlice.label.slice(0, 11) + "…" : activeSlice.label) : (totalLabel || "Tổng")}
+            </text>
+            <text
+              x={center}
+              y={activeSlice ? center + 10 : center + 12}
+              textAnchor="middle"
+              style={{ fontSize: activeSlice ? (isRightLegend ? "0.78rem" : "0.86rem") : (isRightLegend ? "0.82rem" : "0.92rem"), fill: "var(--text)", fontWeight: 700, pointerEvents: "none" }}
+            >
+              {activeSlice ? `${activeSlice.pct}%` : (totalValueFormatted || fmtMoneyDisplay(String(Math.round(total))))}
+            </text>
+          </svg>
+        </div>
+
+        {/* Legend */}
+        <div style={{
+          marginTop: isRightLegend ? 0 : "14px",
+          width: isRightLegend ? "auto" : "100%",
+          flex: isRightLegend ? 1 : undefined,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: isRightLegend ? "10px" : "6px",
+          maxHeight: "220px",
+          overflowY: "auto",
+          paddingRight: "4px"
+        }}>
+          {slices.slice(0, 8).map((s) => (
+            <div
+              key={s.index}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontSize: isRightLegend ? "0.82rem" : "0.78rem",
+                padding: isRightLegend ? "4px 6px" : "3px 6px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                background: hoveredIdx === s.index ? "rgba(0, 0, 0, 0.05)" : "transparent",
+                transition: "background 0.15s ease",
+              }}
+              onMouseEnter={() => setHoveredIdx(s.index)}
+              onMouseLeave={() => setHoveredIdx(null)}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
+                <span style={{ width: "9px", height: "9px", borderRadius: "50%", background: s.color, flexShrink: 0 }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600 }}>{s.label}</span>
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0, marginLeft: "8px" }}>
+                <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{s.formattedValue || fmtMoneyDisplay(String(Math.round(s.value)))}</span>
+                <span style={{ color: "var(--muted)", fontSize: "0.74rem", fontWeight: 600, minWidth: "34px", textAlign: "right" }}>{s.pct}%</span>
+              </div>
+            </div>
+          ))}
+          {slices.length > 8 && (
+            <div style={{ fontSize: "0.74rem", color: "var(--muted)", textAlign: "center", marginTop: "2px" }}>
+              + {slices.length - 8} mục khác
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LiquidAccountsDashboard({
+  accounts,
+  balances,
+  language,
+}: {
+  accounts: Account[];
+  balances: Map<number, string>;
+  language: Language;
+}) {
+  const { tr } = useI18n();
+
+  const cashAccounts = accounts.filter(a => a.account_type === "CASH");
+  const bankAccounts = accounts.filter(a => a.account_type === "BANK");
+  const ewalletAccounts = accounts.filter(a => a.account_type === "EWALLET");
+
+  const cashTotal = cashAccounts.reduce((acc, a) => acc + Math.max(0, Number(balances.get(a.id) || 0)), 0);
+  const bankTotal = bankAccounts.reduce((acc, a) => acc + Math.max(0, Number(balances.get(a.id) || 0)), 0);
+  const ewalletTotal = ewalletAccounts.reduce((acc, a) => acc + Math.max(0, Number(balances.get(a.id) || 0)), 0);
+
+  const grandTotal = cashTotal + bankTotal + ewalletTotal;
+
+  const cashPct = grandTotal > 0 ? (cashTotal / grandTotal) * 100 : 0;
+  const bankPct = grandTotal > 0 ? (bankTotal / grandTotal) * 100 : 0;
+  const ewalletPct = grandTotal > 0 ? (ewalletTotal / grandTotal) * 100 : 0;
+
+  const typeConfig = [
+    {
+      type: "CASH",
+      name: language === "vi" ? "Tiền mặt" : "Cash",
+      count: cashAccounts.length,
+      amount: cashTotal,
+      pct: cashPct,
+      color: "#10b981", // Emerald green
+    },
+    {
+      type: "BANK",
+      name: language === "vi" ? "Tài khoản ngân hàng" : "Bank accounts",
+      count: bankAccounts.length,
+      amount: bankTotal,
+      pct: bankPct,
+      color: "#0084d6", // Sky blue
+    },
+    {
+      type: "EWALLET",
+      name: language === "vi" ? "Ví điện tử" : "E-wallets",
+      count: ewalletAccounts.length,
+      amount: ewalletTotal,
+      pct: ewalletPct,
+      color: "#8b5cf6", // Purple
+    },
+  ];
+
+  const pieData: PieSliceData[] = typeConfig.map(t => ({
+    label: t.name,
+    value: t.amount,
+    color: t.color,
+    formattedValue: `${fmtMoneyDisplay(String(Math.round(t.amount))) ?? "0"} đ`,
+  }));
+
+  return (
+    <div className="liquid-dashboard-grid">
+      {/* Cột trái: Dạng thanh */}
+      <div className="liquid-dash-card">
+        <div className="liquid-dash-header">
+          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+            <span style={{ fontSize: "0.78rem", fontWeight: 700, textTransform: "uppercase", color: "var(--muted)", letterSpacing: "0.5px" }}>
+              {language === "vi" ? "Tổng số dư thanh toán" : "Total liquid balance"}
+            </span>
+            <strong style={{ fontSize: "1.45rem", fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
+              {fmtMoneyDisplay(String(Math.round(grandTotal))) ?? "0"} <span style={{ fontSize: "0.92rem", fontWeight: 600 }}>đ</span>
+            </strong>
+          </div>
+          <span className="badge muted" style={{ fontSize: "0.76rem", padding: "4px 10px", borderRadius: "999px" }}>
+            {accounts.length} {tr("Accounts")}
+          </span>
+        </div>
+
+        <div className="liquid-bars-list">
+          {typeConfig.map(item => (
+            <div className="liquid-bar-item" key={item.type}>
+              <div className="liquid-bar-row-top">
+                <div className="liquid-bar-label-group">
+                  <span
+                    style={{
+                      width: "10px",
+                      height: "10px",
+                      borderRadius: "50%",
+                      backgroundColor: item.color,
+                      display: "inline-block",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span className="liquid-bar-title">{item.name}</span>
+                  <span className="liquid-bar-count">({item.count} {language === "vi" ? "TK" : "accs"})</span>
+                </div>
+                <div className="liquid-bar-val-group">
+                  <span className="liquid-bar-amt">{fmtMoneyDisplay(String(Math.round(item.amount))) ?? "0"} đ</span>
+                  <span className="liquid-bar-pct" style={{ color: item.color }}>{item.pct.toFixed(1)}%</span>
+                </div>
+              </div>
+
+              <div className="liquid-progress-track">
+                <div
+                  className="liquid-progress-fill"
+                  style={{
+                    width: `${Math.min(100, Math.max(0, item.pct))}%`,
+                    backgroundColor: item.color,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Cột phải: Biểu đồ tròn với chú thích bên phải, không có tiêu đề */}
+      <div className="liquid-dash-card" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <ReportDonutChart
+          data={pieData}
+          totalLabel={language === "vi" ? "Tổng cộng" : "Total"}
+          totalValueFormatted={`${fmtMoneyDisplay(String(Math.round(grandTotal))) ?? "0"} đ`}
+          legendPosition="right"
+          height={180}
+        />
+      </div>
+    </div>
+  );
+}
+
 function Assets() {
   const { tr, label, language } = useI18n();
   const qc = useQueryClient();
@@ -708,6 +1141,7 @@ function Assets() {
   const brands = useQuery({ queryKey: ["metal-brands"], queryFn: api.assets.metalBrands });
 
   const [tab, setTab] = useState<"liquid" | "savings" | "metals" | "crypto">("liquid");
+  const [addModal, setAddModal] = useState<"metal" | "crypto" | null>(null);
   const [metalQty, setMetalQty] = useState("");
   const [metalDate, setMetalDate] = useState(todayIso());
   const [metalPrice, setMetalPrice] = useState("");
@@ -725,21 +1159,43 @@ function Assets() {
   const metal = useMutation({
     mutationFn: api.assets.metals.create,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["portfolio"] });
-      qc.invalidateQueries({ queryKey: ["metals"] });
+      invalidateAllFinancialQueries(qc);
       setMetalQty("");
       setMetalPrice("");
       setMetalTotal("");
+      setAddModal(null);
     },
   });
   const crypto = useMutation({
     mutationFn: api.assets.crypto.create,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["portfolio"] });
-      qc.invalidateQueries({ queryKey: ["crypto"] });
+      invalidateAllFinancialQueries(qc);
       setCryptoQty("");
       setCryptoPrice("");
       setCryptoTotal("");
+      setAddModal(null);
+    },
+  });
+  const syncCryptoMutation = useMutation({
+    mutationFn: api.assets.crypto.syncPrices,
+    onSuccess: (res) => {
+      invalidateAllFinancialQueries(qc);
+      alert(`Đã cập nhật giá từ CoinMarketCap cho ${res.updated_count} loại tiền mã hoá (Tỷ giá: ${fmtMoneyDisplay(res.usd_vnd_rate)} đ/USD)`);
+    },
+    onError: (err: unknown) => {
+      const msg = err && typeof err === "object" && "message" in err ? String((err as { message: unknown }).message) : String(err);
+      alert(`Lỗi cập nhật giá CoinMarketCap: ${msg}`);
+    },
+  });
+  const syncMetalsMutation = useMutation({
+    mutationFn: api.assets.metals.syncPrices,
+    onSuccess: (res) => {
+      invalidateAllFinancialQueries(qc);
+      alert(`Đã cập nhật giá vàng cho ${res.updated_count} danh mục kim loại quý`);
+    },
+    onError: (err: unknown) => {
+      const msg = err && typeof err === "object" && "message" in err ? String((err as { message: unknown }).message) : String(err);
+      alert(`Lỗi cập nhật giá vàng: ${msg}`);
     },
   });
 
@@ -820,6 +1276,11 @@ function Assets() {
     }
   }
 
+  const [metalDeduct, setMetalDeduct] = useState<boolean>(true);
+  const [metalFundingAccount, setMetalFundingAccount] = useState<string>("");
+  const [cryptoDeduct, setCryptoDeduct] = useState<boolean>(true);
+  const [cryptoFundingAccount, setCryptoFundingAccount] = useState<string>("");
+
   async function submit(e: FormEvent<HTMLFormElement>, kind: "metal" | "crypto") {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
@@ -830,6 +1291,7 @@ function Assets() {
       const scaledChi = BigInt(whole || "0") * BigInt("10000") + BigInt((fraction + "0000").slice(0, 4));
       const scaledGrams = scaledChi * BigInt("375") / BigInt("100");
       const grams = `${scaledGrams / BigInt("10000")}.${String(scaledGrams % BigInt("10000")).padStart(4, "0")}`.replace(/\.?0+$/, "");
+      const fId = metalDeduct ? Number(metalFundingAccount || v("funding_account_id") || (liquidAccounts[0]?.id ? String(liquidAccounts[0].id) : "0")) : undefined;
       metal.mutate({
         metal_type: v("metal_type") as "GOLD" | "SILVER",
         brand: v("brand"),
@@ -839,6 +1301,7 @@ function Assets() {
         purchase_date: metalDate || v("date"),
         purchase_price: normDecimal(metalPrice) || vd("price"),
         total_cost: normDecimal(metalTotal) || vd("total"),
+        funding_account_id: fId && fId > 0 ? fId : undefined,
         excluded_from_reports: f.get("excluded_from_reports") === "on",
       });
       return;
@@ -850,6 +1313,7 @@ function Assets() {
     const finalPrice = totals?.unitPriceVnd || normDecimal(cryptoPrice);
     if (!finalTotal || !finalPrice) return;
     const identity = await resolveCryptoIdentity(code);
+    const fId = cryptoDeduct ? Number(cryptoFundingAccount || v("funding_account_id") || (liquidAccounts[0]?.id ? String(liquidAccounts[0].id) : "0")) : undefined;
     crypto.mutate({
       coingecko_id: identity.coingecko_id,
       symbol: identity.symbol,
@@ -858,67 +1322,22 @@ function Assets() {
       purchase_date: cryptoDate || v("date"),
       purchase_price: finalPrice,
       total_cost: finalTotal,
+      funding_account_id: fId && fId > 0 ? fId : undefined,
       excluded_from_reports: f.get("excluded_from_reports") === "on",
     });
   }
 
+  const [selectedBrand, setSelectedBrand] = useState<string>("ALL");
+  const [selectedProduct, setSelectedProduct] = useState<string>("ALL");
+  const [selectedCoin, setSelectedCoin] = useState<string>("ALL");
+
   const decimalPattern = "^\\d+([.,]\\d{1,4})?$";
   const productTypes = ["RING", "BAR", "JEWELRY"] as const;
-
-  const forms = {
-    metals: <form className="panel form asset-form" onSubmit={e => submit(e, "metal")}>
-      <h3>{tr("Precious metals")}</h3>
-      <Error error={metal.error} />
-      <select name="metal_type"><option value="GOLD">{tr("Gold")}</option><option value="SILVER">{tr("Silver")}</option></select>
-      <select name="brand" aria-label={tr("Product catalog")}>{(brands.data ?? []).map(b => <option value={b} key={b}>{label(b)}</option>)}</select>
-      <select name="product_type" aria-label={tr("Product")} required defaultValue="">
-        <option value="" disabled>{tr("Product")}</option>
-        {productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}
-      </select>
-      <input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" required value={metalQty} onChange={e => handleMetalQtyChange(e.target.value)} />
-      <div className="amount-row purity-row">
-        <input name="purity" placeholder="99.99" title={tr("Leave blank to use 99.99%")} aria-label={tr("Purity")} inputMode="decimal" pattern={decimalPattern} />
-        <span className="currency-badge">%</span>
-      </div>
-      <div className="amount-row">
-        <MoneyInput value={metalPrice} onChange={handleMetalPriceChange} placeholder={tr("Purchase price")} required />
-        <span className="currency-badge">VND</span>
-      </div>
-      <div className="amount-row">
-        <MoneyInput value={metalTotal} onChange={handleMetalTotalChange} placeholder={tr("Total cost")} required />
-        <span className="currency-badge">VND</span>
-      </div>
-      <DateRow name="date" value={metalDate} onChange={setMetalDate} language={language} label="Purchase date" />
-      <label className="checkbox-row"><input type="checkbox" name="excluded_from_reports" /><span>{tr("Exclude from reports")}</span></label>
-      <button className="primary">+ {tr("Add")}</button>
-    </form>,
-
-    crypto: <form className="panel form asset-form" onSubmit={e => submit(e, "crypto")}>
-      <h3>{tr("Crypto")}</h3>
-      <Error error={crypto.error} />
-      <input name="symbol" placeholder={tr("Coin code")} aria-label={tr("Coin code")} autoCapitalize="characters" required />
-      <input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" required value={cryptoQty} onChange={e => handleCryptoQtyChange(e.target.value)} />
-      <div className="amount-row crypto-price-row">
-        <MoneyInput value={cryptoPrice} onChange={handleCryptoPriceChange} placeholder={tr("Purchase price")} allowDecimal={cryptoCurrency === "USD"} required />
-        <select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}><option value="VND">VND</option><option value="USD">USD</option></select>
-      </div>
-      {cryptoCurrency === "USD" && <p className="quote-notice" role="status">{fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoneyDisplay(fx.data.rate)} VND`}</p>}
-      <div className="amount-row">
-        <MoneyInput value={cryptoTotal} onChange={handleCryptoTotalChange} placeholder={tr("Total cost")} required />
-        <span className="currency-badge">VND</span>
-      </div>
-      <DateRow name="date" value={cryptoDate} onChange={setCryptoDate} language={language} label="Purchase date" />
-      <label className="checkbox-row"><input type="checkbox" name="excluded_from_reports" /><span>{tr("Exclude from reports")}</span></label>
-      <button className="primary">+ {tr("Add")}</button>
-    </form>,
-  };
 
   const p = q.data;
 
   function refreshHoldings() {
-    qc.invalidateQueries({ queryKey: ["portfolio"] });
-    qc.invalidateQueries({ queryKey: ["metals"] });
-    qc.invalidateQueries({ queryKey: ["crypto"] });
+    invalidateAllFinancialQueries(qc);
   }
 
   const liquidAccounts = (accountsQ.data ?? []).filter(a => a.is_active && a.account_type !== "CREDIT_CARD");
@@ -934,16 +1353,25 @@ function Assets() {
         savings={savingsQ.data ?? []}
         metals={metalsQ.data ?? []}
         crypto={cryptoQ.data ?? []}
+        portfolioMetals={p?.precious_metals}
+        portfolioCrypto={p?.crypto}
         activeTab={tab}
         onSelectTab={setTab}
       />
 
       {tab === "liquid" && (
-        <div className="liquid-accounts-panel">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-            <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>{tr("Cash & Bank accounts")}</h3>
-            <span className="hint">{liquidAccounts.length} {tr("Accounts")}</span>
-          </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%" }}>
+          <LiquidAccountsDashboard
+            accounts={liquidAccounts}
+            balances={balances}
+            language={language}
+          />
+
+          <div className="liquid-accounts-panel">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>{tr("Cash & Bank accounts")}</h3>
+              <span className="hint">{liquidAccounts.length} {tr("Accounts")}</span>
+            </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             {liquidAccounts.length === 0 ? (
               <Empty show={true} text="No accounts yet." />
@@ -967,37 +1395,371 @@ function Assets() {
               })
             )}
           </div>
+          </div>
         </div>
       )}
 
       {tab === "savings" && <SavingsPanel />}
 
-      {tab === "metals" && (
-        <>
-          {forms.metals}
-          <div className="asset-sections" style={{ marginTop: "18px" }}>
+      {tab === "metals" && (() => {
+        const metalsList = metalsQ.data ?? [];
+        const distinctBrands = Array.from(new Set(metalsList.map(m => m.brand))).filter(Boolean);
+        const distinctProducts = Array.from(new Set(metalsList.map(m => m.product_type))).filter(Boolean);
+
+        const filteredMetals = metalsList.filter(m => {
+          const matchBrand = selectedBrand === "ALL" || m.brand === selectedBrand;
+          const matchProduct = selectedProduct === "ALL" || m.product_type === selectedProduct;
+          return matchBrand && matchProduct;
+        });
+
+        const metalsTotalCost = sumMoney(filteredMetals.map(m => m.total_cost));
+        const metalsValuation = sumMoney(filteredMetals.map(m => {
+          const portRow = p?.precious_metals?.find(r => r.id === m.id);
+          const currentUnitPrice = portRow?.quote?.valuation_price;
+          const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
+          const chiQtyExact = (Number(m.quantity_grams) / 3.75).toFixed(4);
+          return hasLiveQuote && currentUnitPrice
+            ? sumMoney([mulDecimal(currentUnitPrice, chiQtyExact)])
+            : (portRow?.value ?? m.total_cost);
+        }));
+        const metalsNetPl = sumMoney([metalsValuation, negateMoney(metalsTotalCost)]);
+        const metalsRoi = Number(metalsTotalCost) > 0
+          ? ((Number(metalsNetPl) / Number(metalsTotalCost)) * 100).toFixed(2)
+          : "0.00";
+        const metalsTotalGrams = filteredMetals.reduce((acc, m) => acc + Number(m.quantity_grams), 0);
+        const metalsTotalChi = (metalsTotalGrams / 3.75).toFixed(2);
+        const isPos = Number(metalsNetPl) > 0;
+        const isNeg = Number(metalsNetPl) < 0;
+
+        return (
+          <div style={{ width: "100%" }}>
+            {/* 1. Dashboard đơn giản cho Kim loại quý */}
+            <div className="asset-kpi-grid">
+              <div className="asset-kpi-card">
+                <span>{tr("Total valuation")}</span>
+                <strong>{fmtMoneyDisplay(metalsValuation) || "0"} đ</strong>
+                <small className="hint">{filteredMetals.length} {tr("Holdings")}</small>
+              </div>
+              <div className="asset-kpi-card">
+                <span>{tr("Total invested")}</span>
+                <strong>{fmtMoneyDisplay(metalsTotalCost) || "0"} đ</strong>
+                <small className="hint">{tr("Total cost")}</small>
+              </div>
+              <div className="asset-kpi-card">
+                <span>{tr("Net profit / loss")}</span>
+                <strong style={{ color: isPos ? "#16a34a" : isNeg ? "#dc2626" : "inherit" }}>
+                  {isPos ? "+" : ""}{fmtMoneyDisplay(metalsNetPl)} đ
+                </strong>
+                <small style={{ color: isPos ? "#16a34a" : isNeg ? "#dc2626" : "inherit", fontWeight: 700 }}>
+                  {isPos ? "+" : ""}{metalsRoi}% ROI
+                </small>
+              </div>
+              <div className="asset-kpi-card">
+                <span>{tr("Total quantity")}</span>
+                <strong>{metalsTotalChi} chỉ</strong>
+                <small className="hint">{metalsTotalGrams.toFixed(2)} g</small>
+              </div>
+            </div>
+
+            {/* 2. Toolbar với Tiêu đề, Bộ lọc & Nút thêm */}
+            <div className="asset-type-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+                <h3 style={{ margin: 0 }}>{tr("Precious metals holdings")}</h3>
+                {distinctBrands.length > 0 && (
+                  <select
+                    value={selectedBrand}
+                    onChange={e => setSelectedBrand(e.target.value)}
+                    aria-label={tr("Brand")}
+                    style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--line)", background: "var(--card)", fontSize: "0.85rem", fontWeight: 600 }}
+                  >
+                    <option value="ALL">{tr("All brands")}</option>
+                    {distinctBrands.map(b => (
+                      <option key={b} value={b}>{label(b)}</option>
+                    ))}
+                  </select>
+                )}
+                {distinctProducts.length > 0 && (
+                  <select
+                    value={selectedProduct}
+                    onChange={e => setSelectedProduct(e.target.value)}
+                    aria-label={tr("Product")}
+                    style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--line)", background: "var(--card)", fontSize: "0.85rem", fontWeight: 600 }}
+                  >
+                    <option value="ALL">{tr("All products")}</option>
+                    {distinctProducts.map(prod => (
+                      <option key={prod} value={prod}>{label(prod)}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={syncMetalsMutation.isPending}
+                  onClick={() => syncMetalsMutation.mutate()}
+                  style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  {syncMetalsMutation.isPending ? "Đang lấy giá..." : "🔄 Cập nhật giá vàng"}
+                </button>
+                <button type="button" className="primary" onClick={() => setAddModal("metal")}>
+                  + {tr("Add gold / silver")}
+                </button>
+              </div>
+            </div>
+
+            {/* 3. Danh sách chi tiết hiện ở dưới full trang */}
             <MetalsHoldingsTable
-              metals={metalsQ.data ?? []}
+              metals={filteredMetals}
               portfolioRows={p?.precious_metals ?? []}
               onEdit={m => setEditingMetal(m)}
               onDeleted={refreshHoldings}
             />
           </div>
-        </>
-      )}
+        );
+      })()}
 
-      {tab === "crypto" && (
-        <>
-          {forms.crypto}
-          <div className="asset-sections" style={{ marginTop: "18px" }}>
+      {tab === "crypto" && (() => {
+        const cryptoList = cryptoQ.data ?? [];
+        const distinctCoins = Array.from(new Set(cryptoList.map(c => c.symbol.toUpperCase()))).filter(Boolean);
+
+        const filteredCrypto = cryptoList.filter(c => {
+          return selectedCoin === "ALL" || c.symbol.toUpperCase() === selectedCoin.toUpperCase();
+        });
+
+        const cryptoTotalCost = sumMoney(filteredCrypto.map(c => c.total_cost));
+        const cryptoValuation = sumMoney(filteredCrypto.map(c => {
+          const portRow = p?.crypto?.find(r => r.id === c.id);
+          const currentUnitPrice = portRow?.quote?.valuation_price;
+          const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
+          return hasLiveQuote && currentUnitPrice
+            ? sumMoney([mulDecimal(currentUnitPrice, c.quantity)])
+            : (portRow?.value ?? c.total_cost);
+        }));
+        const cryptoNetPl = sumMoney([cryptoValuation, negateMoney(cryptoTotalCost)]);
+        const cryptoRoi = Number(cryptoTotalCost) > 0
+          ? ((Number(cryptoNetPl) / Number(cryptoTotalCost)) * 100).toFixed(2)
+          : "0.00";
+        const isPos = Number(cryptoNetPl) > 0;
+        const isNeg = Number(cryptoNetPl) < 0;
+
+        return (
+          <div style={{ width: "100%" }}>
+            {/* 1. Dashboard đơn giản cho Crypto */}
+            <div className="asset-kpi-grid">
+              <div className="asset-kpi-card">
+                <span>{tr("Total valuation")}</span>
+                <strong>{fmtMoneyDisplay(cryptoValuation) || "0"} đ</strong>
+                <small className="hint">{filteredCrypto.length} {tr("Holdings")}</small>
+              </div>
+              <div className="asset-kpi-card">
+                <span>{tr("Total invested")}</span>
+                <strong>{fmtMoneyDisplay(cryptoTotalCost) || "0"} đ</strong>
+                <small className="hint">{tr("Total cost")}</small>
+              </div>
+              <div className="asset-kpi-card">
+                <span>{tr("Net profit / loss")}</span>
+                <strong style={{ color: isPos ? "#16a34a" : isNeg ? "#dc2626" : "inherit" }}>
+                  {isPos ? "+" : ""}{fmtMoneyDisplay(cryptoNetPl)} đ
+                </strong>
+                <small style={{ color: isPos ? "#16a34a" : isNeg ? "#dc2626" : "inherit", fontWeight: 700 }}>
+                  {isPos ? "+" : ""}{cryptoRoi}% ROI
+                </small>
+              </div>
+              <div className="asset-kpi-card">
+                <span>{tr("Coins")}</span>
+                <strong>{filteredCrypto.length}</strong>
+                <small className="hint">{tr("Active")}</small>
+              </div>
+            </div>
+
+            {/* 2. Toolbar với Tiêu đề, Bộ lọc & Nút thêm */}
+            <div className="asset-type-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <h3 style={{ margin: 0 }}>{tr("Crypto holdings")}</h3>
+                {distinctCoins.length > 0 && (
+                  <select
+                    value={selectedCoin}
+                    onChange={e => setSelectedCoin(e.target.value)}
+                    aria-label={tr("Coin")}
+                    style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--line)", background: "var(--card)", fontSize: "0.85rem", fontWeight: 600 }}
+                  >
+                    <option value="ALL">{tr("All coins")}</option>
+                    {distinctCoins.map(coin => (
+                      <option key={coin} value={coin}>{coin}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={syncCryptoMutation.isPending}
+                  onClick={() => syncCryptoMutation.mutate()}
+                  style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  {syncCryptoMutation.isPending ? "Đang lấy giá..." : "🔄 Cập nhật giá CoinMarketCap"}
+                </button>
+                <button type="button" className="primary" onClick={() => setAddModal("crypto")}>
+                  + {tr("Add crypto")}
+                </button>
+              </div>
+            </div>
+
+            {/* 3. Danh sách chi tiết hiện ở dưới full trang */}
             <CryptoHoldingsTable
-              crypto={cryptoQ.data ?? []}
+              crypto={filteredCrypto}
               portfolioRows={p?.crypto ?? []}
               onEdit={c => setEditingCrypto(c)}
               onDeleted={refreshHoldings}
             />
           </div>
-        </>
+        );
+      })()}
+
+      {addModal === "metal" && (
+        <Modal title="Add gold / silver" onClose={() => setAddModal(null)}>
+          <form className="form asset-form" onSubmit={e => submit(e, "metal")}>
+            <Error error={metal.error} />
+            <Field label="Type">
+              <select name="metal_type">
+                <option value="GOLD">{tr("Gold")}</option>
+                <option value="SILVER">{tr("Silver")}</option>
+              </select>
+            </Field>
+            <Field label="Brand">
+              <select name="brand" aria-label={tr("Product catalog")}>
+                {(brands.data ?? []).map(b => <option value={b} key={b}>{label(b)}</option>)}
+              </select>
+            </Field>
+            <Field label="Product">
+              <select name="product_type" aria-label={tr("Product")} required defaultValue="">
+                <option value="" disabled>{tr("Product")}</option>
+                {productTypes.map(x => <option value={label(x)} key={x}>{label(x)}</option>)}
+              </select>
+            </Field>
+            <Field label="Quantity (chỉ)">
+              <input name="quantity" placeholder={tr("Quantity (chỉ)")} aria-label={tr("Quantity (chỉ)")} inputMode="decimal" required value={metalQty} onChange={e => handleMetalQtyChange(e.target.value)} />
+            </Field>
+            <Field label="Purity">
+              <div className="amount-row purity-row">
+                <input name="purity" placeholder="99.99" title={tr("Leave blank to use 99.99%")} aria-label={tr("Purity")} inputMode="decimal" pattern={decimalPattern} />
+                <span className="currency-badge">%</span>
+              </div>
+            </Field>
+            <Field label="Purchase price">
+              <div className="amount-row">
+                <MoneyInput value={metalPrice} onChange={handleMetalPriceChange} placeholder={tr("Purchase price")} required />
+                <span className="currency-badge">VND</span>
+              </div>
+            </Field>
+            <Field label="Total cost">
+              <div className="amount-row">
+                <MoneyInput value={metalTotal} onChange={handleMetalTotalChange} placeholder={tr("Total cost")} required />
+                <span className="currency-badge">VND</span>
+              </div>
+            </Field>
+            <Field label="Purchase date">
+              <DateRow name="date" value={metalDate} onChange={setMetalDate} language={language} label="Purchase date" />
+            </Field>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={metalDeduct} onChange={e => setMetalDeduct(e.target.checked)} />
+              <span>{tr("Deduct from payment account")}</span>
+            </label>
+            {metalDeduct && (
+              <Field label="Payment account">
+                <select
+                  name="funding_account_id"
+                  aria-label={tr("Payment account")}
+                  value={metalFundingAccount || (liquidAccounts[0]?.id ? String(liquidAccounts[0].id) : "")}
+                  onChange={e => setMetalFundingAccount(e.target.value)}
+                  required
+                >
+                  {liquidAccounts.map(a => (
+                    <option value={a.id} key={a.id}>
+                      {a.name} ({fmtMoneyDisplay(balances.get(a.id) ?? "0")} VND)
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            <label className="checkbox-row">
+              <input type="checkbox" name="excluded_from_reports" />
+              <span>{tr("Exclude from reports")}</span>
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="primary" disabled={metal.isPending}>+ {tr("Add")}</button>
+              <button type="button" className="secondary" onClick={() => setAddModal(null)}>{tr("Cancel")}</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {addModal === "crypto" && (
+        <Modal title="Add crypto" onClose={() => setAddModal(null)}>
+          <form className="form asset-form" onSubmit={e => submit(e, "crypto")}>
+            <Error error={crypto.error} />
+            <Field label="Coin code">
+              <input name="symbol" placeholder={tr("Coin code")} aria-label={tr("Coin code")} autoCapitalize="characters" required />
+            </Field>
+            <Field label="Quantity">
+              <input name="quantity" placeholder={tr("Quantity")} inputMode="decimal" required value={cryptoQty} onChange={e => handleCryptoQtyChange(e.target.value)} />
+            </Field>
+            <Field label="Purchase price">
+              <div className="amount-row crypto-price-row">
+                <MoneyInput name="purchase_price" value={cryptoPrice} onChange={handleCryptoPriceChange} placeholder={tr("Purchase price")} allowDecimal={cryptoCurrency === "USD"} required />
+                <select name="purchase_currency" aria-label={tr("Currency")} value={cryptoCurrency} onChange={e => setCryptoCurrency(e.target.value as "VND" | "USD")}>
+                  <option value="VND">VND</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+            </Field>
+            {cryptoCurrency === "USD" && (
+              <p className="quote-notice" role="status">
+                {fx.isPending ? tr("Loading exchange rate…") : fx.isError || !fx.data ? tr("Exchange rate unavailable") : `${tr("Exchange rate")}: 1 USD ≈ ${fmtMoneyDisplay(fx.data.rate)} VND`}
+              </p>
+            )}
+            <Field label="Total cost">
+              <div className="amount-row">
+                <MoneyInput name="total_cost" value={cryptoTotal} onChange={handleCryptoTotalChange} placeholder={tr("Total cost")} required />
+                <span className="currency-badge">VND</span>
+              </div>
+            </Field>
+            <Field label="Purchase date">
+              <DateRow name="date" value={cryptoDate} onChange={setCryptoDate} language={language} label="Purchase date" />
+            </Field>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={cryptoDeduct} onChange={e => setCryptoDeduct(e.target.checked)} />
+              <span>{tr("Deduct from payment account")}</span>
+            </label>
+            {cryptoDeduct && (
+              <Field label="Payment account">
+                <select
+                  name="funding_account_id"
+                  aria-label={tr("Payment account")}
+                  value={cryptoFundingAccount || (liquidAccounts[0]?.id ? String(liquidAccounts[0].id) : "")}
+                  onChange={e => setCryptoFundingAccount(e.target.value)}
+                  required
+                >
+                  {liquidAccounts.map(a => (
+                    <option value={a.id} key={a.id}>
+                      {a.name} ({fmtMoneyDisplay(balances.get(a.id) ?? "0")} VND)
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            <label className="checkbox-row">
+              <input type="checkbox" name="excluded_from_reports" />
+              <span>{tr("Exclude from reports")}</span>
+            </label>
+            <div className="form-actions">
+              <button type="submit" className="primary" disabled={crypto.isPending}>+ {tr("Add")}</button>
+              <button type="button" className="secondary" onClick={() => setAddModal(null)}>{tr("Cancel")}</button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {editingMetal && (
@@ -1100,18 +1862,43 @@ function cryptoPurchaseTotals(
 // does a best-effort, non-blocking background lookup against the existing
 // coin-catalog search endpoint (GET /assets/crypto/coins, backed by
 // CoinGecko) purely so a future live-price lookup at valuation time has a
-// real coingecko_id to work with when the typed code matches a known coin.
-// It must never gate recording the purchase: on no exact match, or on any
-// network/catalog error, it falls back to the typed code verbatim so the
-// user's purchase is always saved.
+const MAJOR_CRYPTO_MAP: Record<string, { id: string; name: string }> = {
+  BTC: { id: "bitcoin", name: "Bitcoin" },
+  ETH: { id: "ethereum", name: "Ethereum" },
+  BNB: { id: "binancecoin", name: "BNB" },
+  SOL: { id: "solana", name: "Solana" },
+  USDT: { id: "tether", name: "Tether" },
+  USDC: { id: "usd-coin", name: "USD Coin" },
+  XRP: { id: "ripple", name: "XRP" },
+  ADA: { id: "cardano", name: "Cardano" },
+  DOGE: { id: "dogecoin", name: "Dogecoin" },
+  AVAX: { id: "avalanche-2", name: "Avalanche" },
+  LINK: { id: "chainlink", name: "Chainlink" },
+  DOT: { id: "polkadot", name: "Polkadot" },
+  NEAR: { id: "near", name: "NEAR Protocol" },
+  SUI: { id: "sui", name: "Sui" },
+  APT: { id: "aptos", name: "Aptos" },
+  TON: { id: "the-open-network", name: "Toncoin" },
+  SHIB: { id: "shiba-inu", name: "Shiba Inu" },
+  PEPE: { id: "pepe", name: "Pepe" },
+};
+
 async function resolveCryptoIdentity(code: string): Promise<{ coingecko_id: string; symbol: string; display_name: string }> {
   const trimmed = code.trim();
-  const fallback = { coingecko_id: trimmed.toLowerCase(), symbol: trimmed.toLowerCase(), display_name: trimmed.toUpperCase() };
+  const upper = trimmed.toUpperCase();
+  if (MAJOR_CRYPTO_MAP[upper]) {
+    return {
+      coingecko_id: MAJOR_CRYPTO_MAP[upper].id,
+      symbol: upper,
+      display_name: upper,
+    };
+  }
+  const fallback = { coingecko_id: trimmed.toLowerCase(), symbol: upper, display_name: upper };
   try {
     const matches = await api.assets.crypto.searchCoins(trimmed);
-    const exact = matches.find(m => m.symbol.toLowerCase() === trimmed.toLowerCase());
+    const exact = matches.find(m => m.symbol.toUpperCase() === upper);
     if (!exact) return fallback;
-    return { coingecko_id: exact.id, symbol: exact.symbol, display_name: exact.name };
+    return { coingecko_id: exact.id, symbol: upper, display_name: upper };
   } catch {
     return fallback;
   }
@@ -1168,8 +1955,16 @@ function fmtMoneyDisplay(value: string | null | undefined): string | null | unde
   const normalized = fmtMoney(value);
   if (normalized == null || normalized === "") return normalized;
   const negative = normalized.startsWith("-");
-  const [whole, frac] = normalized.replace("-", "").split(".");
-  return `${negative ? "-" : ""}${groupThousands(whole)}${frac ? "," + frac : ""}`;
+  const [whole] = normalized.replace("-", "").split(".");
+  return `${negative ? "-" : ""}${groupThousands(whole || "0")}`;
+}
+
+function fmtRate(rate: string | number | null | undefined): string {
+  if (rate == null || rate === "") return "";
+  const str = String(rate).trim();
+  if (!str.includes(".")) return str;
+  const stripped = str.replace(/\.?0+$/, "");
+  return stripped || "0";
 }
 
 function formatMoneyInput(raw: string, allowDecimal = false): string {
@@ -1358,60 +2153,259 @@ function savingsStatusClass(status: string): string {
 }
 
 function SavingsPanel() {
-  const { tr } = useI18n();
+  const { tr, language } = useI18n();
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [selectedBank, setSelectedBank] = useState<string>("ALL");
+  const [searchName, setSearchName] = useState<string>("");
+
   const savingsQ = useQuery({ queryKey: ["savings"], queryFn: api.assets.savings.list });
   const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const walletAccounts = (accountsQ.data ?? []).filter(a => a.account_type !== "CREDIT_CARD" && a.is_active);
   const rows = savingsQ.data ?? [];
-  const openRows = rows.filter(r => r.status === "OPEN");
+
+  const distinctBanks = Array.from(new Set(rows.map(r => r.institution))).filter(Boolean);
+  const displayRows = rows.filter(r => {
+    if (selectedBank !== "ALL" && r.institution !== selectedBank) return false;
+    if (searchName.trim() && !r.name.toLowerCase().includes(searchName.trim().toLowerCase())) return false;
+    return true;
+  });
+
+  const openRows = displayRows.filter(r => r.status === "OPEN");
   const totalPrincipal = sumMoney(openRows.map(r => r.principal));
   const totalExpectedInterest = sumMoney(openRows.map(r => r.current_term?.expected_interest));
-  const maturingSoonCount = openRows.filter(r => r.current_term?.maturing_soon).length;
-  function refresh() { qc.invalidateQueries({ queryKey: ["savings"] }); qc.invalidateQueries({ queryKey: ["portfolio"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); }
-  return <div className="savings-panel">
-    <div className="savings-summary metrics-grid">
-      <article className="panel"><h3>{tr("Total principal")}</h3><p className="metric">{fmtMoneyDisplay(totalPrincipal) || "0"}</p></article>
-      <article className="panel"><h3>{tr("Expected interest")}</h3><p className="metric">{fmtMoneyDisplay(totalExpectedInterest) || "0"}</p></article>
-      <article className="panel"><h3>{tr("Accounts maturing soon")}</h3><p className="metric">{maturingSoonCount}</p></article>
+  const totalProjectedMaturity = sumMoney([totalPrincipal, totalExpectedInterest]);
+
+  // Find nearest maturing open savings account
+  const nearestAccount = [...openRows]
+    .filter(r => r.current_term?.days_to_maturity != null)
+    .sort((a, b) => (a.current_term?.days_to_maturity ?? 99999) - (b.current_term?.days_to_maturity ?? 99999))[0] ?? null;
+
+  function refresh() {
+    invalidateAllFinancialQueries(qc);
+  }
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.assets.savings.remove(id),
+    onSuccess: refresh,
+  });
+
+  return (
+    <div className="savings-panel" style={{ width: "100%" }}>
+      {/* 1. Dashboard tổng hợp Tiết kiệm */}
+      <div className="asset-kpi-grid">
+        <div className="asset-kpi-card">
+          <span>{tr("Total principal")}</span>
+          <strong>{fmtMoneyDisplay(totalPrincipal) || "0"} đ</strong>
+          <small className="hint">{openRows.length} {tr("Active accounts count")}</small>
+        </div>
+        <div className="asset-kpi-card">
+          <span>{tr("Total expected interest")}</span>
+          <strong style={{ color: "#16a34a" }}>{fmtMoneyDisplay(totalExpectedInterest) || "0"} đ</strong>
+          <small className="hint">{tr("At maturity")}</small>
+        </div>
+        <div className="asset-kpi-card">
+          <span>{tr("Total projected maturity value")}</span>
+          <strong style={{ color: "#0284c7" }}>{fmtMoneyDisplay(totalProjectedMaturity) || "0"} đ</strong>
+          <small className="hint">{tr("Principal")} + {tr("Expected interest")}</small>
+        </div>
+        <div className="asset-kpi-card" style={{ borderColor: nearestAccount?.current_term?.maturing_soon ? "#f97316" : undefined }}>
+          <span>{tr("Nearest maturity account")}</span>
+          {nearestAccount && nearestAccount.current_term ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "2px" }}>
+              <div style={{ fontWeight: 700, fontSize: "0.92rem", color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {nearestAccount.name} · <span style={{ color: "var(--muted)", fontWeight: 500 }}>{nearestAccount.institution}</span>
+              </div>
+              <div style={{ fontSize: "0.8rem", color: nearestAccount.current_term.days_to_maturity != null && nearestAccount.current_term.days_to_maturity <= 7 ? "#ea580c" : "var(--muted)" }}>
+                {nearestAccount.current_term.maturity_date} ({nearestAccount.current_term.days_to_maturity != null && nearestAccount.current_term.days_to_maturity >= 0 ? `${nearestAccount.current_term.days_to_maturity} ${tr("days")}` : tr("Matured")})
+              </div>
+              <div style={{ fontSize: "0.78rem", marginTop: "2px" }}>
+                <span>{tr("Principal")}: <b>{fmtMoneyDisplay(nearestAccount.principal)} đ</b></span>
+                <span style={{ marginLeft: "6px", color: "#16a34a" }}>· {tr("Projected value at maturity")}: <b>{fmtMoneyDisplay(sumMoney([nearestAccount.principal, nearestAccount.current_term.expected_interest]))} đ</b></span>
+              </div>
+            </div>
+          ) : (
+            <>
+              <strong style={{ fontSize: "1rem", color: "var(--muted)" }}>{tr("No maturing accounts")}</strong>
+              <small className="hint">{tr("No active terms")}</small>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 2. Toolbar với Tiêu đề, Bộ lọc Ngân hàng & Bộ lọc Tên sổ & Nút thêm */}
+      <div className="asset-type-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <h3 style={{ margin: 0 }}>{tr("Savings holdings")}</h3>
+          {distinctBanks.length > 0 && (
+            <select
+              value={selectedBank}
+              onChange={e => setSelectedBank(e.target.value)}
+              aria-label={tr("Bank")}
+              style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--line)", background: "var(--card)", fontSize: "0.85rem", fontWeight: 600, height: "36px", cursor: "pointer" }}
+            >
+              <option value="ALL">{tr("All banks")}</option>
+              {distinctBanks.map(b => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          )}
+          <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+            <input
+              type="text"
+              placeholder={language === "vi" ? "Lọc theo tên sổ..." : "Filter by name..."}
+              value={searchName}
+              onChange={e => setSearchName(e.target.value)}
+              style={{
+                padding: "6px 28px 6px 12px",
+                borderRadius: "8px",
+                border: "1px solid var(--line)",
+                background: "var(--card)",
+                fontSize: "0.85rem",
+                minWidth: "170px",
+                height: "36px",
+                color: "var(--text)"
+              }}
+              aria-label={language === "vi" ? "Lọc theo tên sổ" : "Filter by name"}
+            />
+            {searchName && (
+              <button
+                type="button"
+                onClick={() => setSearchName("")}
+                style={{
+                  position: "absolute",
+                  right: "8px",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--muted)",
+                  fontSize: "0.9rem",
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+                title={language === "vi" ? "Xoá tìm kiếm" : "Clear filter"}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
+        <button type="button" className="primary" onClick={() => setCreateOpen(true)}>
+          + {tr("Add savings account")}
+        </button>
+      </div>
+
+      <Error error={savingsQ.error} />
+      <Loading show={savingsQ.isPending} />
+
+      {/* 3. Danh sách chi tiết hiện ở dưới full trang */}
+      <div className="holdings-table-wrap">
+        <table className="holdings-table">
+          <thead>
+            <tr>
+              <th>{tr("Institution")}</th>
+              <th>{tr("Savings account name")}</th>
+              <th>{tr("Principal")}</th>
+              <th>{tr("Interest rate")}</th>
+              <th>{tr("Term (months)")}</th>
+              <th>{tr("Deposit date")}</th>
+              <th>{tr("Maturity date")}</th>
+              <th>{tr("Expected interest")}</th>
+              <th>{tr("Status")}</th>
+              <th>{tr("Edit")} / {tr("Delete")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.length === 0 ? (
+              <tr>
+                <td colSpan={10} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
+                  {tr("No savings accounts yet.")}
+                </td>
+              </tr>
+            ) : (
+              displayRows.map(row => {
+                const status = savingsStatusText(row);
+                const term = row.current_term;
+                return (
+                  <tr key={row.id} onClick={() => setDetailId(row.id)} style={{ cursor: "pointer" }}>
+                    <td><strong>{row.institution}</strong></td>
+                    <td>{row.name}</td>
+                    <td><strong>{fmtMoneyDisplay(row.principal)} {row.currency}</strong></td>
+                    <td>{term ? `${fmtRate(term.annual_rate)}%/năm` : "—"}</td>
+                    <td>{term ? `${term.term_months} ${tr("months")}` : "—"}</td>
+                    <td>{term?.start_date ?? row.opened_date}</td>
+                    <td>{term?.maturity_date ?? "—"}</td>
+                    <td>{term?.expected_interest ? `${fmtMoneyDisplay(term.expected_interest)} đ` : "—"}</td>
+                    <td><span className={`badge ${savingsStatusClass(status)}`}>{tr(status)}</span></td>
+                    <td onClick={e => e.stopPropagation()}>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button type="button" className="text-button" onClick={() => setDetailId(row.id)}>
+                          {tr("Details")}
+                        </button>
+                        <button
+                          type="button"
+                          className="text-button danger"
+                          disabled={deleteMutation.isPending}
+                          onClick={() => {
+                            if (window.confirm(tr("Are you sure you want to delete this savings account?"))) {
+                              deleteMutation.mutate(row.id);
+                            }
+                          }}
+                        >
+                          {tr("Delete")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {createOpen && (
+        <Modal title="Add savings account" onClose={() => setCreateOpen(false)}>
+          <SavingsCreateForm
+            walletAccounts={walletAccounts}
+            onDone={() => { setCreateOpen(false); refresh(); }}
+            onCancel={() => setCreateOpen(false)}
+          />
+        </Modal>
+      )}
+
+      {detailId != null && (
+        <SavingsDetailDialog
+          id={detailId}
+          walletAccounts={walletAccounts}
+          onClose={() => setDetailId(null)}
+          onChanged={refresh}
+        />
+      )}
     </div>
-    <div className="savings-toolbar"><button type="button" className="primary" onClick={() => setCreateOpen(true)}>+ {tr("Add savings account")}</button></div>
-    <Error error={savingsQ.error} />
-    <Loading show={savingsQ.isPending} />
-    <Empty show={!savingsQ.isPending && rows.length === 0} text="No savings accounts yet." />
-    <div className="savings-cards">{rows.map(row => {
-      const status = savingsStatusText(row);
-      return <button type="button" className="savings-card" key={row.id} onClick={() => setDetailId(row.id)}>
-        <div className="savings-card-head"><strong>{row.institution}</strong><span className={`badge ${savingsStatusClass(status)}`}>{tr(status)}</span></div>
-        <p className="savings-card-name">{row.name}</p>
-        <p className="savings-card-principal">{fmtMoneyDisplay(row.principal)} {row.currency}</p>
-        {row.current_term && <p className="savings-card-rate">{tr("Interest rate")}: {row.current_term.annual_rate}%/năm · {row.current_term.term_months} {tr("months")}</p>}
-        {row.current_term && <p className="savings-card-dates">{row.current_term.start_date} → {row.current_term.maturity_date}</p>}
-        {row.current_term?.status === "ACTIVE" && row.current_term.days_to_maturity != null && <p className="savings-card-countdown">{row.current_term.days_to_maturity >= 0 ? `${tr("Remaining")} ${row.current_term.days_to_maturity} ${tr("days")}` : tr("Matured")}</p>}
-      </button>;
-    })}</div>
-    {createOpen && <Modal title="Add savings account" onClose={() => setCreateOpen(false)}>
-      <SavingsCreateForm walletAccounts={walletAccounts} onDone={() => { setCreateOpen(false); refresh(); }} onCancel={() => setCreateOpen(false)} />
-    </Modal>}
-    {detailId != null && <SavingsDetailDialog id={detailId} walletAccounts={walletAccounts} onClose={() => setDetailId(null)} onChanged={refresh} />}
-  </div>;
+  );
 }
 
 function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccounts: Account[]; onDone: () => void; onCancel: () => void }) {
   const { tr, label, language } = useI18n();
+  const { balances } = useAccountBalances(walletAccounts);
   const [openedDate, setOpenedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [termMonths, setTermMonths] = useState("12");
   const [principal, setPrincipal] = useState("");
+  const [savingsDeduct, setSavingsDeduct] = useState(true);
+  const [savingsFundingAccount, setSavingsFundingAccount] = useState("");
   const create = useMutation({ mutationFn: (input: SavingsCreateInput) => api.assets.savings.create(input), onSuccess: onDone });
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const v = (n: string) => String(f.get(n) ?? "").trim();
+    const fId = savingsDeduct ? Number(savingsFundingAccount || v("funding_account_id") || (walletAccounts[0]?.id ? String(walletAccounts[0].id) : "0")) : undefined;
     create.mutate({
       institution: v("institution"), product_name: v("product_name") || undefined, name: v("name"),
-      principal: principal || v("principal"), funding_account_id: Number(v("funding_account_id")), opened_date: openedDate || v("opened_date"),
+      principal: principal || v("principal"), funding_account_id: fId && fId > 0 ? fId : undefined, opened_date: openedDate || v("opened_date"),
       term_months: Number(v("term_months")), annual_rate: v("annual_rate"), non_term_rate: v("non_term_rate") || "0",
       interest_payment_method: v("interest_payment_method") as SavingsCreateInput["interest_payment_method"],
       maturity_action: v("maturity_action") as SavingsCreateInput["maturity_action"],
@@ -1430,13 +2424,30 @@ function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccount
     </fieldset>
     <fieldset><legend>{tr("Deposit amount")}</legend>
       <Field label="Deposit amount"><div className="amount-row"><MoneyInput value={principal} onChange={setPrincipal} placeholder="0" required /><span className="currency-badge">VND</span></div></Field>
-      <Field label="Source account"><select name="funding_account_id" required defaultValue="">
-        <option value="" disabled>{tr("Select account")}</option>
-        {walletAccounts.map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
-      </select></Field>
-      {walletAccounts.length === 0 && <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p>}
       <Field label="Deposit date"><DateRow name="opened_date" value={openedDate} onChange={setOpenedDate} language={language} label="Deposit date" /></Field>
       <Field label="Term (months)"><input name="term_months" type="number" min={1} step={1} required value={termMonths} onChange={e => setTermMonths(e.target.value)} /></Field>
+      <label className="checkbox-row" style={{ marginTop: "4px" }}>
+        <input type="checkbox" checked={savingsDeduct} onChange={e => setSavingsDeduct(e.target.checked)} />
+        <span>{tr("Deduct from payment account")}</span>
+      </label>
+      {savingsDeduct && (
+        <Field label="Payment account">
+          <select
+            name="funding_account_id"
+            aria-label={tr("Payment account")}
+            value={savingsFundingAccount || (walletAccounts[0]?.id ? String(walletAccounts[0].id) : "")}
+            onChange={e => setSavingsFundingAccount(e.target.value)}
+            required
+          >
+            {walletAccounts.map(a => (
+              <option value={a.id} key={a.id}>
+                {a.name} ({fmtMoneyDisplay(balances.get(a.id) ?? "0")} VND)
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {savingsDeduct && walletAccounts.length === 0 && <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p>}
     </fieldset>
     <fieldset><legend>{tr("Interest rate")} &amp; {tr("Maturity date")}</legend>
       <Field label="Annual interest rate (%/year)"><input name="annual_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" required /></Field>
@@ -1470,6 +2481,16 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
     onError: (_err, _vars, context) => { if (context?.previous) qc.setQueryData(["savings", id], context.previous); },
     onSettled: afterAction,
   });
+
+  const deleteSavings = useMutation({
+    mutationFn: () => api.assets.savings.remove(id),
+    onSuccess: () => {
+      invalidateAllFinancialQueries(qc);
+      onClose();
+      onChanged();
+    },
+  });
+
   const row = detail.data;
   const term = row?.current_term;
   const canCloseNormal = !!term && term.status === "ACTIVE" && term.days_to_maturity != null && term.days_to_maturity <= 0;
@@ -1484,7 +2505,7 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
         <div><dt>{tr("Institution")}</dt><dd>{row.institution}</dd></div>
         <div><dt>{tr("Savings product")}</dt><dd>{row.product_name}</dd></div>
         <div><dt>{tr("Current principal")}</dt><dd>{fmtMoneyDisplay(row.principal)} {row.currency}</dd></div>
-        {term && <div><dt>{tr("Interest rate")}</dt><dd>{term.annual_rate}%/năm</dd></div>}
+        {term && <div><dt>{tr("Interest rate")}</dt><dd>{fmtRate(term.annual_rate)}%/năm</dd></div>}
         {term && <div><dt>{tr("Deposit date")}</dt><dd>{term.start_date}</dd></div>}
         {term && <div><dt>{tr("Term (months)")}</dt><dd>{term.term_months}</dd></div>}
         {term && <div><dt>{tr("Maturity date")}</dt><dd>{term.maturity_date}</dd></div>}
@@ -1503,11 +2524,24 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
         />
         <span>{tr("Exclude from reports")}</span>
       </label>
-      <div className="form-actions">
+      <div className="form-actions" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
         {row.editable && <button type="button" className="secondary" onClick={() => setAction("edit")}>{tr("Edit")}</button>}
         {canCloseNormal && <button type="button" className="primary" onClick={() => setAction("close")}>{tr("Settle")}</button>}
         {canEarlyClose && <button type="button" className="secondary" onClick={() => setAction("early-close")}>{tr("Early settle")}</button>}
         {canRenew && <button type="button" className="secondary" onClick={() => setAction("renew")}>{tr("Renew")}</button>}
+        <button
+          type="button"
+          className="text-button danger"
+          style={{ marginLeft: "auto" }}
+          disabled={deleteSavings.isPending}
+          onClick={() => {
+            if (window.confirm(tr("Are you sure you want to delete this savings account?"))) {
+              deleteSavings.mutate();
+            }
+          }}
+        >
+          {deleteSavings.isPending ? tr("Deleting...") : tr("Delete savings account")}
+        </button>
       </div>
       <h4>{tr("Term history")}</h4>
       <Empty show={(row.terms ?? []).length === 0} text="No terms recorded yet." />
@@ -1515,7 +2549,7 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
         <strong>{tr("Term")} {t.sequence}</strong>
         <span>{t.start_date} - {t.maturity_date}</span>
         <span>{fmtMoneyDisplay(t.principal)} {row.currency}</span>
-        <span>{t.annual_rate}%/năm</span>
+        <span>{fmtRate(t.annual_rate)}%/năm</span>
         {t.actual_interest != null && <span>{tr("Actual interest received")}: {fmtMoneyDisplay(t.actual_interest)}</span>}
         <span className={`badge ${t.status === "ACTIVE" ? "" : "muted"}`}>{label(t.status)}</span>
       </div>)}</div>
@@ -1551,8 +2585,8 @@ function SavingsEditForm({ row, onDone, onCancel }: { row: SavingsAccount; onDon
     <Field label="Savings account name"><input name="name" defaultValue={row.name} required /></Field>
     <Field label="Deposit date"><DateRow name="opened_date" value={openedDate} onChange={setOpenedDate} language={language} label="Deposit date" /></Field>
     <Field label="Term (months)"><input name="term_months" type="number" min={1} step={1} defaultValue={term?.term_months} required /></Field>
-    <Field label="Annual interest rate (%/year)"><input name="annual_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue={term?.annual_rate} required /></Field>
-    <Field label="Demand interest rate (%/year)"><input name="non_term_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue={term?.non_term_rate} /></Field>
+    <Field label="Annual interest rate (%/year)"><input name="annual_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue={term?.annual_rate ? fmtRate(term.annual_rate) : ""} required /></Field>
+    <Field label="Demand interest rate (%/year)"><input name="non_term_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue={term?.non_term_rate ? fmtRate(term.non_term_rate) : "0"} /></Field>
     <Field label="On maturity"><select name="maturity_action" defaultValue={term?.maturity_action ?? "CLOSE"}>{(["CLOSE", "RENEW_PRINCIPAL", "RENEW_PRINCIPAL_AND_INTEREST"] as const).map(x => <option value={x} key={x}>{label(x)}</option>)}</select></Field>
     <Field label="Notes"><input name="notes" defaultValue={row.notes ?? ""} /></Field>
     <div className="form-actions"><Submit pending={patch.isPending} text="Save changes" /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
@@ -1625,45 +2659,800 @@ function applySummary(tr: (text: string) => string, apply: ImportApplyResult | n
   if (apply.invalid_rows.length > 0) parts.push(`${apply.invalid_rows.length} ${tr("invalid rows")}`);
   return ` — ${parts.join("; ")}`;
 }
-function DataPage() {
-  const { tr, label } = useI18n();
+function BackupPanel() {
+  const { tr, language } = useI18n();
   const qc = useQueryClient();
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+
+  const backupsQ = useQuery({
+    queryKey: ["backups"],
+    queryFn: api.backup.list,
+  });
+
+  const [backupMode, setBackupMode] = useState<"project" | "download">("project");
+  const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+
+  // Restore state
+  const [uploadRestoreFile, setUploadRestoreFile] = useState<File | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean;
+    mode: "project" | "upload";
+    filename?: string;
+    file?: File;
+  }>({ open: false, mode: "project" });
+  const [deleteModal, setDeleteModal] = useState<{ open: boolean; filename?: string }>({ open: false });
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const createProjectBackup = useMutation({
+    mutationFn: api.backup.createProject,
+    onSuccess: data => {
+      setStatusMsg({ type: "success", text: data.message || tr("Backup created successfully.") });
+      qc.invalidateQueries({ queryKey: ["backups"] });
+    },
+    onError: err => {
+      setStatusMsg({ type: "error", text: err instanceof globalThis.Error ? err.message : String(err) });
+    },
+  });
+
+  async function handleCreateBackup() {
+    setStatusMsg(null);
+    if (backupMode === "project") {
+      createProjectBackup.mutate();
+    } else {
+      setIsBackingUp(true);
+      try {
+        const url = `${base}/api/v1/backup/create`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "download" }),
+        });
+        if (!res.ok) {
+          throw new globalThis.Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get("Content-Disposition");
+        let filename = "backup_data.db";
+        if (disposition && disposition.includes("filename=")) {
+          filename = disposition.split("filename=")[1].replace(/["']/g, "").trim();
+        }
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(downloadUrl);
+        setStatusMsg({ type: "success", text: tr("Backup created successfully.") });
+      } catch (err) {
+        setStatusMsg({ type: "error", text: err instanceof globalThis.Error ? err.message : String(err) });
+      } finally {
+        setIsBackingUp(false);
+      }
+    }
+  }
+
+  async function executeRestore() {
+    setStatusMsg(null);
+    setIsRestoring(true);
+    try {
+      if (confirmModal.mode === "project" && confirmModal.filename) {
+        const res = await api.backup.restoreProject(confirmModal.filename);
+        setStatusMsg({ type: "success", text: res.message || tr("Restore completed successfully.") });
+      } else if (confirmModal.mode === "upload" && confirmModal.file) {
+        const fileBytes = await confirmModal.file.arrayBuffer();
+        const res = await fetch(`${base}/api/v1/backup/restore/upload`, {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: fileBytes,
+        });
+        const data = (await res.json().catch(() => ({}))) as { detail?: string; message?: string };
+        if (!res.ok) {
+          throw new globalThis.Error(data.detail || `Restore failed (HTTP ${res.status})`);
+        }
+        setStatusMsg({ type: "success", text: data.message || tr("Restore completed successfully.") });
+        setUploadRestoreFile(null);
+      }
+      setConfirmModal({ open: false, mode: "project" });
+      invalidateAllFinancialQueries(qc);
+    } catch (err) {
+      setStatusMsg({ type: "error", text: err instanceof globalThis.Error ? err.message : String(err) });
+      setConfirmModal({ open: false, mode: "project" });
+    } finally {
+      setIsRestoring(false);
+    }
+  }
+
+  async function executeDelete() {
+    if (!deleteModal.filename) return;
+    setIsDeleting(true);
+    try {
+      const res = await api.backup.remove(deleteModal.filename);
+      setStatusMsg({ type: "success", text: res.message || tr("Backup deleted successfully.") });
+      qc.invalidateQueries({ queryKey: ["backups"] });
+      setDeleteModal({ open: false });
+    } catch (err) {
+      setStatusMsg({ type: "error", text: err instanceof globalThis.Error ? err.message : String(err) });
+      setDeleteModal({ open: false });
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  function formatBytes(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+      {statusMsg && (
+        <div
+          style={{
+            padding: "12px 16px",
+            borderRadius: "8px",
+            background: statusMsg.type === "success" ? "#e6f4ea" : "#fce8e6",
+            color: statusMsg.type === "success" ? "#137333" : "#c5221f",
+            border: `1px solid ${statusMsg.type === "success" ? "#ceead6" : "#fad2cf"}`,
+            fontWeight: 500,
+          }}
+        >
+          {statusMsg.text}
+        </div>
+      )}
+
+      {/* 1. Tạo bản sao lưu & Khôi phục từ file */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px" }}>
+        <div className="panel data-workflow">
+          <h3 style={{ margin: 0 }}>{tr("Create backup")}</h3>
+          <p className="hint" style={{ margin: 0 }}>
+            {language === "vi"
+              ? "Sao lưu toàn bộ dữ liệu hiện tại trong cơ sở dữ liệu (tài khoản, giao dịch, danh mục, tài sản, tiết kiệm)."
+              : "Backup entire database including accounts, transactions, categories, assets, and savings."}
+          </p>
+
+          <div className="backup-radio-group">
+            <label className="backup-radio-label">
+              <input
+                type="radio"
+                name="backup_mode"
+                checked={backupMode === "project"}
+                onChange={() => setBackupMode("project")}
+              />
+              <span>{tr("Save to project folder")}</span>
+              <small>(backup/)</small>
+            </label>
+            <label className="backup-radio-label">
+              <input
+                type="radio"
+                name="backup_mode"
+                checked={backupMode === "download"}
+                onChange={() => setBackupMode("download")}
+              />
+              <span>{tr("Download to computer")}</span>
+              <small>(.db)</small>
+            </label>
+          </div>
+
+          <button
+            type="button"
+            className="primary"
+            disabled={createProjectBackup.isPending || isBackingUp}
+            onClick={handleCreateBackup}
+            style={{ width: "fit-content" }}
+          >
+            {createProjectBackup.isPending || isBackingUp
+              ? (language === "vi" ? "Đang sao lưu..." : "Backing up...")
+              : backupMode === "project"
+              ? `+ ${tr("Save to project folder")}`
+              : `⬇ ${tr("Download to computer")}`}
+          </button>
+        </div>
+
+        <div className="panel data-workflow">
+          <h3 style={{ margin: 0 }}>{tr("Restore from uploaded file")}</h3>
+          <p className="hint" style={{ margin: 0 }}>
+            {language === "vi"
+              ? "Tải lên file sao lưu SQLite (.db) từ máy tính để khôi phục lại toàn bộ dữ liệu."
+              : "Upload a SQLite backup file (.db) to restore all database contents."}
+          </p>
+          <input
+            type="file"
+            accept=".db,.sqlite,.sqlite3"
+            aria-label={tr("Choose backup file (.db)")}
+            onChange={e => setUploadRestoreFile(e.target.files?.[0] ?? null)}
+          />
+          <button
+            type="button"
+            className="secondary"
+            disabled={!uploadRestoreFile || isRestoring}
+            onClick={() => setConfirmModal({ open: true, mode: "upload", file: uploadRestoreFile! })}
+            style={{ width: "fit-content", borderColor: "#ea868f", color: "#c5221f" }}
+          >
+            {tr("Restore from uploaded file")}
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Danh sách các bản sao lưu trong project */}
+      <div className="panel" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0 }}>{tr("Project backups")}</h3>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => qc.invalidateQueries({ queryKey: ["backups"] })}
+            style={{ padding: "4px 10px", fontSize: "0.82rem" }}
+          >
+            {language === "vi" ? "Làm mới" : "Refresh"}
+          </button>
+        </div>
+
+        <Loading show={backupsQ.isPending} />
+        <Error error={backupsQ.error} />
+        <Empty show={!backupsQ.isPending && (backupsQ.data?.length ?? 0) === 0} text="No backups found in project." />
+
+        {(backupsQ.data?.length ?? 0) > 0 && (
+          <div style={{ overflowX: "auto", width: "100%" }}>
+            <table className="table full-width" style={{ width: "100%", textAlign: "left" }}>
+              <thead>
+                <tr>
+                  <th>{language === "vi" ? "Tên file sao lưu" : "Backup filename"}</th>
+                  <th>{tr("Size")}</th>
+                  <th>{tr("Created at")}</th>
+                  <th style={{ textAlign: "right" }}>{tr("Actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backupsQ.data?.map(b => (
+                  <tr key={b.filename}>
+                    <td>
+                      <span style={{ fontWeight: 600, fontFamily: "monospace" }}>{b.filename}</span>
+                      {b.is_db && (
+                        <span
+                          style={{
+                            marginLeft: "8px",
+                            fontSize: "0.75rem",
+                            background: "var(--accent-soft)",
+                            color: "var(--accent)",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            fontWeight: 600,
+                          }}
+                        >
+                          SQLite DB
+                        </span>
+                      )}
+                    </td>
+                    <td>{formatBytes(b.size_bytes)}</td>
+                    <td>{b.formatted_date}</td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: "14px" }}>
+                        <a
+                          href={`${base}/api/v1/backup/download/${encodeURIComponent(b.filename)}`}
+                          download={b.filename}
+                          style={{
+                            textDecoration: "none",
+                            color: "var(--accent)",
+                            fontSize: "0.85rem",
+                            fontWeight: 600,
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {tr("Download")}
+                        </a>
+                        {b.is_db && (
+                          <button
+                            type="button"
+                            disabled={isRestoring || isDeleting}
+                            onClick={() => setConfirmModal({ open: true, mode: "project", filename: b.filename })}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#0084d6",
+                              fontSize: "0.85rem",
+                              fontWeight: 600,
+                              padding: 0,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {tr("Restore")}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={isRestoring || isDeleting}
+                          onClick={() => setDeleteModal({ open: true, filename: b.filename })}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#c5221f",
+                            fontSize: "0.85rem",
+                            fontWeight: 600,
+                            padding: 0,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {tr("Delete")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Confirmation Modal for Restore */}
+      {confirmModal.open && (
+        <Modal title="Confirm restore" onClose={() => setConfirmModal({ open: false, mode: "project" })}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div
+              style={{
+                padding: "12px",
+                borderRadius: "8px",
+                background: "#fce8e6",
+                border: "1px solid #fad2cf",
+                color: "#c5221f",
+                fontWeight: 500,
+                fontSize: "0.9rem",
+              }}
+            >
+              ⚠️ {tr("Warning: Restoring will overwrite all current database records.")}
+            </div>
+
+            <p style={{ margin: 0 }}>
+              {confirmModal.mode === "project" ? (
+                <span>
+                  {language === "vi"
+                    ? `Bạn có chắc chắn muốn khôi phục cơ sở dữ liệu từ bản sao lưu `
+                    : `Are you sure you want to restore database from `}
+                  <strong>{confirmModal.filename}</strong>?
+                </span>
+              ) : (
+                <span>
+                  {language === "vi"
+                    ? `Bạn có chắc chắn muốn khôi phục cơ sở dữ liệu từ file tải lên `
+                    : `Are you sure you want to restore database from file `}
+                  <strong>{confirmModal.file?.name}</strong>?
+                </span>
+              )}
+            </p>
+
+            <div className="form-actions" style={{ justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setConfirmModal({ open: false, mode: "project" })}
+              >
+                {tr("Cancel")}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={isRestoring}
+                onClick={executeRestore}
+                style={{ background: "#c5221f", borderColor: "#c5221f" }}
+              >
+                {isRestoring ? (language === "vi" ? "Đang khôi phục..." : "Restoring...") : tr("Confirm restore")}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Confirmation Modal for Delete Backup */}
+      {deleteModal.open && deleteModal.filename && (
+        <Modal title="Delete backup" onClose={() => setDeleteModal({ open: false })}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <p style={{ margin: 0 }}>
+              {language === "vi"
+                ? `Bạn có chắc chắn muốn xoá bản sao lưu `
+                : `Are you sure you want to delete backup `}
+              <strong style={{ fontFamily: "monospace" }}>{deleteModal.filename}</strong>?
+            </p>
+            <p className="hint" style={{ margin: 0, color: "#c5221f" }}>
+              {language === "vi" ? "Thao tác này không thể hoàn tác." : "This action cannot be undone."}
+            </p>
+
+            <div className="form-actions" style={{ justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setDeleteModal({ open: false })}
+                disabled={isDeleting}
+              >
+                {tr("Cancel")}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={isDeleting}
+                onClick={executeDelete}
+                style={{ background: "#c5221f", borderColor: "#c5221f" }}
+              >
+                {isDeleting ? (language === "vi" ? "Đang xoá..." : "Deleting...") : (language === "vi" ? "Xoá bản sao lưu" : "Delete backup")}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function formatVnDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const parts = iso.split("-");
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return iso;
+}
+
+function BankStatementModal({
+  initialAccountId,
+  initialStart,
+  initialEnd,
+  onClose,
+}: {
+  initialAccountId?: string | number;
+  initialStart?: string;
+  initialEnd?: string;
+  onClose: () => void;
+}) {
+  const { tr, label, language } = useI18n();
+  const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
+  const accounts = accountsQ.data ?? [];
+
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(initialAccountId ? String(initialAccountId) : "");
+  const [startDate, setStartDate] = useState<string>(initialStart ?? "");
+  const [endDate, setEndDate] = useState<string>(initialEnd ?? "");
+
+  const setQuickRange = (range: "all" | "this_month" | "last_month" | "this_year") => {
+    const d = new Date();
+    if (range === "all") {
+      setStartDate("");
+      setEndDate("");
+    } else if (range === "this_month") {
+      setStartDate(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`);
+      setEndDate(todayIso());
+    } else if (range === "last_month") {
+      const firstLastMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+      const lastLastMonth = new Date(d.getFullYear(), d.getMonth(), 0);
+      setStartDate(`${firstLastMonth.getFullYear()}-${pad2(firstLastMonth.getMonth() + 1)}-01`);
+      setEndDate(`${lastLastMonth.getFullYear()}-${pad2(lastLastMonth.getMonth() + 1)}-${pad2(lastLastMonth.getDate())}`);
+    } else if (range === "this_year") {
+      setStartDate(`${d.getFullYear()}-01-01`);
+      setEndDate(todayIso());
+    }
+  };
+
+  const statementQ = useQuery({
+    queryKey: ["statement-data", selectedAccountId, startDate, endDate],
+    queryFn: () => api.exports.statementData({
+      account_id: selectedAccountId || undefined,
+      start_date: startDate || undefined,
+      end_date: endDate || undefined,
+    }),
+  });
+
+  const statement = statementQ.data;
+  const currentAccount = accounts.find(a => String(a.id) === selectedAccountId);
+  const brand = currentAccount ? getAccountBrand(currentAccount.name, currentAccount.account_type) : null;
+
+  const fmtVND = (val: string | number) => {
+    const n = Number(val);
+    if (isNaN(n)) return "0 ₫";
+    return `${n.toLocaleString("vi-VN")} ₫`;
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 9999 }}>
+      <div
+        className="modal-card"
+        onClick={e => e.stopPropagation()}
+        style={{ maxWidth: "1100px", width: "95vw", maxHeight: "92vh", overflow: "hidden", display: "flex", flexDirection: "column" }}
+      >
+        <div className="modal-header" style={{ padding: "14px 20px", borderBottom: "1px solid var(--line)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "1.3rem" }}>🖨️</span>
+            <h3 style={{ margin: 0, fontSize: "1.15rem" }}>
+              {language === "vi" ? "Sao Kê Tài Khoản & Xuất PDF" : "Bank Statement & PDF Export"}
+            </h3>
+          </div>
+          <button type="button" className="text-button" onClick={onClose} style={{ fontSize: "1.2rem", padding: "4px 8px" }}>
+            ✕
+          </button>
+        </div>
+
+        <div className="statement-modal-body" style={{ padding: "16px 20px", overflowY: "auto", flex: 1 }}>
+          {/* Controls toolbar */}
+          <div className="statement-toolbar">
+            <div className="statement-filters">
+              <select
+                aria-label={tr("Account")}
+                value={selectedAccountId}
+                onChange={e => setSelectedAccountId(e.target.value)}
+                style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--line)", background: "var(--card)", fontSize: "0.85rem", fontWeight: 600 }}
+              >
+                <option value="">{tr("All accounts")}</option>
+                {accounts.map(a => (
+                  <option value={a.id} key={a.id}>
+                    {a.name} · {label(a.account_type)}
+                  </option>
+                ))}
+              </select>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "4px", flexWrap: "wrap" }}>
+                <button type="button" className={`pill-btn ${!startDate && !endDate ? "active" : ""}`} onClick={() => setQuickRange("all")}>
+                  {language === "vi" ? "Toàn bộ" : "All"}
+                </button>
+                <button type="button" className="pill-btn" onClick={() => setQuickRange("this_month")}>
+                  {language === "vi" ? "Tháng này" : "This month"}
+                </button>
+                <button type="button" className="pill-btn" onClick={() => setQuickRange("last_month")}>
+                  {language === "vi" ? "Tháng trước" : "Last month"}
+                </button>
+                <button type="button" className="pill-btn" onClick={() => setQuickRange("this_year")}>
+                  {language === "vi" ? "Năm nay" : "This year"}
+                </button>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem" }}>
+                <span>{language === "vi" ? "Từ:" : "From:"}</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                  max={endDate || undefined}
+                  style={{ padding: "4px 8px", borderRadius: "6px", border: "1px solid var(--line)", background: "var(--card)", fontSize: "0.82rem", cursor: "pointer" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem" }}>
+                <span>{language === "vi" ? "Đến:" : "To:"}</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  min={startDate || undefined}
+                  style={{ padding: "4px 8px", borderRadius: "6px", border: "1px solid var(--line)", background: "var(--card)", fontSize: "0.82rem", cursor: "pointer" }}
+                />
+              </div>
+            </div>
+
+            <div className="statement-actions">
+              <button type="button" className="primary" onClick={handlePrint} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <span>🖨️</span> {language === "vi" ? "In / Lưu PDF" : "Print / Save PDF"}
+              </button>
+              <a
+                className="secondary"
+                href={api.exports.statementXlsxUrl({ account_id: selectedAccountId, start_date: startDate, end_date: endDate })}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px", textDecoration: "none", padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--line)", fontWeight: 600, fontSize: "0.85rem" }}
+              >
+                <span>📊</span> Excel (.xlsx)
+              </a>
+              <a
+                className="secondary"
+                href={api.exports.statementCsvUrl({ account_id: selectedAccountId, start_date: startDate, end_date: endDate })}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px", textDecoration: "none", padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--line)", fontWeight: 600, fontSize: "0.85rem" }}
+              >
+                <span>📄</span> CSV
+              </a>
+            </div>
+          </div>
+
+          <Loading show={statementQ.isPending} />
+          <Error error={statementQ.error} />
+
+          {/* Statement Document */}
+          {statement && (
+            <div className="statement-print-sheet">
+              {/* Header */}
+              <div className="statement-header">
+                <div>
+                  <h1>{language === "vi" ? "SAO KÊ TÀI KHOẢN" : "ACCOUNT STATEMENT"}</h1>
+                  <div className="statement-query-time">
+                    {language === "vi" ? "Thời gian truy vấn: " : "Statement Period: "}
+                    <strong>
+                      {statement.period.start_date ? formatVnDate(statement.period.start_date) : (language === "vi" ? "Từ đầu" : "Beginning")} - {statement.period.end_date ? formatVnDate(statement.period.end_date) : (language === "vi" ? "Đến nay" : "Current")}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="statement-logo-box">
+                  {currentAccount ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <AccountLogo name={currentAccount.name} accountType={currentAccount.account_type} size={40} />
+                      <div style={{ textAlign: "right" }}>
+                        <strong style={{ fontSize: "1.15rem", color: brand?.primaryColor || "#0f172a", display: "block", textTransform: "uppercase" }}>
+                          {brand?.name || currentAccount.name}
+                        </strong>
+                        <span style={{ fontSize: "0.8rem", color: "#64748b" }}>
+                          {statement.account.account_type_label}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: "right" }}>
+                      <strong style={{ fontSize: "1.15rem", color: "#003366", textTransform: "uppercase" }}>
+                        Personal Finance Ledger
+                      </strong>
+                      <span style={{ fontSize: "0.8rem", color: "#64748b", display: "block" }}>
+                        {language === "vi" ? "Báo cáo tổng hợp" : "Consolidated Statement"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Metadata Info Grid */}
+              <div className="statement-meta-grid">
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <div className="statement-meta-row">
+                    <span>{language === "vi" ? "Số / Tên tài khoản:" : "Account Name / No:"}</span>
+                    <strong>{statement.account.name}</strong>
+                  </div>
+                  <div className="statement-meta-row">
+                    <span>{language === "vi" ? "Loại tài khoản:" : "Account Type:"}</span>
+                    <strong>{statement.account.account_type_label}</strong>
+                  </div>
+                  <div className="statement-meta-row">
+                    <span>{language === "vi" ? "Số dư đầu kỳ:" : "Opening Balance:"}</span>
+                    <strong style={{ color: "#0f172a" }}>{fmtVND(statement.opening_balance)}</strong>
+                  </div>
+                  <div className="statement-meta-row">
+                    <span>{language === "vi" ? "Số dư cuối kỳ:" : "Closing Balance:"}</span>
+                    <strong style={{ color: "#0369a1", fontSize: "0.95rem" }}>{fmtVND(statement.closing_balance)}</strong>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <div className="statement-meta-row">
+                    <span>{language === "vi" ? "Tổng số giao dịch:" : "Transactions Count:"}</span>
+                    <strong>{statement.transaction_count}</strong>
+                  </div>
+                  <div className="statement-meta-row">
+                    <span>{language === "vi" ? "Tổng tiền vào (+):" : "Total Inflow (+):"}</span>
+                    <strong style={{ color: "#16a34a" }}>+{fmtVND(statement.total_in)}</strong>
+                  </div>
+                  <div className="statement-meta-row">
+                    <span>{language === "vi" ? "Tổng tiền ra (-):" : "Total Outflow (-):"}</span>
+                    <strong style={{ color: "#dc2626" }}>-{fmtVND(statement.total_out)}</strong>
+                  </div>
+                  <div className="statement-meta-row">
+                    <span>{language === "vi" ? "Đơn vị tiền tệ:" : "Currency:"}</span>
+                    <strong>{statement.account.currency}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Transactions Table */}
+              <div className="statement-table-wrap">
+                <table className="statement-table">
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "center", width: "90px" }}>{language === "vi" ? "Ngày" : "Date"}</th>
+                      <th style={{ textAlign: "center", width: "100px" }}>{language === "vi" ? "Ngày hiệu lực" : "Effective"}</th>
+                      <th style={{ textAlign: "center", width: "115px" }}>{language === "vi" ? "Loại giao dịch" : "Type"}</th>
+                      <th style={{ textAlign: "left" }}>{language === "vi" ? "Nội dung" : "Description"}</th>
+                      <th style={{ textAlign: "center", width: "170px" }}>Ref#</th>
+                      <th style={{ textAlign: "right", width: "140px" }}>{language === "vi" ? "Số tiền giao dịch" : "Amount"}</th>
+                      <th style={{ textAlign: "right", width: "140px" }}>{language === "vi" ? "Số dư" : "Balance"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statement.transactions.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: "center", padding: "28px", color: "#64748b" }}>
+                          {language === "vi" ? "Không có giao dịch nào trong khoảng thời gian này." : "No transactions recorded in this period."}
+                        </td>
+                      </tr>
+                    ) : (
+                      statement.transactions.map(tx => {
+                        const amt = Number(tx.amount);
+                        const isPos = amt > 0;
+                        const isNeg = amt < 0;
+                        return (
+                          <tr key={tx.entry_id}>
+                            <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>{formatVnDate(tx.transaction_date)}</td>
+                            <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>{formatVnDate(tx.effective_date)}</td>
+                            <td style={{ textAlign: "center", whiteSpace: "nowrap", fontWeight: 600, color: "#475569" }}>
+                              {tx.event_type_label}
+                            </td>
+                            <td style={{ textAlign: "left", wordBreak: "break-word", lineHeight: 1.35 }}>
+                              {tx.description}
+                            </td>
+                            <td style={{ textAlign: "center", fontSize: "0.75rem", fontFamily: "monospace", color: "#64748b" }}>
+                              {tx.ref_no}
+                            </td>
+                            <td style={{ textAlign: "right", whiteSpace: "nowrap", fontWeight: 700, color: isPos ? "#16a34a" : (isNeg ? "#dc2626" : "#0f172a") }}>
+                              {isPos ? `+${fmtMoneyDisplay(tx.amount)}` : fmtMoneyDisplay(tx.amount)}
+                            </td>
+                            <td style={{ textAlign: "right", whiteSpace: "nowrap", fontWeight: 700, color: "#0f172a" }}>
+                              {fmtMoneyDisplay(tx.running_balance)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Statement Footer */}
+              <div className="statement-footer">
+                <div>
+                  <span style={{ border: "1px solid #94a3b8", padding: "2px 6px", borderRadius: "4px", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    {language === "vi" ? "Bảo mật" : "Confidential"}
+                  </span>
+                </div>
+                <div>
+                  {language === "vi" ? "Ngày in: " : "Printed on: "} {new Date().toLocaleDateString("vi-VN")}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DataPage() {
+  const { tr, label, language } = useI18n();
+  const qc = useQueryClient();
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+  const [subTab, setSubTab] = useState<"io" | "review" | "backup">("io");
+
+  // IO State
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState("");
   const [uploading, setUploading] = useState(false);
-  // BUGFIX (user report, 2026-08-26: "Chức năng xuất dữ liệu: Lựa chọn tài
-  // khoản, ngày bắt đầu, ngày kết thúc"): export used to be two bare links
-  // dumping every ledger entry with no way to scope them. All three filters
-  // are optional (see app/api/data.py's _export_rows) so leaving them unset
-  // still exports everything, same as before.
   const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const [exportAccountId, setExportAccountId] = useState("");
-  const [exportStart, setExportStart] = useState(() => {
+  const [exportStart, setExportStart] = useState("");
+  const [exportEnd, setExportEnd] = useState("");
+  const [statementModalOpen, setStatementModalOpen] = useState(false);
+
+  const setDataQuickRange = (range: "all" | "this_month" | "last_month" | "this_year") => {
     const d = new Date();
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`;
-  });
-  const [exportEnd, setExportEnd] = useState(() => todayIso());
-  function exportUrl(kind: "csv" | "xlsx"): string {
-    const params = new URLSearchParams();
-    if (exportAccountId) params.set("account_id", exportAccountId);
-    if (exportStart) params.set("start_date", exportStart);
-    if (exportEnd) params.set("end_date", exportEnd);
-    const qs = params.toString();
-    return `${base}/api/v1/exports/events.${kind}${qs ? `?${qs}` : ""}`;
-  }
+    if (range === "all") {
+      setExportStart("");
+      setExportEnd("");
+    } else if (range === "this_month") {
+      setExportStart(`${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`);
+      setExportEnd(todayIso());
+    } else if (range === "last_month") {
+      const firstLastMonth = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+      const lastLastMonth = new Date(d.getFullYear(), d.getMonth(), 0);
+      setExportStart(`${firstLastMonth.getFullYear()}-${pad2(firstLastMonth.getMonth() + 1)}-01`);
+      setExportEnd(`${lastLastMonth.getFullYear()}-${pad2(lastLastMonth.getMonth() + 1)}-${pad2(lastLastMonth.getDate())}`);
+    } else if (range === "this_year") {
+      setExportStart(`${d.getFullYear()}-01-01`);
+      setExportEnd(todayIso());
+    }
+  };
+
   async function upload() {
     if (!file || uploading) return;
     setUploading(true);
     setStatus(tr("Uploading..."));
     try {
-      // TASK-038: fetch() Headers values must be Latin-1/ByteString -- a
-      // real Money Lover export filename with Vietnamese diacritics (e.g.
-      // "...Tổng cộng...xlsx") makes the browser throw synchronously right
-      // here, before any request is sent. Because that throw used to
-      // happen outside any try/catch, the click did nothing visible at all
-      // ("bấm tải lên không phản hồi"). encodeURIComponent keeps the
-      // header ASCII-safe; the backend unquotes it back to the real name.
       const response = await fetch(`${base}/api/v1/imports/money-lover`, {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream", "X-Filename": encodeURIComponent(file.name) },
@@ -1671,68 +3460,1344 @@ function DataPage() {
       });
       const body = await response.json().catch(() => null);
       if (response.ok && body) {
-        // TASK-040: the upload now pushes matching rows straight into the
-        // ledger in the same request (see app.api.data.import_money_lover),
-        // so surface that outcome here instead of just "rows imported" --
-        // and refresh every view the newly-created events/balances affect.
         setStatus(`${tr("Imported rows")}: ${body.row_count}${applySummary(tr, body.apply)}`);
-        qc.invalidateQueries({ queryKey: ["events"] });
-        qc.invalidateQueries({ queryKey: ["portfolio"] });
-        qc.invalidateQueries({ queryKey: ["account-balances"] });
-        qc.invalidateQueries({ queryKey: ["imports"] });
+        invalidateAllFinancialQueries(qc);
       } else {
         setStatus(body?.detail ?? `${tr("Load failed")} (HTTP ${response.status})`);
       }
     } catch (error) {
-      // NOTE: this file also declares a component named `Error` (see the
-      // `Error` panel component below), which shadows the global `Error`
-      // class within this file -- `instanceof Error` here would narrow
-      // against that component instead, so `globalThis.Error` is used
-      // explicitly to reach the real built-in.
       const message = error instanceof globalThis.Error ? error.message : String(error);
       setStatus(`${tr("Load failed")}: ${message}`);
     } finally {
       setUploading(false);
     }
   }
-  return <Section title="Data" subtitle="Import and export personal finance records."><div className="panel data-workflow"><h3>{tr("Import from Money Lover")}</h3><input type="file" accept=".csv,.xlsx" aria-label={tr("Choose file")} onChange={e => setFile(e.target.files?.[0] ?? null)}/><button type="button" className="primary" disabled={!file || uploading} onClick={upload}>{uploading ? tr("Uploading...") : tr("Upload for review")}</button>{status && <p className="hint" role="status">{status}</p>}<p className="hint">{tr("Matching rows are applied straight into your ledger on upload; unmatched wallets are reported so you can fix and re-apply from the Review page.")}</p></div>
-    <div className="panel data-workflow"><h3>{tr("Export filters")}</h3>
-      <Field label="Account"><select aria-label={tr("Account")} value={exportAccountId} onChange={e => setExportAccountId(e.target.value)}>
-        <option value="">{tr("All accounts")}</option>
-        {(accountsQ.data ?? []).map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
-      </select></Field>
-      <Field label="Start date"><input type="date" aria-label={tr("Start date")} value={exportStart} onChange={e => setExportStart(e.target.value)} max={exportEnd || undefined} /></Field>
-      <Field label="End date"><input type="date" aria-label={tr("End date")} value={exportEnd} onChange={e => setExportEnd(e.target.value)} min={exportStart || undefined} /></Field>
-      <div className="form-actions"><a className="secondary" href={exportUrl("csv")}>{tr("Export CSV")}</a><a className="secondary" href={exportUrl("xlsx")}>{tr("Export XLSX")}</a></div>
-    </div>
-  </Section>;
-}
 
-function Review() {
-  const { label, tr } = useI18n();
-  const qc = useQueryClient();
+  // Review State
   const [applyStatus, setApplyStatus] = useState<Record<number, string>>({});
-  const imports = useQuery({ queryKey: ["imports"], queryFn: api.imports.list }); const reconciliation = useQuery({ queryKey: ["reconciliation"], queryFn: api.reconciliation.list });
-  // TASK-040: pushes a batch's not-yet-applied rows into the ledger without
-  // re-uploading -- how an already-existing batch (imported before this
-  // feature shipped) or one with previously-unmatched wallets (since fixed)
-  // gets applied. Idempotent, so pressing it again on a fully-applied batch
-  // is harmless.
+  const imports = useQuery({ queryKey: ["imports"], queryFn: api.imports.list });
+  const reconciliation = useQuery({ queryKey: ["reconciliation"], queryFn: api.reconciliation.list });
   const apply = useMutation({
     mutationFn: (batchId: number) => api.imports.apply(batchId),
     onSuccess: (result, batchId) => {
       setApplyStatus(prev => ({ ...prev, [batchId]: applySummary(tr, result) }));
-      qc.invalidateQueries({ queryKey: ["imports"] });
-      qc.invalidateQueries({ queryKey: ["events"] });
-      qc.invalidateQueries({ queryKey: ["portfolio"] });
-      qc.invalidateQueries({ queryKey: ["account-balances"] });
+      invalidateAllFinancialQueries(qc);
     },
     onError: (error, batchId) => {
       const message = error instanceof globalThis.Error ? error.message : String(error);
       setApplyStatus(prev => ({ ...prev, [batchId]: `${tr("Load failed")}: ${message}` }));
     },
   });
-  return <Section title="Import & reconciliation review" subtitle="Persisted import batches and reconciliation candidates."><div className="review-grid"><article className="panel"><h3>{tr("Import batches")}</h3><Loading show={imports.isPending}/><Error error={imports.error}/><Empty show={!imports.isPending && imports.data?.length === 0} text="No import batches yet."/>{imports.data?.map(x => <div className="review-row" key={x.id}><div><strong>{x.original_filename}</strong><small>{x.source} · {x.row_count} {tr("rows")} · {x.applied_row_count >= x.row_count ? tr("Applied") : `${x.applied_row_count}/${x.row_count} ${tr("applied")}`}</small>{applyStatus[x.id] && <small className="hint">{applyStatus[x.id]}</small>}</div><div className="review-row-actions"><small>{x.imported_at}</small><button type="button" className="secondary" disabled={apply.isPending && apply.variables === x.id} onClick={() => apply.mutate(x.id)}>{apply.isPending && apply.variables === x.id ? tr("Applying...") : x.applied_row_count >= x.row_count ? tr("Re-apply") : tr("Apply")}</button></div></div>)}</article><article className="panel"><h3>{tr("Reconciliation candidates")}</h3><Loading show={reconciliation.isPending}/><Error error={reconciliation.error}/><Empty show={!reconciliation.isPending && reconciliation.data?.length === 0} text="No reconciliation candidates yet."/>{reconciliation.data?.map(x => <div className="review-row" key={x.id}><div><strong>{tr("Raw row")} #{x.source_row_number}</strong><small>{x.transaction_date} · {label(x.event_type)} · {tr("Event")} #{x.financial_event_id}</small></div><span className="badge warning">{label(x.state)}</span></div>)}</article></div></Section>;
+
+  return (
+    <section className="data-page-section">
+      <div className="segmented" style={{ maxWidth: 620, marginBottom: "16px", flexWrap: "wrap" }}>
+        <button
+          type="button"
+          className={subTab === "io" ? "active" : ""}
+          onClick={() => setSubTab("io")}
+        >
+          {language === "vi" ? "Nhập & Xuất dữ liệu" : "Import & Export"}
+        </button>
+        <button
+          type="button"
+          className={subTab === "review" ? "active" : ""}
+          onClick={() => setSubTab("review")}
+        >
+          {language === "vi" ? "Đối soát & Xem lại" : "Reconciliation & Review"} {imports.data && imports.data.length > 0 ? `(${imports.data.length})` : ""}
+        </button>
+        <button
+          type="button"
+          className={subTab === "backup" ? "active" : ""}
+          onClick={() => setSubTab("backup")}
+        >
+          {language === "vi" ? "Sao lưu & Khôi phục" : "Backup & Restore"}
+        </button>
+      </div>
+
+      {subTab === "io" ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px" }}>
+          <div className="panel data-workflow">
+            <h3>{tr("Import from Money Lover")}</h3>
+            <input type="file" accept=".csv,.xlsx" aria-label={tr("Choose file")} onChange={e => setFile(e.target.files?.[0] ?? null)}/>
+            <button type="button" className="primary" disabled={!file || uploading} onClick={upload}>
+              {uploading ? tr("Uploading...") : tr("Upload for review")}
+            </button>
+            {status && <p className="hint" role="status">{status}</p>}
+            <p className="hint">{tr("Matching rows are applied straight into your ledger on upload; unmatched wallets are reported so you can fix and re-apply from the Review page.")}</p>
+          </div>
+          <div className="panel data-workflow">
+            <h3>{language === "vi" ? "Xuất dữ liệu & Sao kê tài khoản" : tr("Export filters")}</h3>
+            <Field label="Account">
+              <select aria-label={tr("Account")} value={exportAccountId} onChange={e => setExportAccountId(e.target.value)}>
+                <option value="">{tr("All accounts")}</option>
+                {(accountsQ.data ?? []).map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
+              </select>
+            </Field>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px", flexWrap: "wrap", margin: "4px 0 8px" }}>
+              <button type="button" className={`pill-btn ${!exportStart && !exportEnd ? "active" : ""}`} onClick={() => setDataQuickRange("all")}>
+                {language === "vi" ? "Toàn bộ" : "All"}
+              </button>
+              <button type="button" className="pill-btn" onClick={() => setDataQuickRange("this_month")}>
+                {language === "vi" ? "Tháng này" : "This month"}
+              </button>
+              <button type="button" className="pill-btn" onClick={() => setDataQuickRange("last_month")}>
+                {language === "vi" ? "Tháng trước" : "Last month"}
+              </button>
+              <button type="button" className="pill-btn" onClick={() => setDataQuickRange("this_year")}>
+                {language === "vi" ? "Năm nay" : "This year"}
+              </button>
+            </div>
+            <Field label="Start date">
+              <input type="date" aria-label={tr("Start date")} value={exportStart} onChange={e => setExportStart(e.target.value)} onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }} max={exportEnd || undefined} style={{ cursor: "pointer" }} />
+            </Field>
+            <Field label="End date">
+              <input type="date" aria-label={tr("End date")} value={exportEnd} onChange={e => setExportEnd(e.target.value)} onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }} min={exportStart || undefined} style={{ cursor: "pointer" }} />
+            </Field>
+            <div className="form-actions" style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "12px" }}>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => setStatementModalOpen(true)}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <span>🖨️</span> {language === "vi" ? "Xem & In sao kê (PDF)" : "View & Print Statement (PDF)"}
+              </button>
+              <a
+                className="secondary"
+                href={api.exports.statementXlsxUrl({ account_id: exportAccountId, start_date: exportStart, end_date: exportEnd })}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <span>📊</span> {language === "vi" ? "Xuất sao kê Excel" : "Statement XLSX"}
+              </a>
+              <a
+                className="secondary"
+                href={api.exports.statementCsvUrl({ account_id: exportAccountId, start_date: exportStart, end_date: exportEnd })}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <span>📄</span> {language === "vi" ? "Xuất sao kê CSV" : "Statement CSV"}
+              </a>
+            </div>
+          </div>
+        </div>
+      ) : subTab === "review" ? (
+        <div className="review-grid">
+          <article className="panel">
+            <h3>{tr("Import batches")}</h3>
+            <Loading show={imports.isPending}/>
+            <Error error={imports.error}/>
+            <Empty show={!imports.isPending && imports.data?.length === 0} text="No import batches yet."/>
+            {imports.data?.map(x => (
+              <div className="review-row" key={x.id}>
+                <div>
+                  <strong>{x.original_filename}</strong>
+                  <small>{x.source} · {x.row_count} {tr("rows")} · {x.applied_row_count >= x.row_count ? tr("Applied") : `${x.applied_row_count}/${x.row_count} ${tr("applied")}`}</small>
+                  {applyStatus[x.id] && <small className="hint">{applyStatus[x.id]}</small>}
+                </div>
+                <div className="review-row-actions">
+                  <small>{x.imported_at}</small>
+                  <button type="button" className="secondary" disabled={apply.isPending && apply.variables === x.id} onClick={() => apply.mutate(x.id)}>
+                    {apply.isPending && apply.variables === x.id ? tr("Applying...") : x.applied_row_count >= x.row_count ? tr("Re-apply") : tr("Apply")}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </article>
+          <article className="panel">
+            <h3>{tr("Reconciliation candidates")}</h3>
+            <Loading show={reconciliation.isPending}/>
+            <Error error={reconciliation.error}/>
+            <Empty show={!reconciliation.isPending && reconciliation.data?.length === 0} text="No reconciliation candidates yet."/>
+            {reconciliation.data?.map(x => (
+              <div className="review-row" key={x.id}>
+                <div>
+                  <strong>{tr("Raw row")} #{x.source_row_number}</strong>
+                  <small>{x.transaction_date} · {label(x.event_type)} · {tr("Event")} #{x.financial_event_id}</small>
+                </div>
+                <span className="badge warning">{label(x.state)}</span>
+              </div>
+            ))}
+          </article>
+        </div>
+      ) : (
+        <BackupPanel />
+      )}
+      {statementModalOpen && (
+        <BankStatementModal
+          initialAccountId={exportAccountId}
+          initialStart={exportStart}
+          initialEnd={exportEnd}
+          onClose={() => setStatementModalOpen(false)}
+        />
+      )}
+    </section>
+  );
+}
+
+function getLevel1Category(categoryId: number | null | undefined, categories: Category[]): Category | undefined {
+  if (!categoryId) return undefined;
+  const byId = new Map(categories.map(c => [c.id, c]));
+  let current = byId.get(categoryId);
+  if (!current) return undefined;
+
+  const chain: Category[] = [];
+  const seen = new Set<number>();
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.unshift(current);
+    current = current.parent_id == null ? undefined : byId.get(current.parent_id);
+  }
+
+  if (chain.length > 1 && (chain[0].name.toLowerCase() === "expenses" || chain[0].name.toLowerCase() === "income")) {
+    return chain[1];
+  }
+  return chain[0];
+}
+
+function getLevel1ExpenseCategories(categories: Category[]): Category[] {
+  const expensesRoot = categories.find(c => c.parent_id == null && c.name.toLowerCase() === "expenses");
+  if (expensesRoot) {
+    return categories.filter(c => c.parent_id === expensesRoot.id && c.is_active !== false);
+  }
+  return categories.filter(c => c.parent_id == null && c.name.toLowerCase() !== "income" && c.is_active !== false);
+}
+
+function Reports() {
+  const { tr, label, language } = useI18n();
+  const eventsQ = useQuery({ queryKey: ["events"], queryFn: api.events.list });
+  const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
+  const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
+
+  const [timeScope, setTimeScope] = useState<"ALL" | "YEAR" | "QUARTER" | "MONTH" | "WEEK" | "DAY" | "CUSTOM">("MONTH");
+  const [selectedYear, setSelectedYear] = useState<string>(() => String(new Date().getFullYear()));
+  const [selectedQuarter, setSelectedQuarter] = useState<number>(() => Math.floor(new Date().getMonth() / 3) + 1);
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayIso());
+  const [dayWindowOffset, setDayWindowOffset] = useState<number>(0);
+  const [customStart, setCustomStart] = useState(() => `${new Date().getFullYear()}-01-01`);
+  const [customEnd, setCustomEnd] = useState(() => todayIso());
+  const [activeReportTab, setActiveReportTab] = useState<"time" | "category" | "account" | "payee">("time");
+  const [categoryFlow, setCategoryFlow] = useState<"EXPENSE" | "INCOME">("EXPENSE");
+  const [expandedParents, setExpandedParents] = useState<Record<number, boolean>>({});
+
+  const todayStr = todayIso();
+  const currentMonthKey = useMemo(() => todayStr.slice(0, 7), [todayStr]);
+  const hasFuture = useMemo(() => (eventsQ.data ?? []).some(e => e.transaction_date > todayStr), [eventsQ.data, todayStr]);
+
+  const pastEvents = useMemo(() => (eventsQ.data ?? []).filter(e => e.transaction_date <= todayStr), [eventsQ.data, todayStr]);
+  const minTxMonth = useMemo(() => {
+    return pastEvents.length > 0
+      ? pastEvents.reduce((min, e) => e.transaction_date.slice(0, 7) < min ? e.transaction_date.slice(0, 7) : min, currentMonthKey)
+      : currentMonthKey;
+  }, [pastEvents, currentMonthKey]);
+  const defaultMinMonth = `${Number(currentMonthKey.slice(0, 4)) - 1}-01`;
+  const earliestMonthKey = minTxMonth < defaultMinMonth ? minTxMonth : defaultMinMonth;
+
+  const allMonths: string[] = useMemo(() => {
+    const list: string[] = [];
+    for (let key = earliestMonthKey, guard = 0; key <= currentMonthKey && guard < 1200; key = shiftMonthKey(key, 1), guard++) {
+      list.push(key);
+    }
+    if (hasFuture) {
+      list.push("FUTURE");
+    }
+    return list;
+  }, [earliestMonthKey, currentMonthKey, hasFuture]);
+
+  const [monthWindowStartIndex, setMonthWindowStartIndex] = useState<number>(() => {
+    return Math.max(0, allMonths.indexOf(currentMonthKey) - 2);
+  });
+
+  const visibleMonths = useMemo(() => {
+    return allMonths.slice(monthWindowStartIndex, monthWindowStartIndex + 3);
+  }, [allMonths, monthWindowStartIndex]);
+
+  const lastMonthKey = shiftMonthKey(currentMonthKey, -1);
+  function monthLabel(key: string): string {
+    if (key === "FUTURE") return tr("Future");
+    if (key === currentMonthKey) return tr("This month");
+    if (key === lastMonthKey) return tr("Last month");
+    const [y, m] = key.split("-");
+    const currentYear = todayStr.slice(0, 4);
+    if (y === currentYear) {
+      return language === "vi" ? `Tháng ${Number(m)}` : `Month ${Number(m)}`;
+    }
+    return language === "vi" ? `Tháng ${Number(m)}/${y}` : `Month ${Number(m)}/${y}`;
+  }
+
+  // Weeks calculation
+  const [selectedWeekYear, setSelectedWeekYear] = useState<number>(() => new Date().getFullYear());
+  const [selectedWeekMonth, setSelectedWeekMonth] = useState<number>(() => new Date().getMonth() + 1);
+
+  const thisWeekMonday = useMemo(() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d;
+  }, []);
+  const thisWeekStart = useMemo(() => formatYmd(thisWeekMonday), [thisWeekMonday]);
+  const thisWeekEnd = useMemo(() => {
+    const end = new Date(thisWeekMonday);
+    end.setDate(end.getDate() + 6);
+    return formatYmd(end);
+  }, [thisWeekMonday]);
+
+  const lastWeekMonday = useMemo(() => {
+    const d = new Date(thisWeekMonday);
+    d.setDate(d.getDate() - 7);
+    return d;
+  }, [thisWeekMonday]);
+  const lastWeekStart = useMemo(() => formatYmd(lastWeekMonday), [lastWeekMonday]);
+  const lastWeekEnd = useMemo(() => {
+    const end = new Date(lastWeekMonday);
+    end.setDate(end.getDate() + 6);
+    return formatYmd(end);
+  }, [lastWeekMonday]);
+
+  const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(() => thisWeekStart);
+  const [selectedWeekEnd, setSelectedWeekEnd] = useState<string | null>(() => thisWeekEnd);
+
+  const currentMonthWeeks = useMemo(() => {
+    const all = getYearWeeks(selectedWeekYear, language);
+    return all.filter(w => {
+      if (w.month !== selectedWeekMonth) return false;
+      if (w.start === thisWeekStart && w.end === thisWeekEnd) return false;
+      if (w.start === lastWeekStart && w.end === lastWeekEnd) return false;
+      return true;
+    });
+  }, [selectedWeekYear, selectedWeekMonth, thisWeekStart, thisWeekEnd, lastWeekStart, lastWeekEnd, language]);
+
+  const activeMonthBtnRef = useRef<HTMLButtonElement>(null);
+  const weekScrollRef = useRef<HTMLDivElement>(null);
+  const activeWeekBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Day calculation
+  const visibleDays = useMemo(() => {
+    const today = todayIso();
+    return [
+      shiftIsoDate(today, dayWindowOffset - 3),
+      shiftIsoDate(today, dayWindowOffset - 2),
+      shiftIsoDate(today, dayWindowOffset - 1),
+      shiftIsoDate(today, dayWindowOffset),
+    ];
+  }, [dayWindowOffset]);
+
+  function onCalendarDateChange(iso: string) {
+    if (!iso) return;
+    setSelectedDate(iso);
+    const [ty, tm, td] = todayIso().split("-").map(Number);
+    const [py, pm, pd] = iso.split("-").map(Number);
+    const diffTime = Date.UTC(py, pm - 1, pd) - Date.UTC(ty, tm - 1, td);
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays < dayWindowOffset - 3 || diffDays > dayWindowOffset) {
+      setDayWindowOffset(diffDays);
+    }
+  }
+
+  const distinctYears = useMemo(() => {
+    const years = new Set<string>();
+    const thisYear = String(new Date().getFullYear());
+    years.add(thisYear);
+    (eventsQ.data ?? []).forEach(e => {
+      if (e.transaction_date) years.add(e.transaction_date.slice(0, 4));
+    });
+    return Array.from(years).sort().reverse();
+  }, [eventsQ.data]);
+
+  const activeMonthKey = selectedMonthKey ?? currentMonthKey;
+
+  const { startDate, endDate } = useMemo(() => {
+    if (timeScope === "ALL") {
+      const minDate = (eventsQ.data ?? []).reduce((min, e) => e.transaction_date < min ? e.transaction_date : min, "1970-01-01");
+      const maxDate = (eventsQ.data ?? []).reduce((max, e) => e.transaction_date > max ? e.transaction_date : max, todayStr);
+      return { startDate: minDate, endDate: maxDate };
+    }
+    if (timeScope === "YEAR") {
+      return { startDate: `${selectedYear}-01-01`, endDate: `${selectedYear}-12-31` };
+    }
+    if (timeScope === "QUARTER") {
+      const startMonth = String((selectedQuarter - 1) * 3 + 1).padStart(2, "0");
+      const endMonthNum = selectedQuarter * 3;
+      const lastDay = new Date(Number(selectedYear), endMonthNum, 0).getDate();
+      return {
+        startDate: `${selectedYear}-${startMonth}-01`,
+        endDate: `${selectedYear}-${String(endMonthNum).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+      };
+    }
+    if (timeScope === "MONTH") {
+      if (activeMonthKey === "FUTURE") {
+        const nextMonthStart = shiftMonthKey(currentMonthKey, 1) + "-01";
+        const maxDate = (eventsQ.data ?? []).reduce((max, e) => e.transaction_date > max ? e.transaction_date : max, todayStr);
+        return { startDate: nextMonthStart, endDate: maxDate > nextMonthStart ? maxDate : nextMonthStart };
+      }
+      const [y, m] = activeMonthKey.split("-").map(Number);
+      const endDay = new Date(y, m, 0).getDate();
+      return {
+        startDate: `${activeMonthKey}-01`,
+        endDate: `${activeMonthKey}-${String(endDay).padStart(2, "0")}`,
+      };
+    }
+    if (timeScope === "WEEK") {
+      return {
+        startDate: selectedWeekStart ?? thisWeekStart,
+        endDate: selectedWeekEnd ?? thisWeekEnd,
+      };
+    }
+    if (timeScope === "DAY") {
+      return { startDate: selectedDate, endDate: selectedDate };
+    }
+    return {
+      startDate: customStart || "1970-01-01",
+      endDate: customEnd || todayStr,
+    };
+  }, [timeScope, selectedYear, selectedQuarter, activeMonthKey, currentMonthKey, todayStr, selectedWeekStart, selectedWeekEnd, thisWeekStart, thisWeekEnd, selectedDate, customStart, customEnd, eventsQ.data]);
+
+  const events = eventsQ.data;
+  const accounts = accountsQ.data;
+  const categories = categoriesQ.data;
+
+  const accountMap = useMemo(() => new Map((accounts ?? []).map(a => [a.id, a])), [accounts]);
+  const categoryMap = useMemo(() => new Map((categories ?? []).map(c => [c.id, c])), [categories]);
+
+  const filteredEvents = useMemo(() => {
+    return (events ?? []).filter(e => {
+      if (e.excluded_from_reports) return false;
+      if (startDate && e.transaction_date < startDate) return false;
+      if (endDate && e.transaction_date > endDate) return false;
+      return true;
+    });
+  }, [events, startDate, endDate]);
+
+  let totalIncome = "0";
+  let totalExpense = "0";
+  let incomeTxnCount = 0;
+  let expenseTxnCount = 0;
+  let maxExpenseAmount = 0;
+  let maxExpenseEvent: FinancialEvent | null = null;
+
+  for (const e of filteredEvents) {
+    if (e.event_type === "INCOME" || e.event_type === "INTEREST") {
+      let eventAmt = "0";
+      for (const entry of e.entries) {
+        if (!entry.amount.startsWith("-")) {
+          eventAmt = sumMoney([eventAmt, entry.amount]);
+        }
+      }
+      totalIncome = sumMoney([totalIncome, eventAmt]);
+      incomeTxnCount++;
+    } else if (e.event_type === "EXPENSE") {
+      let eventAmt = "0";
+      for (const entry of e.entries) {
+        const cleanAmt = entry.amount.replace("-", "");
+        eventAmt = sumMoney([eventAmt, cleanAmt]);
+      }
+      totalExpense = sumMoney([totalExpense, eventAmt]);
+      expenseTxnCount++;
+      const numAmt = Number(eventAmt);
+      if (numAmt > maxExpenseAmount) {
+        maxExpenseAmount = numAmt;
+        maxExpenseEvent = e;
+      }
+    }
+  }
+
+  const netSavings = sumMoney([totalIncome, `-${totalExpense}`]);
+  const incomeNum = Number(totalIncome);
+  const expenseNum = Number(totalExpense);
+  const netNum = Number(netSavings);
+  const savingsRate = incomeNum > 0 ? ((netNum / incomeNum) * 100).toFixed(1) : "0.0";
+
+  let dayCount = 30;
+  if (startDate && endDate) {
+    const s = new Date(startDate);
+    const e = new Date(endDate);
+    const diff = Math.max(1, Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    dayCount = diff;
+  }
+  const dailyAverageExpense = dayCount > 0 ? Math.round(expenseNum / dayCount) : 0;
+
+  // 1. Time Breakdown
+  const timeBuckets = useMemo(() => {
+    const map = new Map<string, { income: string; expense: string; count: number }>();
+    filteredEvents.forEach(e => {
+      const monthKey = e.transaction_date.slice(0, 7);
+      if (!map.has(monthKey)) map.set(monthKey, { income: "0", expense: "0", count: 0 });
+      const item = map.get(monthKey)!;
+      item.count++;
+      if (e.event_type === "INCOME" || e.event_type === "INTEREST") {
+        e.entries.forEach(en => {
+          if (!en.amount.startsWith("-")) item.income = sumMoney([item.income, en.amount]);
+        });
+      } else if (e.event_type === "EXPENSE") {
+        e.entries.forEach(en => {
+          item.expense = sumMoney([item.expense, en.amount.replace("-", "")]);
+        });
+      }
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([month, data]) => {
+        const inc = Number(data.income);
+        const exp = Number(data.expense);
+        const net = inc - exp;
+        const rate = inc > 0 ? ((net / inc) * 100).toFixed(1) : "0.0";
+        return { month, income: data.income, expense: data.expense, net: String(net), rate, count: data.count, incNum: inc, expNum: exp };
+      });
+  }, [filteredEvents]);
+
+  const maxMonthVal = useMemo(() => {
+    let max = 1;
+    timeBuckets.forEach(b => {
+      if (b.incNum > max) max = b.incNum;
+      if (b.expNum > max) max = b.expNum;
+    });
+    return max;
+  }, [timeBuckets]);
+
+  // 2. Category Breakdown
+  const categoryStats = useMemo(() => {
+    const map = new Map<number | null, { total: string; count: number; subcategories: Map<number, { total: string; count: number }> }>();
+    const targetType = categoryFlow;
+
+    filteredEvents.forEach(e => {
+      if (e.event_type !== targetType && !(targetType === "INCOME" && e.event_type === "INTEREST")) return;
+      let eventAmt = "0";
+      e.entries.forEach(en => {
+        eventAmt = sumMoney([eventAmt, en.amount.replace("-", "")]);
+      });
+
+      const cat = e.category_id ? categoryMap.get(e.category_id) : null;
+      let parentId: number | null = null;
+      let isSub = false;
+      if (cat) {
+        if (cat.parent_id) {
+          parentId = cat.parent_id;
+          isSub = true;
+        } else {
+          parentId = cat.id;
+        }
+      }
+
+      if (!map.has(parentId)) {
+        map.set(parentId, { total: "0", count: 0, subcategories: new Map() });
+      }
+      const pEntry = map.get(parentId)!;
+      pEntry.total = sumMoney([pEntry.total, eventAmt]);
+      pEntry.count++;
+
+      if (isSub && cat) {
+        if (!pEntry.subcategories.has(cat.id)) {
+          pEntry.subcategories.set(cat.id, { total: "0", count: 0 });
+        }
+        const sEntry = pEntry.subcategories.get(cat.id)!;
+        sEntry.total = sumMoney([sEntry.total, eventAmt]);
+        sEntry.count++;
+      }
+    });
+
+    const grandTotal = targetType === "EXPENSE" ? expenseNum : incomeNum;
+    return Array.from(map.entries())
+      .map(([parentId, data]) => {
+        const cat = parentId ? categoryMap.get(parentId) : null;
+        const name = cat ? categoryLabel(language, cat.name) : (language === "vi" ? "Khác / Chưa phân loại" : "Other / Unclassified");
+        const totalNum = Number(data.total);
+        const share = grandTotal > 0 ? ((totalNum / grandTotal) * 100).toFixed(1) : "0.0";
+        const icon = cat?.icon ?? "Folder";
+
+        const subList = Array.from(data.subcategories.entries()).map(([subId, subData]) => {
+          const subCat = categoryMap.get(subId);
+          const subTotalNum = Number(subData.total);
+          const subShare = grandTotal > 0 ? ((subTotalNum / grandTotal) * 100).toFixed(1) : "0.0";
+          return {
+            id: subId,
+            name: subCat ? categoryLabel(language, subCat.name) : "",
+            icon: subCat?.icon ?? "Tag",
+            total: subData.total,
+            count: subData.count,
+            share: subShare,
+          };
+        }).sort((a, b) => Number(b.total) - Number(a.total));
+
+        return {
+          id: parentId,
+          name,
+          icon,
+          total: data.total,
+          totalNum,
+          count: data.count,
+          share,
+          subList,
+        };
+      })
+      .sort((a, b) => b.totalNum - a.totalNum);
+  }, [filteredEvents, categoryFlow, categoryMap, expenseNum, incomeNum, language]);
+
+  // 3. Account Breakdown
+  const accountStats = useMemo(() => {
+    const map = new Map<number, { inflow: string; outflow: string; expenseCount: number; incomeCount: number }>();
+    (accounts ?? []).forEach(a => map.set(a.id, { inflow: "0", outflow: "0", expenseCount: 0, incomeCount: 0 }));
+
+    filteredEvents.forEach(e => {
+      e.entries.forEach(en => {
+        if (!map.has(en.account_id)) {
+          map.set(en.account_id, { inflow: "0", outflow: "0", expenseCount: 0, incomeCount: 0 });
+        }
+        const accData = map.get(en.account_id)!;
+        if (en.amount.startsWith("-")) {
+          accData.outflow = sumMoney([accData.outflow, en.amount.replace("-", "")]);
+          accData.expenseCount++;
+        } else {
+          accData.inflow = sumMoney([accData.inflow, en.amount]);
+          accData.incomeCount++;
+        }
+      });
+    });
+
+    return Array.from(map.entries())
+      .map(([accId, data]) => {
+        const acc = accountMap.get(accId);
+        const inflowNum = Number(data.inflow);
+        const outflowNum = Number(data.outflow);
+        const netNum = inflowNum - outflowNum;
+        const shareOfExpense = expenseNum > 0 ? ((outflowNum / expenseNum) * 100).toFixed(1) : "0.0";
+        return {
+          account: acc ?? { id: accId, name: `Tài khoản #${accId}`, account_type: "BANK" as AccountType, currency: "VND", is_active: true, sort_order: 0 },
+          inflow: data.inflow,
+          outflow: data.outflow,
+          outflowNum,
+          net: String(netNum),
+          shareOfExpense,
+          txnCount: data.expenseCount + data.incomeCount,
+        };
+      })
+      .filter(item => Number(item.inflow) > 0 || Number(item.outflow) > 0)
+      .sort((a, b) => b.outflowNum - a.outflowNum);
+  }, [filteredEvents, accounts, accountMap, expenseNum]);
+
+  // 4. Payee Breakdown (Using Level 1 Expense Categories)
+  const payeeStats = useMemo(() => {
+    const map = new Map<string, { expense: string; count: number; lastDate: string; icon?: string }>();
+
+    filteredEvents.forEach(e => {
+      // Chi tiêu theo đối tượng CHỈ tính các sự kiện chi tiêu (EXPENSE)
+      if (e.event_type !== "EXPENSE") return;
+
+      const lvl1Cat = getLevel1Category(e.category_id, categories ?? []);
+      let name = (e.payee_text || "").trim();
+      const icon = lvl1Cat?.icon ?? undefined;
+
+      if (!name) {
+        if (lvl1Cat) {
+          name = categoryLabel(language, lvl1Cat.name);
+        } else if (e.note && e.note.trim()) {
+          name = e.note.trim();
+        } else {
+          name = language === "vi" ? "Khác / Chưa phân loại" : "Other / Uncategorized";
+        }
+      }
+
+      if (!map.has(name)) {
+        map.set(name, { expense: "0", count: 0, lastDate: e.transaction_date, icon });
+      }
+      const pEntry = map.get(name)!;
+      pEntry.count++;
+      if (e.transaction_date > pEntry.lastDate) {
+        pEntry.lastDate = e.transaction_date;
+      }
+      if (!pEntry.icon && icon) {
+        pEntry.icon = icon;
+      }
+
+      let eventAmt = "0";
+      e.entries.forEach(en => {
+        const cleanAmt = en.amount.replace("-", "");
+        eventAmt = sumMoney([eventAmt, cleanAmt]);
+      });
+      pEntry.expense = sumMoney([pEntry.expense, eventAmt]);
+    });
+
+    return Array.from(map.entries())
+      .filter(([, data]) => Number(data.expense) > 0)
+      .map(([name, data]) => {
+        const expNum = Number(data.expense);
+        const share = expenseNum > 0 ? ((expNum / expenseNum) * 100).toFixed(1) : "0.0";
+        const avg = data.count > 0 ? Math.round(expNum / data.count) : 0;
+        return {
+          name,
+          icon: data.icon,
+          expense: data.expense,
+          expNum,
+          count: data.count,
+          lastDate: data.lastDate,
+          share,
+          avg: String(avg),
+        };
+      })
+      .sort((a, b) => b.expNum - a.expNum);
+  }, [filteredEvents, categories, expenseNum, language]);
+
+  return (
+    <div className="reports-page">
+      {/* Time Filters: Tất cả | Năm | Quý | Tháng | Tuần | Ngày | Tùy chỉnh */}
+      <div className="ledger-time-filter-wrap" style={{ marginBottom: "16px" }}>
+        <div className="ledger-time-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={timeScope === "ALL"} className={timeScope === "ALL" ? "active" : ""} onClick={() => setTimeScope("ALL")}>{tr("All")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "YEAR"} className={timeScope === "YEAR" ? "active" : ""} onClick={() => setTimeScope("YEAR")}>{tr("Year")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "QUARTER"} className={timeScope === "QUARTER" ? "active" : ""} onClick={() => setTimeScope("QUARTER")}>{tr("Quarter")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "MONTH"} className={timeScope === "MONTH" ? "active" : ""} onClick={() => setTimeScope("MONTH")}>{tr("Month")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "WEEK"} className={timeScope === "WEEK" ? "active" : ""} onClick={() => setTimeScope("WEEK")}>{tr("Week")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "DAY"} className={timeScope === "DAY" ? "active" : ""} onClick={() => setTimeScope("DAY")}>{tr("Day")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "CUSTOM"} className={timeScope === "CUSTOM" ? "active" : ""} onClick={() => setTimeScope("CUSTOM")}>{tr("Custom range")}</button>
+        </div>
+
+        {timeScope === "MONTH" && (
+          <div className="ledger-scroll-row-wrap" style={{ marginTop: "4px", justifyContent: "center" }}>
+            <button
+              type="button"
+              className="scroll-arrow-btn"
+              onClick={() => setMonthWindowStartIndex(prev => Math.max(0, prev - 1))}
+              disabled={monthWindowStartIndex === 0}
+              style={{ opacity: monthWindowStartIndex === 0 ? 0.35 : 1, cursor: monthWindowStartIndex === 0 ? "default" : "pointer" }}
+              title={tr("Previous month")}
+              aria-label="Previous month"
+            >
+              ‹
+            </button>
+            <div className="ledger-months" role="tablist" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              {visibleMonths.map(key => {
+                const isSelected = activeMonthKey === key;
+                return (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    className={isSelected ? "active" : ""}
+                    style={{ minWidth: "90px", textAlign: "center" }}
+                    onClick={() => setSelectedMonthKey(key)}
+                    key={key}
+                    ref={isSelected ? activeMonthBtnRef : undefined}
+                  >
+                    {monthLabel(key)}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              className="scroll-arrow-btn"
+              onClick={() => setMonthWindowStartIndex(prev => Math.min(Math.max(0, allMonths.length - 3), prev + 1))}
+              disabled={monthWindowStartIndex >= allMonths.length - 3}
+              style={{ opacity: monthWindowStartIndex >= allMonths.length - 3 ? 0.35 : 1, cursor: monthWindowStartIndex >= allMonths.length - 3 ? "default" : "pointer" }}
+              title={tr("Next month")}
+              aria-label="Next month"
+            >
+              ›
+            </button>
+          </div>
+        )}
+
+        {timeScope === "YEAR" && (
+          <div className="time-sub-controls" style={{ marginTop: "4px" }}>
+            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="time-select">
+              {distinctYears.map(y => <option value={y} key={y}>{tr("Year")} {y}</option>)}
+            </select>
+          </div>
+        )}
+
+        {timeScope === "QUARTER" && (
+          <div className="time-sub-controls" style={{ marginTop: "4px" }}>
+            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="time-select">
+              {distinctYears.map(y => <option value={y} key={y}>{tr("Year")} {y}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: "6px" }}>
+              {[1, 2, 3, 4].map(q => (
+                <button
+                  type="button"
+                  key={q}
+                  className={`pill-btn ${selectedQuarter === q ? "active" : ""}`}
+                  onClick={() => setSelectedQuarter(q)}
+                >
+                  {tr("Quarter")} {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {timeScope === "WEEK" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "4px", width: "100%", minWidth: 0 }}>
+            <div>
+              <input
+                type="month"
+                value={`${selectedWeekYear}-${String(selectedWeekMonth).padStart(2, "0")}`}
+                onChange={e => {
+                  if (!e.target.value) return;
+                  const [y, m] = e.target.value.split("-").map(Number);
+                  setSelectedWeekYear(y);
+                  setSelectedWeekMonth(m);
+                }}
+                onClick={e => {
+                  try {
+                    e.currentTarget.showPicker?.();
+                  } catch {}
+                }}
+                className="time-input"
+                style={{
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  fontSize: "0.84rem",
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--line)",
+                  background: "var(--card)",
+                  color: "var(--text)",
+                  width: "auto",
+                  minWidth: "160px"
+                }}
+              />
+            </div>
+            <div className="ledger-scroll-row-wrap">
+              <button
+                type="button"
+                className="scroll-arrow-btn"
+                onClick={() => weekScrollRef.current?.scrollBy({ left: -240, behavior: "smooth" })}
+                title={tr("Previous")}
+                aria-label="Previous weeks"
+              >
+                ‹
+              </button>
+              <div className="ledger-months scroll-container" role="tablist" ref={weekScrollRef}>
+                {currentMonthWeeks.map(w => {
+                  const isSelected = startDate === w.start && endDate === w.end;
+                  return (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={isSelected}
+                      className={isSelected ? "active" : ""}
+                      onClick={() => {
+                        setSelectedWeekStart(w.start);
+                        setSelectedWeekEnd(w.end);
+                      }}
+                      key={w.start}
+                      ref={isSelected ? activeWeekBtnRef : undefined}
+                    >
+                      {w.label}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={startDate === lastWeekStart && endDate === lastWeekEnd}
+                  className={startDate === lastWeekStart && endDate === lastWeekEnd ? "active" : ""}
+                  onClick={() => {
+                    setSelectedWeekStart(lastWeekStart);
+                    setSelectedWeekEnd(lastWeekEnd);
+                  }}
+                  ref={startDate === lastWeekStart && endDate === lastWeekEnd ? activeWeekBtnRef : undefined}
+                >
+                  {tr("Last week")}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={startDate === thisWeekStart && endDate === thisWeekEnd}
+                  className={startDate === thisWeekStart && endDate === thisWeekEnd ? "active" : ""}
+                  onClick={() => {
+                    setSelectedWeekStart(thisWeekStart);
+                    setSelectedWeekEnd(thisWeekEnd);
+                  }}
+                  ref={startDate === thisWeekStart && endDate === thisWeekEnd ? activeWeekBtnRef : undefined}
+                >
+                  {tr("This week")}
+                </button>
+              </div>
+              <button
+                type="button"
+                className="scroll-arrow-btn"
+                onClick={() => weekScrollRef.current?.scrollBy({ left: 240, behavior: "smooth" })}
+                title={tr("Next")}
+                aria-label="Next weeks"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+        )}
+
+        {timeScope === "DAY" && (
+          <div className="time-sub-controls" style={{ marginTop: "4px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", flexWrap: "nowrap" }}>
+            <button
+              type="button"
+              className="scroll-arrow-btn"
+              onClick={() => setDayWindowOffset(prev => prev - 1)}
+              title={tr("Previous")}
+              aria-label="Previous days"
+            >
+              ‹
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap" }}>
+              {visibleDays.map(d => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`pill-btn ${selectedDate === d ? "active" : ""}`}
+                  style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                  onClick={() => setSelectedDate(d)}
+                >
+                  {formatShortDayLabel(language, d)}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="scroll-arrow-btn"
+              onClick={() => setDayWindowOffset(prev => prev + 1)}
+              title={tr("Next")}
+              aria-label="Next days"
+            >
+              ›
+            </button>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={e => onCalendarDateChange(e.target.value)}
+              onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }}
+              className="time-input"
+              style={{ cursor: "pointer", marginLeft: "4px", padding: "3px 6px", height: "28px", minHeight: "28px", fontSize: "0.82rem" }}
+              aria-label={tr("Select date")}
+            />
+          </div>
+        )}
+
+        {timeScope === "CUSTOM" && (
+          <div className="time-sub-controls" style={{ marginTop: "6px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="hint" style={{ whiteSpace: "nowrap", fontWeight: 600, minWidth: "60px" }}>{tr("From date")}:</span>
+              <input
+                type="date"
+                value={customStart}
+                onChange={e => setCustomStart(e.target.value)}
+                onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }}
+                className="time-input"
+                style={{ cursor: "pointer", flex: 1, minHeight: "32px" }}
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="hint" style={{ whiteSpace: "nowrap", fontWeight: 600, minWidth: "60px" }}>{tr("To date")}:</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={e => setCustomEnd(e.target.value)}
+                onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }}
+                className="time-input"
+                style={{ cursor: "pointer", flex: 1, minHeight: "32px" }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Hero Overview KPI Cards */}
+      <div className="reports-kpis">
+        <article className="reports-kpi-card" style={{ borderTop: "4px solid #16a34a" }}>
+          <div className="reports-kpi-header">
+            <span>{tr("Total Income")}</span>
+            <span style={{ color: "#16a34a" }}>↗</span>
+          </div>
+          <div className="reports-kpi-val" style={{ color: "#16a34a" }}>
+            +{fmtMoneyDisplay(totalIncome)} VND
+          </div>
+          <div className="reports-kpi-sub">
+            {incomeTxnCount} {language === "vi" ? "giao dịch thu nhập" : "income transactions"}
+          </div>
+        </article>
+
+        <article className="reports-kpi-card" style={{ borderTop: "4px solid #dc2626" }}>
+          <div className="reports-kpi-header">
+            <span>{tr("Total Expenses")}</span>
+            <span style={{ color: "#dc2626" }}>↘</span>
+          </div>
+          <div className="reports-kpi-val" style={{ color: "#dc2626" }}>
+            -{fmtMoneyDisplay(totalExpense)} VND
+          </div>
+          <div className="reports-kpi-sub">
+            {expenseTxnCount} {language === "vi" ? "giao dịch chi tiêu" : "expense transactions"}
+          </div>
+        </article>
+
+        <article className="reports-kpi-card" style={{ borderTop: `4px solid ${netNum >= 0 ? "#0284c7" : "#dc2626"}` }}>
+          <div className="reports-kpi-header">
+            <span>{tr("Net Savings")}</span>
+            <span className={`badge ${netNum >= 0 ? "" : "warning"}`}>{savingsRate}%</span>
+          </div>
+          <div className="reports-kpi-val" style={{ color: netNum >= 0 ? "#0284c7" : "#dc2626" }}>
+            {netNum >= 0 ? "+" : ""}{fmtMoneyDisplay(netSavings)} VND
+          </div>
+          <div className="reports-kpi-sub">
+            {tr("Savings Rate")}: <strong>{savingsRate}%</strong>
+          </div>
+        </article>
+
+        <article className="reports-kpi-card" style={{ borderTop: "4px solid #d97706" }}>
+          <div className="reports-kpi-header">
+            <span>{tr("Daily Average")}</span>
+            <span style={{ color: "#d97706" }}>⚡</span>
+          </div>
+          <div className="reports-kpi-val" style={{ color: "#0f172a" }}>
+            {fmtMoneyDisplay(String(dailyAverageExpense))} VND
+          </div>
+          <div className="reports-kpi-sub">
+            {maxExpenseEvent ? (
+              <span title={maxExpenseEvent.note || ""}>
+                {language === "vi" ? "Lớn nhất" : "Top"}: {fmtMoneyDisplay(String(maxExpenseAmount))} VND
+              </span>
+            ) : "—"}
+          </div>
+        </article>
+      </div>
+
+      {/* 4 Dimension Report Tabs */}
+      <div className="reports-dimension-nav">
+        <button
+          type="button"
+          className={`reports-dim-btn ${activeReportTab === "time" ? "active" : ""}`}
+          onClick={() => setActiveReportTab("time")}
+        >
+          <IconGlyph iconKey="Calendar" size={18} />
+          <span>{tr("By Time")}</span>
+        </button>
+        <button
+          type="button"
+          className={`reports-dim-btn ${activeReportTab === "category" ? "active" : ""}`}
+          onClick={() => setActiveReportTab("category")}
+        >
+          <IconGlyph iconKey="Grid" size={18} />
+          <span>{tr("By Category")}</span>
+        </button>
+        <button
+          type="button"
+          className={`reports-dim-btn ${activeReportTab === "account" ? "active" : ""}`}
+          onClick={() => setActiveReportTab("account")}
+        >
+          <IconGlyph iconKey="CreditCard" size={18} />
+          <span>{tr("By Account")}</span>
+        </button>
+        <button
+          type="button"
+          className={`reports-dim-btn ${activeReportTab === "payee" ? "active" : ""}`}
+          onClick={() => setActiveReportTab("payee")}
+        >
+          <IconGlyph iconKey="Users" size={18} />
+          <span>{tr("By Payee")}</span>
+        </button>
+      </div>
+
+      {/* Tab 1: By Time Dashboard */}
+      {activeReportTab === "time" && (
+        <div className="reports-panel">
+          <div className="reports-panel-header">
+            <h3 className="reports-panel-title">{tr("Income vs Expenses")} ({tr("By Time")})</h3>
+            <div style={{ display: "flex", gap: "12px", fontSize: "0.78rem" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: "#16a34a" }} />
+                {tr("Income")}
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: "#dc2626" }} />
+                {tr("Expenses")}
+              </span>
+            </div>
+          </div>
+
+          <Empty show={timeBuckets.length === 0} text={tr("No transactions in this period")} />
+
+          {timeBuckets.length > 0 && (
+            <div className="report-split-grid">
+              <div className="monthly-chart-wrap" style={{ margin: 0 }}>
+                {timeBuckets.map(b => {
+                  const incPct = Math.min(100, Math.round((b.incNum / maxMonthVal) * 100));
+                  const expPct = Math.min(100, Math.round((b.expNum / maxMonthVal) * 100));
+                  return (
+                    <div className="monthly-chart-row" key={b.month}>
+                      <div className="monthly-chart-label">{b.month}</div>
+                      <div className="monthly-chart-bars">
+                        <div className="monthly-bar-track" title={`Thu nhập: +${fmtMoneyDisplay(b.income)} VND`}>
+                          <div className="monthly-bar-fill-income" style={{ width: `${incPct}%` }} />
+                        </div>
+                        <div className="monthly-bar-track" title={`Chi tiêu: -${fmtMoneyDisplay(b.expense)} VND`}>
+                          <div className="monthly-bar-fill-expense" style={{ width: `${expPct}%` }} />
+                        </div>
+                      </div>
+                      <div className="monthly-chart-amounts">
+                        <strong style={{ color: "#16a34a" }}>+{fmtMoneyDisplay(b.income)}</strong>
+                        <strong style={{ color: "#dc2626" }}>-{fmtMoneyDisplay(b.expense)}</strong>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <ReportDonutChart
+                title={language === "vi" ? "Tỷ lệ Thu nhập / Chi tiêu" : "Income vs Expense Share"}
+                data={[
+                  { label: tr("Income"), value: incomeNum, color: "#16a34a", formattedValue: `+${fmtMoneyDisplay(totalIncome)}` },
+                  { label: tr("Expenses"), value: expenseNum, color: "#dc2626", formattedValue: `-${fmtMoneyDisplay(totalExpense)}` },
+                ]}
+                totalLabel={tr("Net Savings")}
+                totalValueFormatted={`${netNum >= 0 ? "+" : ""}${fmtMoneyDisplay(netSavings)}`}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 2: By Category Dashboard */}
+      {activeReportTab === "category" && (
+        <div className="reports-panel">
+          <div className="reports-panel-header">
+            <h3 className="reports-panel-title">{categoryFlow === "EXPENSE" ? tr("Expense Breakdown") : tr("Income Breakdown")}</h3>
+            <div className="segmented" style={{ margin: 0 }}>
+              <button
+                type="button"
+                className={categoryFlow === "EXPENSE" ? "active" : ""}
+                onClick={() => setCategoryFlow("EXPENSE")}
+              >
+                {tr("Expenses")}
+              </button>
+              <button
+                type="button"
+                className={categoryFlow === "INCOME" ? "active" : ""}
+                onClick={() => setCategoryFlow("INCOME")}
+              >
+                {tr("Income")}
+              </button>
+            </div>
+          </div>
+
+          <Empty show={categoryStats.length === 0} text={tr("No transactions in this period")} />
+
+          {categoryStats.length > 0 && (
+            <div className="report-split-grid">
+              <div className="category-report-list">
+                {categoryStats.map((cat, idx) => {
+                  const isExpanded = cat.id != null && !!expandedParents[cat.id];
+                  const hasSubs = cat.subList.length > 0;
+                  const barColor = PIE_COLORS[idx % PIE_COLORS.length];
+                  return (
+                    <div className="category-report-item" key={cat.id ?? "none"}>
+                      <div
+                        className="category-report-header"
+                        onClick={() => {
+                          if (hasSubs && cat.id != null) {
+                            setExpandedParents(prev => ({ ...prev, [cat.id!]: !prev[cat.id!] }));
+                          }
+                        }}
+                      >
+                        <div className="category-report-left">
+                          <div style={{ color: barColor, display: "flex", alignItems: "center" }}>
+                            <IconGlyph iconKey={cat.icon} size={22} />
+                          </div>
+                          <div className="category-report-info">
+                            <div className="category-report-title-row">
+                              <span className="category-report-title">{cat.name}</span>
+                              <div>
+                                <strong style={{ fontSize: "0.95rem", color: categoryFlow === "EXPENSE" ? "#dc2626" : "#16a34a" }}>
+                                  {categoryFlow === "EXPENSE" ? "-" : "+"}{fmtMoneyDisplay(cat.total)} VND
+                                </strong>
+                                <span style={{ fontSize: "0.78rem", color: "var(--muted)", marginLeft: "8px" }}>
+                                  ({cat.share}%)
+                                </span>
+                              </div>
+                            </div>
+                            <div className="category-report-bar-wrap">
+                              <div className="category-report-bar" style={{ width: `${cat.share}%`, background: barColor }} />
+                            </div>
+                          </div>
+                        </div>
+                        {hasSubs && (
+                          <span style={{ color: "var(--muted)", fontSize: "0.8rem", marginLeft: "12px" }}>
+                            {isExpanded ? "▲" : "▼"}
+                          </span>
+                        )}
+                      </div>
+
+                      {isExpanded && hasSubs && (
+                        <div className="category-sub-list">
+                          {cat.subList.map(sub => (
+                            <div className="category-sub-item" key={sub.id}>
+                              <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                <IconGlyph iconKey={sub.icon} size={14} />
+                                <span>{sub.name}</span>
+                                <small style={{ color: "var(--muted)" }}>({sub.count} {language === "vi" ? "lần" : "txns"})</small>
+                              </span>
+                              <strong>
+                                {categoryFlow === "EXPENSE" ? "-" : "+"}{fmtMoneyDisplay(sub.total)} VND ({sub.share}%)
+                              </strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <ReportDonutChart
+                title={categoryFlow === "EXPENSE" ? (language === "vi" ? "Cơ cấu chi tiêu theo nhóm" : "Expense Breakdown") : (language === "vi" ? "Cơ cấu thu nhập theo nhóm" : "Income Breakdown")}
+                data={categoryStats.map((cat, i) => ({
+                  label: cat.name,
+                  value: cat.totalNum,
+                  color: PIE_COLORS[i % PIE_COLORS.length],
+                  formattedValue: `${categoryFlow === "EXPENSE" ? "-" : "+"}${fmtMoneyDisplay(cat.total)}`,
+                }))}
+                totalLabel={categoryFlow === "EXPENSE" ? tr("Total Expenses") : tr("Total Income")}
+                totalValueFormatted={`${categoryFlow === "EXPENSE" ? "-" : "+"}${fmtMoneyDisplay(categoryFlow === "EXPENSE" ? totalExpense : totalIncome)}`}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 3: By Account Dashboard */}
+      {activeReportTab === "account" && (
+        <div className="reports-panel">
+          <div className="reports-panel-header">
+            <h3 className="reports-panel-title">{tr("Account Cash Flow")}</h3>
+          </div>
+
+          <Empty show={accountStats.length === 0} text={tr("No transactions in this period")} />
+
+          {accountStats.length > 0 && (
+            <div className="report-split-grid">
+              <div className="account-flow-2col">
+                {accountStats.map(item => {
+                  const brand = getAccountBrand(item.account.name, item.account.account_type);
+                  const netNum = Number(item.net);
+                  return (
+                    <article className="account-flow-card" key={item.account.id} style={{ borderTop: `4px solid ${brand.primaryColor}` }}>
+                      <div className="account-flow-header">
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <AccountLogo name={item.account.name} accountType={item.account.account_type} size={32} />
+                          <div>
+                            <strong style={{ fontSize: "0.92rem", display: "block" }}>{item.account.name}</strong>
+                            <small style={{ color: brand.primaryColor, fontWeight: 600, fontSize: "0.74rem" }}>
+                              {label(item.account.account_type)} · {item.shareOfExpense}% {language === "vi" ? "tổng chi" : "of spend"}
+                            </small>
+                          </div>
+                        </div>
+                        <span className="badge muted">{item.txnCount} {language === "vi" ? "giao dịch" : "txns"}</span>
+                      </div>
+
+                      <div className="account-flow-numbers">
+                        <div className="account-flow-stat">
+                          <span>{tr("Inflow")}</span>
+                          <strong style={{ color: "#16a34a" }}>+{fmtMoneyDisplay(item.inflow)}</strong>
+                        </div>
+                        <div className="account-flow-stat">
+                          <span>{tr("Outflow")}</span>
+                          <strong style={{ color: "#dc2626" }}>-{fmtMoneyDisplay(item.outflow)}</strong>
+                        </div>
+                        <div className="account-flow-stat">
+                          <span>{tr("Net")}</span>
+                          <strong style={{ color: netNum >= 0 ? "#0284c7" : "#dc2626" }}>
+                            {netNum >= 0 ? "+" : ""}{fmtMoneyDisplay(item.net)}
+                          </strong>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              <ReportDonutChart
+                title={language === "vi" ? "Tỷ trọng chi theo tài khoản" : "Spend Share by Account"}
+                data={accountStats.map((item, i) => ({
+                  label: item.account.name,
+                  value: item.outflowNum,
+                  color: PIE_COLORS[i % PIE_COLORS.length],
+                  formattedValue: `-${fmtMoneyDisplay(item.outflow)}`,
+                }))}
+                totalLabel={tr("Total Expenses")}
+                totalValueFormatted={`-${fmtMoneyDisplay(totalExpense)}`}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 4: By Payee Dashboard */}
+      {activeReportTab === "payee" && (
+        <div className="reports-panel">
+          <div className="reports-panel-header">
+            <h3 className="reports-panel-title">{tr("Payee & Merchant Spending")}</h3>
+            <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
+              {payeeStats.length} {language === "vi" ? "đối tượng / nhóm chi tiêu" : "payees / categories"}
+            </span>
+          </div>
+
+          <Empty show={payeeStats.length === 0} text={tr("No transactions in this period")} />
+
+          {payeeStats.length > 0 && (
+            <div className="report-split-grid">
+              <div style={{ overflowX: "auto" }}>
+                <table className="payee-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>{language === "vi" ? "Đối tượng chi tiêu" : "Expense Payee / Target"}</th>
+                      <th>{tr("Total Expenses")}</th>
+                      <th>{tr("Share")}</th>
+                      <th>{tr("Transaction Count")}</th>
+                      <th>{tr("Average per Transaction")}</th>
+                      <th>{language === "vi" ? "Lần gần nhất" : "Last Transaction"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payeeStats.map((p, idx) => (
+                      <tr key={p.name}>
+                        <td style={{ color: "var(--muted)", fontWeight: 700 }}>{idx + 1}</td>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            {p.icon && <CategoryIcon name={p.name} icon={p.icon} size={18} />}
+                            <strong>{p.name}</strong>
+                          </div>
+                        </td>
+                        <td style={{ color: "#dc2626", fontWeight: 700 }}>
+                          -{fmtMoneyDisplay(p.expense)} VND
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "0.8rem", width: "36px" }}>{p.share}%</span>
+                            <div style={{ width: 60, height: 6, borderRadius: 999, background: "#f1f5f9", overflow: "hidden" }}>
+                              <div style={{ width: `${Math.min(100, Math.max(0, Number(p.share)))}%`, height: "100%", background: PIE_COLORS[idx % PIE_COLORS.length], borderRadius: 999 }} />
+                            </div>
+                          </div>
+                        </td>
+                        <td>{p.count}</td>
+                        <td>{fmtMoneyDisplay(p.avg)} VND</td>
+                        <td style={{ color: "var(--muted)", fontSize: "0.8rem" }}>{p.lastDate}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ReportDonutChart
+                title={language === "vi" ? "Tỷ trọng chi theo đối tượng" : "Spending by Payee"}
+                data={payeeStats.map((p, i) => ({
+                  label: p.name,
+                  value: p.expNum,
+                  color: PIE_COLORS[i % PIE_COLORS.length],
+                  formattedValue: `-${fmtMoneyDisplay(p.expense)}`,
+                }))}
+                totalLabel={tr("Total Expenses")}
+                totalValueFormatted={`-${fmtMoneyDisplay(totalExpense)}`}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 type TimeScope = "ALL" | "YEAR" | "QUARTER" | "MONTH" | "WEEK" | "DAY" | "CUSTOM";
@@ -2018,38 +5083,229 @@ function AccountPeriodTransactionsModal({
   );
 }
 
+function AccountTypeFilterDropdown({
+  selected,
+  onSelect,
+  accounts,
+}: {
+  selected: "ALL" | AccountType;
+  onSelect: (type: "ALL" | AccountType) => void;
+  accounts: Account[];
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const { language } = useI18n();
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [open]);
+
+  const counts: Record<string, number> = {
+    ALL: accounts.length,
+    CASH: accounts.filter(a => a.account_type === "CASH").length,
+    BANK: accounts.filter(a => a.account_type === "BANK").length,
+    CREDIT_CARD: accounts.filter(a => a.account_type === "CREDIT_CARD").length,
+    EWALLET: accounts.filter(a => a.account_type === "EWALLET").length,
+  };
+
+  const options: { id: "ALL" | AccountType; label: string; icon: string; count: number }[] = [
+    { id: "ALL", label: language === "vi" ? "Tất cả các tài khoản" : "All accounts", icon: "Grid", count: counts.ALL },
+    { id: "CASH", label: language === "vi" ? "Tài khoản tiền mặt" : "Cash accounts", icon: "Wallet", count: counts.CASH },
+    { id: "BANK", label: language === "vi" ? "Tài khoản ngân hàng" : "Bank accounts", icon: "Landmark", count: counts.BANK },
+    { id: "CREDIT_CARD", label: language === "vi" ? "Thẻ tín dụng" : "Credit cards", icon: "CreditCard", count: counts.CREDIT_CARD },
+    { id: "EWALLET", label: language === "vi" ? "Ví điện tử" : "E-wallets", icon: "Smartphone", count: counts.EWALLET },
+  ];
+
+  const currentOption = options.find(o => o.id === selected) ?? options[0];
+
+  return (
+    <div className="account-type-dropdown" ref={ref}>
+      <button
+        type="button"
+        className="account-type-dropdown-trigger"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+      >
+        <span className="account-type-dropdown-icon">
+          <IconGlyph iconKey={currentOption.icon} size={16} />
+        </span>
+        <span className="account-type-dropdown-label">{currentOption.label}</span>
+        <span className="account-type-dropdown-count">{currentOption.count}</span>
+        <span className="caret">▾</span>
+      </button>
+
+      {open && (
+        <div className="account-type-dropdown-menu">
+          {options.map(opt => (
+            <button
+              type="button"
+              key={opt.id}
+              className={`account-type-dropdown-item ${selected === opt.id ? "active" : ""}`}
+              onClick={() => {
+                onSelect(opt.id);
+                setOpen(false);
+              }}
+            >
+              <span className="account-type-dropdown-item-icon">
+                <IconGlyph iconKey={opt.icon} size={16} />
+              </span>
+              <span className="account-type-dropdown-item-title">{opt.label}</span>
+              <span className="account-type-dropdown-item-badge">{opt.count}</span>
+              {selected === opt.id && <span className="account-type-dropdown-check">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Accounts() {
-  const { label, tr } = useI18n();
+  const { label, tr, language } = useI18n();
   const qc = useQueryClient();
   const [formTarget, setFormTarget] = useState<"new" | Account | null>(null);
   const [adjusting, setAdjusting] = useState<Account | null>(null);
   const [selectedAccountForTxns, setSelectedAccountForTxns] = useState<Account | null>(null);
+  const [statementAccount, setStatementAccount] = useState<Account | null>(null);
+  const [filterType, setFilterType] = useState<"ALL" | AccountType>("ALL");
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+
   const query = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const balances = useAccountBalances(query.data);
-  const toggle = useMutation({ mutationFn: (account: Account) => api.accounts.update(account.id, { is_active: !account.is_active }), onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }) });
+  const toggle = useMutation({ mutationFn: (account: Account) => api.accounts.update(account.id, { is_active: !account.is_active }), onSuccess: () => invalidateAllFinancialQueries(qc) });
+
+  const reorder = useMutation({
+    mutationFn: async (reorderedList: Account[]) => {
+      const updates: Promise<unknown>[] = [];
+      reorderedList.forEach((acc, index) => {
+        const newOrder = index + 1;
+        if (acc.sort_order !== newOrder) {
+          updates.push(api.accounts.update(acc.id, { sort_order: newOrder }));
+        }
+      });
+      await Promise.all(updates);
+    },
+    onMutate: async (newOrderList) => {
+      await qc.cancelQueries({ queryKey: ["accounts"] });
+      const previous = qc.getQueryData<Account[]>(["accounts"]);
+      qc.setQueryData(["accounts"], newOrderList);
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(["accounts"], context.previous);
+      }
+    },
+    onSettled: () => {
+      invalidateAllFinancialQueries(qc);
+    },
+  });
+
   const move = useMutation({
     mutationFn: ({ a, b }: { a: Account; b: Account }) => Promise.all([api.accounts.update(a.id, { sort_order: b.sort_order }), api.accounts.update(b.id, { sort_order: a.sort_order })]),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["accounts"] }),
+    onSuccess: () => invalidateAllFinancialQueries(qc),
   });
+
   function moveBy(index: number, delta: number) {
     const list = query.data ?? [];
     const target = index + delta;
     if (target < 0 || target >= list.length) return;
     move.mutate({ a: list[index], b: list[target] });
   }
-  function refresh() { qc.invalidateQueries({ queryKey: ["accounts"] }); qc.invalidateQueries({ queryKey: ["account-balances"] }); qc.invalidateQueries({ queryKey: ["portfolio"] }); qc.invalidateQueries({ queryKey: ["events"] }); }
-  return <Section title="Accounts" subtitle="Create, edit, or deactivate the accounts used by ledger entries. Order here also sets the order accounts appear in when recording a transaction.">
-    <div className="savings-toolbar"><button type="button" className="primary" onClick={() => setFormTarget("new")}>+ {tr("Add account")}</button></div>
+
+  function handleDrop(targetAccount: Account) {
+    if (!draggingId || draggingId === targetAccount.id) {
+      setDraggingId(null);
+      setDragOverId(null);
+      return;
+    }
+    const allAccounts = query.data ?? [];
+    const sourceIndex = allAccounts.findIndex(a => a.id === draggingId);
+    const destIndex = allAccounts.findIndex(a => a.id === targetAccount.id);
+    if (sourceIndex === -1 || destIndex === -1) {
+      setDraggingId(null);
+      setDragOverId(null);
+      return;
+    }
+
+    const reordered = [...allAccounts];
+    const [moved] = reordered.splice(sourceIndex, 1);
+    reordered.splice(destIndex, 0, moved);
+
+    setDraggingId(null);
+    setDragOverId(null);
+    reorder.mutate(reordered);
+  }
+
+  function refresh() { invalidateAllFinancialQueries(qc); }
+
+  const allAccounts = query.data ?? [];
+  const filteredAccounts = filterType === "ALL"
+    ? allAccounts
+    : allAccounts.filter(x => x.account_type === filterType);
+
+  return <section className="accounts-section">
+    <div className="accounts-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
+      <div className="accounts-toolbar-left" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        <button type="button" className="primary" onClick={() => setFormTarget("new")}>+ {tr("Add account")}</button>
+        <AccountTypeFilterDropdown
+          selected={filterType}
+          onSelect={setFilterType}
+          accounts={allAccounts}
+        />
+      </div>
+      {allAccounts.length > 1 && (
+        <div className="accounts-toolbar-hint" style={{ fontSize: "0.8rem", color: "var(--muted)", display: "flex", alignItems: "center", gap: "6px" }}>
+          <span>⠿ {language === "vi" ? "Kéo thả thẻ để sắp xếp thứ tự" : "Drag cards to reorder"}</span>
+        </div>
+      )}
+    </div>
     <Error error={query.error ?? toggle.error ?? balances.error ?? move.error} />
     <Loading show={query.isPending} />
-    <Empty show={!query.isPending && query.data?.length === 0} text="No accounts yet." />
-    <div className="cards">{query.data?.map((x, i) => {
+    <Empty show={!query.isPending && allAccounts.length === 0} text="No accounts yet." />
+    <Empty show={!query.isPending && allAccounts.length > 0 && filteredAccounts.length === 0} text="No accounts match this filter." />
+    <div className="cards">{filteredAccounts.map((x, i) => {
       const bal = balances.balances.get(x.id);
       const isCreditCard = x.account_type === "CREDIT_CARD";
       const brand = getAccountBrand(x.name, x.account_type);
       return <article
-        className={`account-card-clickable ${isCreditCard ? "account-card-credit" : "account-card-bank"} ${!x.is_active ? "inactive" : ""}`}
+        className={`account-card-clickable ${isCreditCard ? "account-card-credit" : "account-card-bank"} ${!x.is_active ? "inactive" : ""} ${draggingId === x.id ? "is-dragging" : ""} ${dragOverId === x.id ? "is-drag-over" : ""}`}
         key={x.id}
+        draggable={true}
+        onDragStart={e => {
+          e.dataTransfer.setData("text/plain", String(x.id));
+          e.dataTransfer.effectAllowed = "move";
+          setDraggingId(x.id);
+        }}
+        onDragOver={e => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          if (dragOverId !== x.id) {
+            setDragOverId(x.id);
+          }
+        }}
+        onDragLeave={() => {
+          if (dragOverId === x.id) {
+            setDragOverId(null);
+          }
+        }}
+        onDrop={e => {
+          e.preventDefault();
+          handleDrop(x);
+        }}
+        onDragEnd={() => {
+          setDraggingId(null);
+          setDragOverId(null);
+        }}
         style={{
           "--brand-color": brand.primaryColor,
           "--brand-gradient": brand.gradient,
@@ -2060,7 +5316,7 @@ function Accounts() {
           if ((e.target as HTMLElement).closest("button")) return;
           setSelectedAccountForTxns(x);
         }}
-        title="Bấm để xem toàn bộ giao dịch của tài khoản"
+        title="Bấm để xem toàn bộ giao dịch hoặc kéo thả để đổi thứ tự"
       >
         <div className="account-card-brand-bar" style={{ background: brand.gradient }} />
         <div className="account-card-header">
@@ -2073,7 +5329,19 @@ function Accounts() {
               </span>
             </div>
           </span>
-          <Status active={x.is_active} />
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <Status active={x.is_active} />
+            <span className="account-card-drag-handle" title="Kéo thả để sắp xếp thứ tự" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="8" cy="5" r="1.5" fill="currentColor" />
+                <circle cx="8" cy="12" r="1.5" fill="currentColor" />
+                <circle cx="8" cy="19" r="1.5" fill="currentColor" />
+                <circle cx="16" cy="5" r="1.5" fill="currentColor" />
+                <circle cx="16" cy="12" r="1.5" fill="currentColor" />
+                <circle cx="16" cy="19" r="1.5" fill="currentColor" />
+              </svg>
+            </span>
+          </div>
         </div>
 
         <p className="account-balance" style={{ marginTop: "4px" }}>
@@ -2096,7 +5364,8 @@ function Accounts() {
 
         <div className="card-actions" onClick={e => e.stopPropagation()}>
           <button type="button" className="text-button" aria-label={tr("Move up")} disabled={move.isPending || i === 0} onClick={() => moveBy(i, -1)}>↑</button>
-          <button type="button" className="text-button" aria-label={tr("Move down")} disabled={move.isPending || i === (query.data?.length ?? 0) - 1} onClick={() => moveBy(i, 1)}>↓</button>
+          <button type="button" className="text-button" aria-label={tr("Move down")} disabled={move.isPending || i === (allAccounts.length) - 1} onClick={() => moveBy(i, 1)}>↓</button>
+          <button type="button" className="text-button" onClick={() => setStatementAccount(x)} title="Xem & In sao kê tài khoản">{language === "vi" ? "Sao kê" : "Statement"}</button>
           <button type="button" className="text-button" onClick={() => setFormTarget(x)}>{tr("Edit")}</button>
           <button type="button" className="text-button" onClick={() => setAdjusting(x)}>{tr("Adjust balance")}</button>
           <button type="button" className="text-button" disabled={toggle.isPending} onClick={() => toggle.mutate(x)}>{tr(x.is_active ? "Deactivate" : "Activate")}</button>
@@ -2110,7 +5379,8 @@ function Accounts() {
       <AccountAdjustForm account={adjusting} currentBalance={balances.balances.get(adjusting.id) ?? "0"} onDone={() => { setAdjusting(null); refresh(); }} onCancel={() => setAdjusting(null)} />
     </Modal>}
     {selectedAccountForTxns && <AccountPeriodTransactionsModal account={selectedAccountForTxns} onClose={() => setSelectedAccountForTxns(null)} />}
-  </Section>;
+    {statementAccount && <BankStatementModal initialAccountId={statementAccount.id} onClose={() => setStatementAccount(null)} />}
+  </section>;
 }
 
 function BankPickerDropdown({
@@ -2752,20 +6022,55 @@ function IconPicker({ value, onChange, language }: { value: string | null; onCha
   </div>;
 }
 
-// User request, 2026-08-26: "hãy hiện 1 tài khoản mặc định là tài khoản lần
-// cuối ghi giao dịch" -- derives the default account for a new transaction
-// from whichever account the most-recently-recorded event actually used,
-// rather than persisting a separate "last used" value in client storage.
-// Sorting by transaction_date then id (not created-at, which the API
-// doesn't expose) means this reflects the last *entered* transaction, which
-// naturally "carries forward" after each submit since resetComposer() clears
-// the composer and the mutation invalidates ["events"], refetching this
-// list with the just-submitted transaction now included.
 function lastUsedAccountId(events: FinancialEvent[] | undefined): string {
   if (!events || events.length === 0) return "";
   const last = [...events].sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id)[0];
   const entry = last.entries[0];
   return entry ? String(entry.account_id) : "";
+}
+
+function parseFeedDateParts(ymd: string, language: Language) {
+  if (!ymd || !ymd.includes("-")) return { dayNum: ymd, relativeDay: "", monthYearLabel: "" };
+  const [y, m, d] = ymd.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  if (isNaN(date.getTime())) return { dayNum: String(d), relativeDay: "", monthYearLabel: "" };
+
+  const today = todayIso();
+  const dToday = new Date();
+  const dYesterday = new Date(dToday);
+  dYesterday.setDate(dYesterday.getDate() - 1);
+  const yesterdayStr = `${dYesterday.getFullYear()}-${pad2(dYesterday.getMonth() + 1)}-${pad2(dYesterday.getDate())}`;
+
+  const dTomorrow = new Date(dToday);
+  dTomorrow.setDate(dTomorrow.getDate() + 1);
+  const tomorrowStr = `${dTomorrow.getFullYear()}-${pad2(dTomorrow.getMonth() + 1)}-${pad2(dTomorrow.getDate())}`;
+
+  let relativeDay = "";
+  if (ymd === today) {
+    relativeDay = language === "vi" ? "Hôm nay" : "Today";
+  } else if (ymd === yesterdayStr) {
+    relativeDay = language === "vi" ? "Hôm qua" : "Yesterday";
+  } else if (ymd === tomorrowStr) {
+    relativeDay = language === "vi" ? "Ngày mai" : "Tomorrow";
+  } else {
+    if (language === "vi") {
+      const daysVi = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
+      relativeDay = daysVi[date.getDay()];
+    } else {
+      const daysEn = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      relativeDay = daysEn[date.getDay()];
+    }
+  }
+
+  let monthYearLabel = "";
+  if (language === "vi") {
+    monthYearLabel = `tháng ${m} ${y}`;
+  } else {
+    const monthsEn = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    monthYearLabel = `${monthsEn[m - 1]} ${y}`;
+  }
+
+  return { dayNum: String(d), relativeDay, monthYearLabel };
 }
 
 function Transactions() {
@@ -2783,27 +6088,14 @@ function Transactions() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [formError, setFormError] = useState("");
-  // User request, 2026-08-26: "không tính vào báo cáo đối với giao dịch
-  // nhập mới ... Cho phép chỉnh sửa giá trị này ở các menu chỉnh sửa giao
-  // dịch" -- opt-in per transaction, defaults false for a new one and is
-  // populated from the event being edited by startEdit() below.
   const [excludedFromReports, setExcludedFromReports] = useState(false);
-  // TASK-042: "thiết kế thêm tính năng xem chi tiết, chỉnh sửa, xoá giao
-  // dịch" -- editingEvent tracks which transaction (if any) the composer
-  // below is editing rather than creating; detailEvent tracks which
-  // transaction's row was clicked to view its details modal (Edit there
-  // sets editingEvent and closes the modal). Both are null in the normal
-  // "add a new transaction" state.
   const [editingEvent, setEditingEvent] = useState<FinancialEvent | null>(null);
   const [detailEvent, setDetailEvent] = useState<FinancialEvent | null>(null);
   const events = useQuery({ queryKey: ["events"], queryFn: api.events.list });
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const categories = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
   const { balances } = useAccountBalances(accounts.data);
-  // User request, 2026-08-26: default the Select-account row to the last
-  // account actually used, without ever overwriting a choice the user is
-  // already in the middle of making (guarded on the field still being
-  // empty) or an in-progress edit of an existing transaction.
+
   const firstEntryAccountId = entries[0]?.accountId;
   useEffect(() => {
     if (editingEvent) return;
@@ -2811,6 +6103,7 @@ function Transactions() {
     const defaultId = lastUsedAccountId(events.data);
     if (defaultId) setEntries(current => current.map((entry, i) => i === 0 ? { ...entry, accountId: defaultId } : entry));
   }, [events.data, editingEvent, firstEntryAccountId]);
+
   function resetComposer() {
     setEntries([{ accountId: "", amount: "" }]);
     setTransferFrom(""); setTransferTo(""); setTransferAmount("");
@@ -2818,29 +6111,25 @@ function Transactions() {
     setDate(todayIso());
     setExcludedFromReports(false);
   }
+
   const mutation = useMutation({
     mutationFn: (input: EventInput) => editingEvent ? api.events.update(editingEvent.id, input) : api.events.create(input),
     onSuccess: () => {
       resetComposer();
       setEditingEvent(null);
-      qc.invalidateQueries({ queryKey: ["events"] });
+      invalidateAllFinancialQueries(qc);
     },
   });
-  const accountNames = new Map(accounts.data?.map(x => [x.id, x.name]));
+
   const categoriesMap = new Map(categories.data?.map(c => [c.id, c]));
-  const categoryNames = new Map(categories.data?.map(x => [x.id, categoryLabel(language, x.name)]));
   const validCategories = categoriesForEventType(type, categories.data ?? []).filter(x => x.is_active);
   const activeAccounts = accounts.data?.filter(x => x.is_active) ?? [];
   const creditCardAccounts = activeAccounts.filter(x => x.account_type === "CREDIT_CARD");
   const fundingAccounts = activeAccounts.filter(x => x.account_type !== "CREDIT_CARD");
+
   function updateEntry(index: number, field: keyof EntryDraft, value: string) { setEntries(current => current.map((entry, i) => i === index ? { ...entry, [field]: value } : entry)); }
   function changeType(next: EventType) { setType(next); setFormError(""); if (!categoryIsValidForEventType(next, categoryId, categories.data ?? [])) setCategoryId(""); }
-  // TASK-042: populate the composer from an existing transaction so Edit
-  // reuses the exact same form/validation/submit path as creating one,
-  // instead of a second bespoke edit form. Only reachable for
-  // composerEventTypes (see startEdit's caller) -- TRANSFER/
-  // CREDIT_CARD_PAYMENT's two entries are told apart by sign, matching how
-  // submit() itself always books the "from"/funding leg negative.
+
   function startEdit(event: FinancialEvent) {
     setFormError("");
     setEditingEvent(event);
@@ -2860,6 +6149,7 @@ function Transactions() {
       setEntries([{ accountId: String(entry.account_id), amount: fmtMoney(entry.amount.replace(/^-/, "")) ?? "" }]);
     }
   }
+
   function cancelEdit() {
     resetComposer();
     setCategoryId("");
@@ -2868,6 +6158,7 @@ function Transactions() {
     setFormError("");
     setEditingEvent(null);
   }
+
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError("");
@@ -2875,72 +6166,76 @@ function Transactions() {
     if (type === "TRANSFER" && (!transferFrom || !transferTo || transferFrom === transferTo)) { setFormError(tr("Choose two different accounts")); return; }
     if (type === "CREDIT_CARD_PAYMENT" && (!cardAccountId || !fundingAccountId)) { setFormError(tr("Choose two different accounts")); return; }
     if (type === "EXPENSE" || type === "INCOME") {
-      // TASK-041: "ràng buộc dữ liệu cho việc nhập chi tiêu, phải đầy đủ số
-      // tiền, ngày tháng, loại chi tiêu" -- account, amount, and category
-      // were all previously optional here: an unselected account silently
-      // sent account_id: 0 (which the backend would reject as a foreign-key
-      // violation with no clean message, not a validation error), and an
-      // unselected category silently saved as uncategorized with no
-      // warning at all. Date can't be missing -- dateRow's onChange always
-      // falls back to today() -- so it needs no extra check here.
       if (!entries[0]?.accountId) { setFormError(tr("Choose an account")); return; }
       if (!entries[0]?.amount?.trim()) { setFormError(tr("Enter an amount")); return; }
-      // Only require a category when there's actually one to pick --
-      // otherwise a user with every category deactivated would be locked
-      // out of recording anything at all.
-      if (validCategories.length > 0 && !categoryIsValidForEventType(type, categoryId, categories.data ?? [])) { setFormError(tr("Choose a category")); return; }
+      if (validCategories.length > 0 && !categoryId) { setFormError(tr("Choose a category")); return; }
     }
-    const submittedEntries = type === "TRANSFER"
-      ? [{ account_id: Number(transferFrom), amount: `-${transferAmount}` }, { account_id: Number(transferTo), amount: transferAmount }]
-      : type === "CREDIT_CARD_PAYMENT"
-      ? [{ account_id: Number(fundingAccountId), amount: `-${paymentAmount}` }, { account_id: Number(cardAccountId), amount: paymentAmount }]
-      // BUGFIX (reported: recording an EXPENSE from a ZaloPay e-wallet
-      // added to the balance instead of subtracting): the backend's
-      // ledger service trusts the caller's signed amount as-is (see
-      // app/services/ledger.py -- it never flips signs itself), and this
-      // single-entry EXPENSE/INCOME path used to send the amount the user
-      // typed completely unsigned. The Expense/Income segmented control
-      // above is now the sole source of sign -- any "-" the user might
-      // still type is stripped first so it can't double-negate -- exactly
-      // mirroring how app/services/moneylover_normalize.py already signs
-      // amounts for the Money Lover import path.
-      : entries.map(entry => {
-          const magnitude = entry.amount.trim().replace(/^-/, "");
-          return { account_id: Number(entry.accountId), amount: type === "EXPENSE" ? negateMoney(magnitude) : magnitude };
-        });
-    mutation.mutate({ event_type: type, transaction_date: date, category_id: categoryIsValidForEventType(type, categoryId, categories.data ?? []) ? Number(categoryId) : null, payee_text: String(f.get("payee") ?? "").trim() || undefined, trip_event_text: String(f.get("trip") ?? "").trim() || undefined, note: String(f.get("note") ?? "").trim() || undefined, excluded_from_reports: excludedFromReports, entries: submittedEntries });
+    const payeeText = f.get("payee")?.toString().trim() || undefined;
+    const tripText = f.get("trip")?.toString().trim() || undefined;
+    const noteText = f.get("note")?.toString().trim() || undefined;
+    if (type === "TRANSFER") {
+      const amt = transferAmount.trim();
+      mutation.mutate({
+        event_type: "TRANSFER",
+        transaction_date: date,
+        payee_text: payeeText,
+        trip_event_text: tripText,
+        note: noteText,
+        excluded_from_reports: excludedFromReports,
+        entries: [{ account_id: Number(transferFrom), amount: `-${amt}` }, { account_id: Number(transferTo), amount: amt }],
+      });
+      return;
+    }
+    if (type === "CREDIT_CARD_PAYMENT") {
+      const amt = paymentAmount.trim();
+      mutation.mutate({
+        event_type: "CREDIT_CARD_PAYMENT",
+        transaction_date: date,
+        payee_text: payeeText,
+        trip_event_text: tripText,
+        note: noteText,
+        excluded_from_reports: excludedFromReports,
+        entries: [{ account_id: Number(fundingAccountId), amount: `-${amt}` }, { account_id: Number(cardAccountId), amount: amt }],
+      });
+      return;
+    }
+    const signedEntries = entries.map(e => ({ account_id: Number(e.accountId), amount: type === "EXPENSE" ? `-${e.amount.trim()}` : e.amount.trim() }));
+    mutation.mutate({
+      event_type: type,
+      transaction_date: date,
+      category_id: categoryId ? Number(categoryId) : undefined,
+      payee_text: payeeText,
+      trip_event_text: tripText,
+      note: noteText,
+      excluded_from_reports: excludedFromReports,
+      entries: signedEntries,
+    });
   }
-  const amountCurrency = (type === "TRANSFER" ? activeAccounts.find(a => String(a.id) === transferFrom)
-    : type === "CREDIT_CARD_PAYMENT" ? activeAccounts.find(a => String(a.id) === fundingAccountId)
-    : activeAccounts.find(a => String(a.id) === entries[0]?.accountId))?.currency ?? "VND";
-  const dateRow = <DateRow value={date} onChange={setDate} language={language} />;
-  {/* TASK-037: 26px matches AccountLogo/CategoryIcon in the other .row-icon slots below (32px container, ~26px content) so every composer row reads at the same visual weight. */}
-  const noteRow = <div className="note-row"><span className="row-icon" aria-hidden="true"><IconGlyph iconKey="Notebook" size={26} /></span><input name="note" placeholder={tr("Add a note")} defaultValue={editingEvent?.note ?? ""} className="note-input" /></div>;
-  // User request, 2026-08-26 (UI redesign): "Đưa danh sách các giao dịch
-  // sang góc bên phải, chỉ đưa 20 giao dịch gần nhất theo thời gian hoặc
-  // các giao dịch tương lai nếu có" -- the old full-width table of every
-  // transaction is gone from this page (the new "Sổ giao dịch"/Ledger page
-  // is where the full, filterable history now lives); this page's right
-  // column instead shows a short recency-ranked slice: if any transaction
-  // is dated after today, those future transactions are shown (soonest
-  // first) instead of history, otherwise the 20 most recent past/today
-  // transactions are shown (most recent first).
+
+  const amountCurrency = activeAccounts.find(x => String(x.id) === (type === "TRANSFER" ? transferFrom : type === "CREDIT_CARD_PAYMENT" ? fundingAccountId : entries[0]?.accountId))?.currency ?? "VND";
+  const noteRow = <Field label="Note"><input name="note" defaultValue={editingEvent?.note ?? ""} placeholder={tr("Optional note")} /></Field>;
+  const dateRow = <Field label="Date"><input type="date" aria-label={tr("Date")} value={date} onChange={e => setDate(e.target.value || todayIso())} onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }} style={{ cursor: "pointer" }} required /></Field>;
+
   const todayStr = todayIso();
   const allEvents = events.data ?? [];
   const futureEvents = allEvents.filter(x => x.transaction_date > todayStr).sort((a, b) => a.transaction_date < b.transaction_date ? -1 : a.transaction_date > b.transaction_date ? 1 : a.id - b.id);
   const recentEvents = futureEvents.length > 0
-    ? futureEvents.slice(0, 20)
-    : [...allEvents].sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id).slice(0, 20);
-  const showingFuture = futureEvents.length > 0;
+    ? futureEvents.slice(0, 30)
+    : [...allEvents].sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id).slice(0, 40);
+
+  const groupedRecent = useMemo(() => {
+    const map = new Map<string, FinancialEvent[]>();
+    for (const ev of recentEvents) {
+      const list = map.get(ev.transaction_date) ?? [];
+      list.push(ev);
+      map.set(ev.transaction_date, list);
+    }
+    return map;
+  }, [recentEvents]);
+
   return <section className="transactions-page">
     <div className="transactions-layout">
       <div className="transactions-composer-col">
-        {/* TASK-042: keying the form on the edit target forces React to remount
-            it (and its uncontrolled payee/trip/note inputs) whenever editingEvent
-            changes -- from null to an event when Edit is clicked, between two
-            different events, or back to null on cancel/save -- so those
-            inputs' defaultValue is re-applied instead of sticking to whatever
-            was typed for the previously-edited transaction. */}
         <form onSubmit={submit} className="event-form composer" key={editingEvent ? `edit-${editingEvent.id}` : "new"}>
           {editingEvent && <p className="hint editing-banner" role="status">{tr("Editing transaction")} #{editingEvent.id} · <button type="button" className="text-button" onClick={cancelEdit}>{tr("Cancel")}</button></p>}
           <div className="type-row"><div className="segmented" role="group" aria-label={tr("Type")}>{composerEventTypes.map(x => <button type="button" className={type === x ? "active" : ""} onClick={() => changeType(x)} key={x}>{label(x)}</button>)}</div></div>
@@ -2969,7 +6264,14 @@ function Transactions() {
           </div>
           <button type="button" className="secondary details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => !open)}>{detailsOpen ? tr("Hide details") : `+ ${tr("Add details")}`}</button>
           {detailsOpen && <div className="form event-details">
-            <Field label="Payee"><input name="payee" defaultValue={editingEvent?.payee_text ?? ""} /></Field>
+            <Field label="Payee">
+              <input name="payee" list="expense-payee-options-main" defaultValue={editingEvent?.payee_text ?? ""} placeholder={language === "vi" ? "Chọn hoặc nhập đối tượng..." : "Select or type payee..."} />
+              <datalist id="expense-payee-options-main">
+                {getLevel1ExpenseCategories(categories.data ?? []).map(c => (
+                  <option key={c.id} value={categoryLabel(language, c.name)} />
+                ))}
+              </datalist>
+            </Field>
             <Field label="Trip / event"><input name="trip" defaultValue={editingEvent?.trip_event_text ?? ""} /></Field>
             <label className="checkbox-row">
               <input type="checkbox" checked={excludedFromReports} onChange={e => setExcludedFromReports(e.target.checked)} />
@@ -2977,35 +6279,134 @@ function Transactions() {
             </label>
             <p className="hint">{tr("This transaction won't be counted in income/expense summary reports.")}</p>
           </div>}
-          <div className="form-actions"><Submit pending={mutation.isPending} text={editingEvent ? "Save changes" : "Record transaction"} />{editingEvent && <button type="button" className="secondary" onClick={cancelEdit}>{tr("Cancel")}</button>}</div>
+          <div className="form-actions composer-actions">
+            <Submit
+              pending={mutation.isPending}
+              text={editingEvent ? "Save changes" : "Record transaction"}
+              className="composer-submit-btn"
+            />
+            {editingEvent && (
+              <button
+                type="button"
+                className="secondary composer-cancel-btn"
+                onClick={cancelEdit}
+              >
+                {tr("Cancel")}
+              </button>
+            )}
+          </div>
         </form>
         <Error error={events.error ?? accounts.error ?? categories.error ?? mutation.error} />
       </div>
+
       <aside className="transactions-recent-col">
-        <div className="panel recent-panel">
-          <h3>{showingFuture ? tr("Future") : tr("Transactions")}</h3>
-          <Loading show={events.isPending} />
-          <Empty show={!events.isPending && recentEvents.length === 0} text="No transactions yet." />
-          {/* TASK-042: same click-to-open-details behavior as the old full
-              table, just in a compact recency-ranked list instead of every
-              row -- tabIndex + onKeyDown keep it keyboard-reachable. */}
-          <div className="recent-list">{recentEvents.map(x => {
-            const parentCategoryName = (() => {
-              if (!x.category_id) return undefined;
-              const cat = categoriesMap.get(x.category_id);
-              if (!cat?.parent_id) return undefined;
-              const parent = categoriesMap.get(cat.parent_id);
-              if (!parent || parent.parent_id == null || parent.name === "Expenses" || parent.name === "Income") return undefined;
-              return categoryLabel(language, parent.name);
-            })();
-            const noteOrDetail = x.payee_text ?? x.trip_event_text ?? x.note;
-            const subtitle = parentCategoryName ? (noteOrDetail ? `${parentCategoryName} · ${noteOrDetail}` : parentCategoryName) : noteOrDetail;
-            return <div className="recent-row" tabIndex={0} key={x.id} onClick={() => setDetailEvent(x)} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailEvent(x); } }}>
-              <div className="recent-row-main"><span className="event-type">{label(x.event_type)}{x.category_id && <small> · {categoryNames.get(x.category_id) ?? `${tr("Category")} #${x.category_id}`}</small>}{x.excluded_from_reports && <span className="badge muted" title={tr("This transaction won't be counted in income/expense summary reports.")}>{tr("Excluded from reports")}</span>}</span><small>{x.transaction_date}</small></div>
-              {subtitle && <div className="recent-row-detail"><small>{subtitle}</small></div>}
-              <div className="recent-row-entries">{x.entries.map(e => <span className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</span>)}</div>
-            </div>;
-          })}</div>
+        <Loading show={events.isPending} />
+        <Empty show={!events.isPending && recentEvents.length === 0} text="No transactions yet." />
+
+        <div className="transactions-feed-col">
+          {[...groupedRecent.entries()].map(([dateIso, dayEvents]) => {
+            const { dayNum, relativeDay, monthYearLabel } = parseFeedDateParts(dateIso, language);
+
+            let dayTotal = 0;
+            for (const ev of dayEvents) {
+              if (ev.event_type === "EXPENSE") {
+                const amt = Math.abs(Number(ev.entries[0]?.amount ?? 0));
+                dayTotal -= amt;
+              } else if (ev.event_type === "INCOME") {
+                const amt = Math.abs(Number(ev.entries[0]?.amount ?? 0));
+                dayTotal += amt;
+              } else if (ev.event_type === "TRANSFER" || ev.event_type === "CREDIT_CARD_PAYMENT") {
+                const neg = ev.entries.find(e => e.amount.startsWith("-"));
+                const amt = neg ? Math.abs(Number(neg.amount)) : Math.abs(Number(ev.entries[0]?.amount ?? 0));
+                dayTotal -= amt;
+              } else {
+                const amt = Number(ev.entries[0]?.amount ?? 0);
+                dayTotal += amt;
+              }
+            }
+
+            const dayTotalFormatted = dayTotal < 0
+              ? `-${Math.abs(dayTotal).toLocaleString("vi-VN")}`
+              : dayTotal > 0
+              ? `+${dayTotal.toLocaleString("vi-VN")}`
+              : "0";
+
+            return (
+              <div className="transactions-date-card" key={dateIso}>
+                <div className="transactions-date-header">
+                  <div className="transactions-date-left">
+                    <span className="transactions-date-num">{dayNum}</span>
+                    <div className="transactions-date-sub">
+                      <span className="transactions-date-relative">{relativeDay}</span>
+                      <span className="transactions-date-month">{monthYearLabel}</span>
+                    </div>
+                  </div>
+                  <span className="transactions-date-total">{dayTotalFormatted}</span>
+                </div>
+
+                <div className="transactions-items-list">
+                  {dayEvents.map(x => {
+                    const cat = x.category_id ? categoriesMap.get(x.category_id) : null;
+                    const isTransfer = x.event_type === "TRANSFER" || x.event_type === "CREDIT_CARD_PAYMENT";
+                    const isIncome = x.event_type === "INCOME";
+
+                    let itemTitle = "";
+                    if (isTransfer) {
+                      const isOutflow = Number(x.entries[0]?.amount ?? 0) < 0 || x.entries.some(e => e.amount.startsWith("-"));
+                      itemTitle = isOutflow ? (language === "vi" ? "Tiền chuyển đi" : "Transfer out") : (language === "vi" ? "Tiền chuyển đến" : "Transfer in");
+                    } else if (cat) {
+                      itemTitle = categoryLabel(language, cat.name);
+                    } else {
+                      itemTitle = label(x.event_type);
+                    }
+
+                    const noteOrDetail = x.note ?? x.payee_text ?? x.trip_event_text ?? "";
+                    const subtitle = noteOrDetail && noteOrDetail !== itemTitle ? noteOrDetail : "";
+
+                    let primaryAmount = 0;
+                    if (isTransfer) {
+                      const neg = x.entries.find(e => e.amount.startsWith("-"));
+                      const pos = x.entries.find(e => !e.amount.startsWith("-"));
+                      primaryAmount = neg ? Math.abs(Number(neg.amount)) : (pos ? Math.abs(Number(pos.amount)) : Math.abs(Number(x.entries[0]?.amount ?? 0)));
+                    } else {
+                      primaryAmount = Math.abs(Number(x.entries[0]?.amount ?? 0));
+                    }
+
+                    const isRed = !isIncome;
+
+                    return (
+                      <div
+                        className="transaction-feed-item"
+                        tabIndex={0}
+                        key={x.id}
+                        onClick={() => setDetailEvent(x)}
+                        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailEvent(x); } }}
+                      >
+                        <div className="transaction-feed-left">
+                          <CategoryIconBadge
+                            name={cat?.name ?? (isTransfer ? "Wallet" : isIncome ? "MoneyBag" : "Receipt")}
+                            icon={cat?.icon}
+                            size={42}
+                            iconSize={22}
+                          />
+                          <div className="transaction-feed-text">
+                            <span className="transaction-feed-title">{itemTitle}</span>
+                            {subtitle && <span className="transaction-feed-sub">{subtitle}</span>}
+                          </div>
+                        </div>
+                        <span
+                          className="transaction-feed-amount"
+                          style={{ color: isRed ? "#e05252" : "#10b981" }}
+                        >
+                          {primaryAmount.toLocaleString("vi-VN")}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </aside>
     </div>
@@ -3036,7 +6437,7 @@ function TransactionDetailModal({ event, accounts, categories, language, onClose
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const remove = useMutation({
     mutationFn: () => api.events.remove(event.id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["events"] }); onClose(); },
+    onSuccess: () => { invalidateAllFinancialQueries(qc); onClose(); },
   });
   const editable = composerEventTypes.includes(event.event_type);
   const category = categories.find(c => c.id === event.category_id);
@@ -3101,13 +6502,18 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, editingEve
   const initial = editingEvent;
   const isTransferLike = !!initial && (initial.event_type === "TRANSFER" || initial.event_type === "CREDIT_CARD_PAYMENT");
   const initialTransfer = initial && isTransferLike ? splitTransferEntries(initial) : null;
-  const [type, setType] = useState<EventType>(initial && composerEventTypes.includes(initial.event_type) ? initial.event_type : "EXPENSE");
+  const [type, setType] = useState<EventType>(() => {
+    if (!initial) return "EXPENSE";
+    if (composerEventTypes.includes(initial.event_type)) return initial.event_type;
+    const firstAmount = Number(initial.entries[0]?.amount ?? 0);
+    return firstAmount > 0 ? "INCOME" : "EXPENSE";
+  });
   const [categoryId, setCategoryId] = useState(initial?.category_id != null ? String(initial.category_id) : "");
   const [date, setDate] = useState(() => initial ? initial.transaction_date : todayIso());
   const [entries, setEntries] = useState<EntryDraft[]>(() => {
     if (initial && !isTransferLike) {
       const entry = initial.entries[0];
-      return [{ accountId: String(entry.account_id), amount: fmtMoney(entry.amount.replace(/^-/, "")) ?? "" }];
+      return [{ accountId: String(entry?.account_id ?? defaultAccountId), amount: fmtMoney(entry?.amount?.replace(/^-/, "") ?? "") ?? "" }];
     }
     return [{ accountId: String(defaultAccountId), amount: "" }];
   });
@@ -3186,7 +6592,14 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, editingEve
     </div>
     <button type="button" className="secondary details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => !open)}>{detailsOpen ? tr("Hide details") : `+ ${tr("Add details")}`}</button>
     {detailsOpen && <div className="form event-details">
-      <Field label="Payee"><input name="payee" defaultValue={initial?.payee_text ?? ""} /></Field>
+      <Field label="Payee">
+        <input name="payee" list="expense-payee-options-ledger" defaultValue={initial?.payee_text ?? ""} placeholder={language === "vi" ? "Chọn hoặc nhập đối tượng..." : "Select or type payee..."} />
+        <datalist id="expense-payee-options-ledger">
+          {getLevel1ExpenseCategories(categories).map(c => (
+            <option key={c.id} value={categoryLabel(language, c.name)} />
+          ))}
+        </datalist>
+      </Field>
       <Field label="Trip / event"><input name="trip" defaultValue={initial?.trip_event_text ?? ""} /></Field>
       <label className="checkbox-row">
         <input type="checkbox" checked={excludedFromReports} onChange={e => setExcludedFromReports(e.target.checked)} />
@@ -3199,37 +6612,280 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, editingEve
   </form>;
 }
 
+function formatShortDayLabel(language: Language, iso: string): string {
+  const today = todayIso();
+  const yesterday = shiftIsoDate(today, -1);
+  if (iso === today) {
+    return language === "vi" ? "Hôm nay" : "Today";
+  }
+  if (iso === yesterday) {
+    return language === "vi" ? "Hôm qua" : "Yesterday";
+  }
+  const parts = iso.split("-");
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}`;
+  }
+  return iso;
+}
+
+function formatLongDate(language: Language, ymd: string): string {
+  if (!ymd || !ymd.includes("-")) return ymd;
+  const [y, m, d] = ymd.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  if (isNaN(date.getTime())) return ymd;
+
+  if (language === "vi") {
+    const daysVi = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
+    const dayOfWeek = daysVi[date.getDay()];
+    return `${dayOfWeek}, ${d} tháng ${m} ${y}`;
+  } else {
+    const daysEn = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const monthsEn = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const dayOfWeek = daysEn[date.getDay()];
+    const monthName = monthsEn[m - 1];
+    return `${dayOfWeek}, ${monthName} ${d}, ${y}`;
+  }
+}
+
 function LedgerDetailPanel({ event, accountNames, categories, language, onEdit, onDeleted }: {
   event: FinancialEvent; accountNames: Map<number, string>; categories: Category[]; language: Language; onEdit: () => void; onDeleted: () => void;
 }) {
   const { label, tr } = useI18n();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const remove = useMutation({ mutationFn: () => api.events.remove(event.id), onSuccess: onDeleted });
-  const editable = composerEventTypes.includes(event.event_type);
   const category = categories.find(c => c.id === event.category_id);
-  return <div className="ledger-detail-panel">
-    <h3>{tr("Transaction details")}</h3>
-    <dl className="detail-grid">
-      <div><dt>{tr("Date")}</dt><dd>{formatIsoDateLabel(language, event.transaction_date)}</dd></div>
-      <div><dt>{tr("Type")}</dt><dd>{label(event.event_type)}</dd></div>
-      {category && <div><dt>{tr("Category")}</dt><dd>{categoryPath(category, categories, n => categoryLabel(language, n))}</dd></div>}
-      {event.payee_text && <div><dt>{tr("Payee")}</dt><dd>{event.payee_text}</dd></div>}
-      {event.trip_event_text && <div><dt>{tr("Trip / event")}</dt><dd>{event.trip_event_text}</dd></div>}
-      {event.note && <div><dt>{tr("Note")}</dt><dd>{event.note}</dd></div>}
-      {event.excluded_from_reports && <div><dt>{tr("Exclude from reports")}</dt><dd>{tr("Excluded from reports")}</dd></div>}
-    </dl>
-    <div className="detail-entries">{event.entries.map(e => <div className="entry" key={e.id}><b>{fmtMoneyDisplay(e.amount)}</b> · {accountNames.get(e.account_id) ?? `${tr("Account")} #${e.account_id}`}</div>)}</div>
-    <Error error={remove.error} />
-    {editable ? <div className="form-actions">
-      <button type="button" className="text-button" onClick={onEdit}>{tr("Edit")}</button>
-      {!confirmingDelete
-        ? <button type="button" className="text-button danger" onClick={() => setConfirmingDelete(true)}>{tr("Delete")}</button>
-        : <>
-          <button type="button" className="text-button danger" disabled={remove.isPending} onClick={() => remove.mutate()}>{remove.isPending ? tr("Deleting...") : tr("Confirm delete")}</button>
-          <button type="button" className="text-button" onClick={() => setConfirmingDelete(false)}>{tr("Cancel")}</button>
-        </>}
-    </div> : <p className="hint">{tr("This transaction type is managed on its own page and can't be edited or deleted here.")}</p>}
-  </div>;
+
+  // Compute entry or total amount
+  const primaryAmountStr = event.entries[0]?.amount ?? "0";
+  const numAmount = Number(primaryAmountStr);
+  const isExpense = numAmount < 0 || event.event_type === "EXPENSE";
+  const isIncome = numAmount > 0 && event.event_type === "INCOME";
+  const absAmountStr = primaryAmountStr.startsWith("-") ? primaryAmountStr.slice(1) : primaryAmountStr;
+  const formattedAmount = fmtMoneyDisplay(absAmountStr) ?? absAmountStr;
+
+  // Title / Category display
+  const titleText = category
+    ? categoryLabel(language, category.name)
+    : (event.event_type === "TRANSFER"
+        ? tr("Transfer")
+        : event.event_type === "CREDIT_CARD_PAYMENT"
+        ? tr("Credit card payment")
+        : label(event.event_type));
+
+  const formattedDate = formatLongDate(language, event.transaction_date);
+  const isTransferType = event.event_type === "TRANSFER" || event.event_type === "CREDIT_CARD_PAYMENT";
+  const split = isTransferType ? splitTransferEntries(event) : null;
+  const primaryAccountName = event.entries[0] ? (accountNames.get(event.entries[0].account_id) ?? `${tr("Account")} #${event.entries[0].account_id}`) : "";
+
+  return (
+    <div className="ledger-detail-panel" style={{ padding: "20px 22px", borderRadius: "18px", background: "var(--card)", border: "1px solid var(--line)" }}>
+      {/* 1. Header: Icon + Category Name + Large Amount */}
+      <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+        <CategoryIconBadge
+          name={category?.name ?? (isTransferType ? "Wallet" : isIncome ? "MoneyBag" : "Receipt")}
+          icon={category?.icon}
+          size={52}
+          iconSize={26}
+        />
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: 0, flex: 1 }}>
+          <span style={{ fontSize: "1.25rem", fontWeight: 600, color: "var(--text)", lineHeight: 1.25, wordBreak: "break-word" }}>
+            {titleText}
+          </span>
+          <span
+            style={{
+              fontSize: "2.1rem",
+              fontWeight: 500,
+              color: isExpense ? "#ef4444" : isIncome ? "#10b981" : "var(--text)",
+              lineHeight: 1.15,
+              fontVariantNumeric: "tabular-nums",
+              letterSpacing: "-0.02em"
+            }}
+          >
+            {formattedAmount}
+          </span>
+        </div>
+      </div>
+
+      {/* 2. Divider */}
+      <div style={{ height: "1px", background: "var(--line)", margin: "16px 0" }} />
+
+      {/* 3. Detail Info Rows */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+        {/* Row 1: Ngày */}
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center", flexShrink: 0 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text)" }}>
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+              <circle cx="8" cy="14" r="0.75" fill="currentColor" />
+              <circle cx="12" cy="14" r="0.75" fill="currentColor" />
+              <circle cx="16" cy="14" r="0.75" fill="currentColor" />
+              <circle cx="8" cy="18" r="0.75" fill="currentColor" />
+              <circle cx="12" cy="18" r="0.75" fill="currentColor" />
+              <circle cx="16" cy="18" r="0.75" fill="currentColor" />
+            </svg>
+          </div>
+          <span style={{ fontSize: "0.95rem", color: "var(--text)", fontWeight: 500 }}>
+            {formattedDate}
+          </span>
+        </div>
+
+        {/* Row 2: Tài khoản / Ví */}
+        {isTransferType && split ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center", flexShrink: 0 }}>
+              <AccountLogo name={accountNames.get(split.negEntry.account_id) ?? ""} size={22} />
+            </div>
+            <span style={{ fontSize: "0.95rem", color: "var(--text)", fontWeight: 500 }}>
+              {accountNames.get(split.negEntry.account_id) ?? "—"} → {accountNames.get(split.posEntry.account_id) ?? "—"}
+            </span>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center", flexShrink: 0 }}>
+              <AccountLogo name={primaryAccountName} size={22} />
+            </div>
+            <span style={{ fontSize: "0.95rem", color: "var(--text)", fontWeight: 500 }}>
+              {primaryAccountName}
+            </span>
+          </div>
+        )}
+
+        {/* Row 3: Ghi chú (nếu có) */}
+        {event.note && (
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center", flexShrink: 0 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--muted)" }}>
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </div>
+            <span style={{ fontSize: "0.92rem", color: "var(--muted)", fontStyle: "italic" }}>
+              {event.note}
+            </span>
+          </div>
+        )}
+
+        {/* Row 4: Người nhận / Người chi (nếu có) */}
+        {event.payee_text && (
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center", flexShrink: 0 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--muted)" }}>
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+            </div>
+            <span style={{ fontSize: "0.92rem", color: "var(--text)" }}>
+              {event.payee_text}
+            </span>
+          </div>
+        )}
+
+        {/* Row 5: Sự kiện / Chuyến đi (nếu có) */}
+        {event.trip_event_text && (
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center", flexShrink: 0 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--muted)" }}>
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                <line x1="7" y1="7" x2="7.01" y2="7" />
+              </svg>
+            </div>
+            <span style={{ fontSize: "0.92rem", color: "var(--text)" }}>
+              {event.trip_event_text}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <Error error={remove.error} />
+
+      {/* 4. Form Actions: Chỉnh sửa / Xoá */}
+      <div className="form-actions" style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+        <button type="button" className="text-button" onClick={onEdit}>{tr("Edit")}</button>
+        {!confirmingDelete ? (
+          <button type="button" className="text-button danger" onClick={() => setConfirmingDelete(true)}>{tr("Delete")}</button>
+        ) : (
+          <>
+            <button type="button" className="text-button danger" disabled={remove.isPending} onClick={() => remove.mutate()}>
+              {remove.isPending ? tr("Deleting...") : tr("Confirm delete")}
+            </button>
+            <button type="button" className="text-button" onClick={() => setConfirmingDelete(false)}>
+              {tr("Cancel")}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function getWeek1Monday(year: number): Date {
+  // Jan 2 of year
+  const jan2 = new Date(year, 0, 2);
+  const day = jan2.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  let firstWorkDay: Date;
+  if (day >= 1 && day <= 5) {
+    firstWorkDay = jan2;
+  } else if (day === 6) {
+    // Saturday -> Jan 4 (Mon)
+    firstWorkDay = new Date(year, 0, 4);
+  } else {
+    // Sunday -> Jan 3 (Mon)
+    firstWorkDay = new Date(year, 0, 3);
+  }
+  const fDay = firstWorkDay.getDay();
+  const diffToMonday = fDay === 0 ? -6 : 1 - fDay;
+  const monday = new Date(firstWorkDay);
+  monday.setDate(monday.getDate() + diffToMonday);
+  return monday;
+}
+
+function getYearWeeks(year: number, language: Language) {
+  const week1Mon = getWeek1Monday(year);
+  const nextYearWeek1Mon = getWeek1Monday(year + 1);
+
+  const weeks: { index: number; start: string; end: string; label: string; month: number }[] = [];
+  const curr = new Date(week1Mon);
+  let weekIdx = 1;
+
+  while (curr < nextYearWeek1Mon) {
+    const startIso = formatYmd(curr);
+    const end = new Date(curr);
+    end.setDate(end.getDate() + 6);
+    const endIso = formatYmd(end);
+
+    const [, sm, sd] = startIso.split("-");
+    const [, em, ed] = endIso.split("-");
+
+    const label = language === "vi"
+      ? `Tuần ${weekIdx} (từ ${sd}/${sm} đến ${ed}/${em})`
+      : `Week ${weekIdx} (${sd}/${sm} - ${ed}/${em})`;
+
+    const midDay = new Date(curr);
+    midDay.setDate(midDay.getDate() + 3);
+    const midMonth = midDay.getMonth() + 1;
+
+    weeks.push({
+      index: weekIdx,
+      start: startIso,
+      end: endIso,
+      label,
+      month: midMonth,
+    });
+
+    curr.setDate(curr.getDate() + 7);
+    weekIdx++;
+  }
+  return weeks;
 }
 
 /** User request, 2026-08-26 (UI redesign): the new "Sổ giao dịch" page --
@@ -3252,40 +6908,63 @@ function Ledger() {
   const activeAccounts = (accountsQ.data ?? []).filter(a => a.is_active);
   const { balances } = useAccountBalances(activeAccounts);
   const [selectedAccountId, setSelectedAccountId] = useState<number | "ALL" | null>(null);
+  const [timeScope, setTimeScope] = useState<"ALL" | "YEAR" | "QUARTER" | "MONTH" | "WEEK" | "DAY" | "CUSTOM">("MONTH");
+  const [selectedYear, setSelectedYear] = useState<string>(() => String(new Date().getFullYear()));
+  const [selectedQuarter, setSelectedQuarter] = useState<number>(() => Math.floor(new Date().getMonth() / 3) + 1);
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayIso());
+  const [dayWindowOffset, setDayWindowOffset] = useState<number>(0);
+  const [customStartDate, setCustomStartDate] = useState<string>(() => `${new Date().getFullYear()}-01-01`);
+  const [customEndDate, setCustomEndDate] = useState<string>(() => todayIso());
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
+  const [selectedWeekYear, setSelectedWeekYear] = useState<number>(() => new Date().getFullYear());
+  const [selectedWeekMonth, setSelectedWeekMonth] = useState<number>(() => new Date().getMonth() + 1);
+  const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(null);
+  const [selectedWeekEnd, setSelectedWeekEnd] = useState<string | null>(null);
   const [detailEventId, setDetailEventId] = useState<number | null>(null);
   const [composerOpen, setComposerOpen] = useState<"new" | "edit" | null>(null);
   const [selectedEventIds, setSelectedEventIds] = useState<Set<number>>(new Set());
   const [confirmModal, setConfirmModal] = useState<"bulk" | "all" | null>(null);
+  const [includeAssetEvents, setIncludeAssetEvents] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
-  // User answer (AskUserQuestion, 2026-08-26): default selected account =
-  // "Tài khoản đầu tiên theo thứ tự sắp xếp hiện có (giống trang Tài
-  // khoản)" -- accounts.list() is already returned in sort_order (see
-  // Accounts(), which renders query.data in API order with no client
-  // sort), so the first active account in that order is the default.
+  const activeMonthBtnRef = useRef<HTMLButtonElement>(null);
+  const weekScrollRef = useRef<HTMLDivElement>(null);
+  const activeWeekBtnRef = useRef<HTMLButtonElement>(null);
+
+  const mostRecentAccountId = useMemo(() => {
+    if (!eventsQ.data || eventsQ.data.length === 0 || activeAccounts.length === 0) {
+      return activeAccounts[0]?.id;
+    }
+    const sorted = [...eventsQ.data].sort((a, b) => {
+      if (a.transaction_date !== b.transaction_date) {
+        return b.transaction_date.localeCompare(a.transaction_date);
+      }
+      return b.id - a.id;
+    });
+    for (const ev of sorted) {
+      for (const entry of ev.entries) {
+        if (activeAccounts.some(acc => acc.id === entry.account_id)) {
+          return entry.account_id;
+        }
+      }
+    }
+    return activeAccounts[0]?.id;
+  }, [eventsQ.data, activeAccounts]);
+
   useEffect(() => {
-    if (selectedAccountId == null && activeAccounts.length > 0) setSelectedAccountId(activeAccounts[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAccounts.length, selectedAccountId]);
+    if (selectedAccountId == null && mostRecentAccountId != null) {
+      setSelectedAccountId(mostRecentAccountId);
+    }
+  }, [mostRecentAccountId, selectedAccountId]);
 
   const isAllAccounts = selectedAccountId === "ALL";
 
-  const balanceQ = useQuery({
-    queryKey: ["account-balance", selectedAccountId],
-    queryFn: () => api.accounts.balance(selectedAccountId as number),
-    enabled: typeof selectedAccountId === "number",
-  });
-
-  const allAccountsBalance = sumMoney(Array.from(balances.values()));
-  const currentBalance = isAllAccounts ? allAccountsBalance : balanceQ.data?.balance;
-
-  const accountEvents = selectedAccountId == null
-    ? []
-    : isAllAccounts
-    ? (eventsQ.data ?? [])
-    : (eventsQ.data ?? []).filter(e => e.entries.some(en => en.account_id === selectedAccountId));
+  const accountEvents = useMemo(() => {
+    if (selectedAccountId == null) return [];
+    if (isAllAccounts) return eventsQ.data ?? [];
+    return (eventsQ.data ?? []).filter(e => e.entries.some(en => en.account_id === selectedAccountId));
+  }, [selectedAccountId, isAllAccounts, eventsQ.data]);
 
   function entryAmountFor(event: FinancialEvent): string {
     if (isAllAccounts) {
@@ -3302,54 +6981,220 @@ function Ledger() {
   const todayStr = todayIso();
   const hasFuture = accountEvents.some(e => e.transaction_date > todayStr);
   const currentMonthKey = todayStr.slice(0, 7);
+
   const pastEvents = accountEvents.filter(e => e.transaction_date <= todayStr);
-  const earliestMonthKey = pastEvents.length > 0
+  const minTxMonth = pastEvents.length > 0
     ? pastEvents.reduce((min, e) => e.transaction_date.slice(0, 7) < min ? e.transaction_date.slice(0, 7) : min, currentMonthKey)
     : currentMonthKey;
+  const defaultMinMonth = `${Number(currentMonthKey.slice(0, 4)) - 1}-01`;
+  const earliestMonthKey = minTxMonth < defaultMinMonth ? minTxMonth : defaultMinMonth;
 
-  function shiftMonthKey(key: string, delta: number): string {
-    const [y, m] = key.split("-").map(Number);
-    const total = (m - 1) + delta;
-    const year = y + Math.floor(total / 12);
-    const month = ((total % 12) + 12) % 12;
-    return `${year}-${String(month + 1).padStart(2, "0")}`;
-  }
-  // User answer (AskUserQuestion, 2026-08-26): "Danh sách tháng cuộn ngang,
-  // tự sinh từ tháng có giao dịch sớm nhất tới nay" -- guard bounds the
-  // generation loop against a corrupt/garbage transaction_date ever
-  // causing it to run away; any real account's history is far short of
-  // 1200 months.
-  const months: string[] = [];
-  for (let key = earliestMonthKey, guard = 0; key <= currentMonthKey && guard < 1200; key = shiftMonthKey(key, 1), guard++) {
-    months.push(key);
-  }
+  const allMonths: string[] = useMemo(() => {
+    const list: string[] = [];
+    for (let key = earliestMonthKey, guard = 0; key <= currentMonthKey && guard < 1200; key = shiftMonthKey(key, 1), guard++) {
+      list.push(key);
+    }
+    if (hasFuture) {
+      list.push("FUTURE");
+    }
+    return list;
+  }, [earliestMonthKey, currentMonthKey, hasFuture]);
+
+  const [monthWindowStartIndex, setMonthWindowStartIndex] = useState<number>(() => {
+    return Math.max(0, allMonths.indexOf(currentMonthKey) - 2);
+  });
+
+  useEffect(() => {
+    const idx = allMonths.indexOf(currentMonthKey);
+    if (idx >= 0) {
+      setMonthWindowStartIndex(Math.max(0, idx - 2));
+    }
+  }, [selectedAccountId, currentMonthKey, allMonths]);
+
+  const visibleMonths = useMemo(() => {
+    return allMonths.slice(monthWindowStartIndex, monthWindowStartIndex + 3);
+  }, [allMonths, monthWindowStartIndex]);
+
   const lastMonthKey = shiftMonthKey(currentMonthKey, -1);
   function monthLabel(key: string): string {
     if (key === "FUTURE") return tr("Future");
     if (key === currentMonthKey) return tr("This month");
     if (key === lastMonthKey) return tr("Last month");
     const [y, m] = key.split("-");
-    return `${m}/${y}`;
+    const currentYear = todayStr.slice(0, 4);
+    if (y === currentYear) {
+      return language === "vi" ? `Tháng ${Number(m)}` : `Month ${Number(m)}`;
+    }
+    return language === "vi" ? `Tháng ${Number(m)}/${y}` : `Month ${Number(m)}/${y}`;
   }
+
+  const thisWeekMonday = useMemo(() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    return d;
+  }, []);
+  const thisWeekStart = useMemo(() => formatYmd(thisWeekMonday), [thisWeekMonday]);
+  const thisWeekEnd = useMemo(() => {
+    const end = new Date(thisWeekMonday);
+    end.setDate(end.getDate() + 6);
+    return formatYmd(end);
+  }, [thisWeekMonday]);
+
+  const lastWeekMonday = useMemo(() => {
+    const d = new Date(thisWeekMonday);
+    d.setDate(d.getDate() - 7);
+    return d;
+  }, [thisWeekMonday]);
+  const lastWeekStart = useMemo(() => formatYmd(lastWeekMonday), [lastWeekMonday]);
+  const lastWeekEnd = useMemo(() => {
+    const end = new Date(lastWeekMonday);
+    end.setDate(end.getDate() + 6);
+    return formatYmd(end);
+  }, [lastWeekMonday]);
+
+  const currentMonthWeeks = useMemo(() => {
+    const all = getYearWeeks(selectedWeekYear, language);
+    return all.filter(w => {
+      if (w.month !== selectedWeekMonth) return false;
+      if (w.start === thisWeekStart && w.end === thisWeekEnd) return false;
+      if (w.start === lastWeekStart && w.end === lastWeekEnd) return false;
+      return true;
+    });
+  }, [selectedWeekYear, selectedWeekMonth, thisWeekStart, thisWeekEnd, lastWeekStart, lastWeekEnd, language]);
+
+  const distinctYears = useMemo(() => {
+    const yearsSet = new Set<string>();
+    accountEvents.forEach(e => {
+      if (e.transaction_date && e.transaction_date.length >= 4) {
+        yearsSet.add(e.transaction_date.slice(0, 4));
+      }
+    });
+    yearsSet.add(String(new Date().getFullYear()));
+    return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
+  }, [accountEvents]);
+
+  // Auto-scroll to active month button
+  useEffect(() => {
+    if (timeScope === "MONTH") {
+      const timer = setTimeout(() => {
+        activeMonthBtnRef.current?.scrollIntoView({ inline: "center", behavior: "smooth", block: "nearest" });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedMonthKey, timeScope]);
+
+  // Auto-scroll to active week button
+  useEffect(() => {
+    if (timeScope === "WEEK") {
+      const timer = setTimeout(() => {
+        activeWeekBtnRef.current?.scrollIntoView({ inline: "center", behavior: "smooth", block: "nearest" });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedWeekStart, selectedWeekEnd, timeScope]);
 
   // Defaults to (and resets to, on every account switch) the current month
   useEffect(() => {
     setSelectedMonthKey(currentMonthKey);
+    setSelectedWeekStart(thisWeekStart);
+    setSelectedWeekEnd(thisWeekEnd);
     setSelectedEventIds(new Set());
     setConfirmModal(null);
-  }, [selectedAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedAccountId, currentMonthKey, thisWeekStart, thisWeekEnd]);
 
   useEffect(() => {
     setSelectedEventIds(new Set());
     setConfirmModal(null);
-  }, [selectedMonthKey]);
+  }, [selectedMonthKey, timeScope, selectedYear, selectedQuarter, selectedDate, customStartDate, customEndDate, selectedWeekStart, selectedWeekEnd]);
 
   const activeMonthKey = selectedMonthKey ?? currentMonthKey;
   const isFutureBucket = activeMonthKey === "FUTURE";
-  const periodStart = isFutureBucket ? shiftIsoDate(todayStr, 1) : `${activeMonthKey}-01`;
-  const periodEnd = isFutureBucket
-    ? accountEvents.reduce((max, e) => e.transaction_date > max ? e.transaction_date : max, periodStart)
-    : (() => { const [y, m] = activeMonthKey.split("-").map(Number); return new Date(y, m, 0).toISOString().slice(0, 10); })();
+
+  const visibleDays = useMemo(() => {
+    const today = todayIso();
+    return [
+      shiftIsoDate(today, dayWindowOffset - 3),
+      shiftIsoDate(today, dayWindowOffset - 2),
+      shiftIsoDate(today, dayWindowOffset - 1),
+      shiftIsoDate(today, dayWindowOffset),
+    ];
+  }, [dayWindowOffset]);
+
+  function onCalendarDateChange(iso: string) {
+    if (!iso) return;
+    setSelectedDate(iso);
+    const [ty, tm, td] = todayIso().split("-").map(Number);
+    const [py, pm, pd] = iso.split("-").map(Number);
+    const diffTime = Date.UTC(py, pm - 1, pd) - Date.UTC(ty, tm - 1, td);
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays < dayWindowOffset - 3 || diffDays > dayWindowOffset) {
+      setDayWindowOffset(diffDays);
+    }
+  }
+
+  const { periodStart, periodEnd } = useMemo(() => {
+    if (timeScope === "ALL") {
+      const minDate = accountEvents.reduce((min, e) => e.transaction_date < min ? e.transaction_date : min, "1970-01-01");
+      const maxDate = accountEvents.reduce((max, e) => e.transaction_date > max ? e.transaction_date : max, todayStr);
+      return { periodStart: minDate, periodEnd: maxDate };
+    }
+    if (timeScope === "YEAR") {
+      return { periodStart: `${selectedYear}-01-01`, periodEnd: `${selectedYear}-12-31` };
+    }
+    if (timeScope === "QUARTER") {
+      const startMonth = String((selectedQuarter - 1) * 3 + 1).padStart(2, "0");
+      const endMonthNum = selectedQuarter * 3;
+      const lastDay = new Date(Number(selectedYear), endMonthNum, 0).getDate();
+      return {
+        periodStart: `${selectedYear}-${startMonth}-01`,
+        periodEnd: `${selectedYear}-${String(endMonthNum).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+      };
+    }
+    if (timeScope === "MONTH") {
+      if (isFutureBucket) {
+        const start = shiftIsoDate(todayStr, 1);
+        const end = accountEvents.reduce((max, e) => e.transaction_date > max ? e.transaction_date : max, start);
+        return { periodStart: start, periodEnd: end };
+      }
+      const [y, m] = activeMonthKey.split("-").map(Number);
+      const endDay = new Date(y, m, 0).getDate();
+      return {
+        periodStart: `${activeMonthKey}-01`,
+        periodEnd: `${activeMonthKey}-${String(endDay).padStart(2, "0")}`,
+      };
+    }
+    if (timeScope === "WEEK") {
+      if (selectedWeekStart && selectedWeekEnd) {
+        return { periodStart: selectedWeekStart, periodEnd: selectedWeekEnd };
+      }
+      return { periodStart: thisWeekStart, periodEnd: thisWeekEnd };
+    }
+    if (timeScope === "DAY") {
+      return { periodStart: selectedDate, periodEnd: selectedDate };
+    }
+    return {
+      periodStart: customStartDate || "1970-01-01",
+      periodEnd: customEndDate || todayStr,
+    };
+  }, [timeScope, selectedYear, selectedQuarter, activeMonthKey, isFutureBucket, selectedDate, customStartDate, customEndDate, selectedWeekStart, selectedWeekEnd, thisWeekStart, thisWeekEnd, accountEvents, todayStr]);
+
+  function getPeriodLabel(): string {
+    if (timeScope === "ALL") return tr("All time");
+    if (timeScope === "YEAR") return `${tr("Year")} ${selectedYear}`;
+    if (timeScope === "QUARTER") return `${tr("Quarter")} ${selectedQuarter}/${selectedYear}`;
+    if (timeScope === "MONTH") return monthLabel(activeMonthKey);
+    if (timeScope === "WEEK") {
+      if (periodStart === thisWeekStart && periodEnd === thisWeekEnd) return tr("This week");
+      if (periodStart === lastWeekStart && periodEnd === lastWeekEnd) return tr("Last week");
+      const [, sm, sd] = periodStart.split("-");
+      const [, em, ed] = periodEnd.split("-");
+      return language === "vi" ? `Tuần (${sd}/${sm} → ${ed}/${em})` : `Week (${sd}/${sm} → ${ed}/${em})`;
+    }
+    if (timeScope === "DAY") return `${tr("Date")} ${selectedDate}`;
+    return `${customStartDate} → ${customEndDate}`;
+  }
 
   function balanceAsOf(cutoffIso: string): string {
     if (isAllAccounts) {
@@ -3399,10 +7244,7 @@ function Ledger() {
   const detailEvent = detailEventId != null ? (eventsQ.data ?? []).find(e => e.id === detailEventId) ?? null : null;
 
   function refresh() {
-    qc.invalidateQueries({ queryKey: ["events"] });
-    qc.invalidateQueries({ queryKey: ["account-balance"] });
-    qc.invalidateQueries({ queryKey: ["account-balances"] });
-    qc.invalidateQueries({ queryKey: ["portfolio"] });
+    invalidateAllFinancialQueries(qc);
   }
 
   if (accountsQ.isPending) return <section className="ledger-page"><Loading show /></section>;
@@ -3411,24 +7253,283 @@ function Ledger() {
   const composerDefaultAccountId = typeof selectedAccountId === "number" ? selectedAccountId : (activeAccounts[0]?.id ?? 1);
 
   return <section className="ledger-page">
-    <div className="ledger-header">
-      <AccountRow
-        label="Select account"
-        accounts={activeAccounts}
-        value={selectedAccountId != null ? String(selectedAccountId) : ""}
-        onChange={v => setSelectedAccountId(v === "ALL" ? "ALL" : Number(v))}
-        balances={balances}
-        allowAll
-      />
-      <div className="ledger-balance">
-        <span>{tr("Current balance")}</span>
-        <strong>{fmtMoneyDisplay(currentBalance) ?? (balanceQ.isPending ? "…" : "—")}</strong>
+    <div className="ledger-top-row">
+      <div className="ledger-header">
+        <AccountRow
+          label="Select account"
+          accounts={activeAccounts}
+          value={selectedAccountId != null ? String(selectedAccountId) : ""}
+          onChange={v => setSelectedAccountId(v === "ALL" ? "ALL" : Number(v))}
+          balances={balances}
+          allowAll
+        />
+      </div>
+
+      {/* Time Filters: Tất cả | Năm | Quý | Tháng | Tuần | Ngày | Tùy chỉnh */}
+      <div className="ledger-time-filter-wrap">
+        <div className="ledger-time-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={timeScope === "ALL"} className={timeScope === "ALL" ? "active" : ""} onClick={() => setTimeScope("ALL")}>{tr("All")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "YEAR"} className={timeScope === "YEAR" ? "active" : ""} onClick={() => setTimeScope("YEAR")}>{tr("Year")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "QUARTER"} className={timeScope === "QUARTER" ? "active" : ""} onClick={() => setTimeScope("QUARTER")}>{tr("Quarter")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "MONTH"} className={timeScope === "MONTH" ? "active" : ""} onClick={() => setTimeScope("MONTH")}>{tr("Month")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "WEEK"} className={timeScope === "WEEK" ? "active" : ""} onClick={() => setTimeScope("WEEK")}>{tr("Week")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "DAY"} className={timeScope === "DAY" ? "active" : ""} onClick={() => setTimeScope("DAY")}>{tr("Day")}</button>
+          <button type="button" role="tab" aria-selected={timeScope === "CUSTOM"} className={timeScope === "CUSTOM" ? "active" : ""} onClick={() => setTimeScope("CUSTOM")}>{tr("Custom range")}</button>
+        </div>
+
+        {timeScope === "MONTH" && (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", marginTop: "4px", width: "100%" }}>
+            <button
+              type="button"
+              className="scroll-arrow-btn"
+              onClick={() => setMonthWindowStartIndex(prev => Math.max(0, prev - 1))}
+              disabled={monthWindowStartIndex <= 0}
+              style={{ opacity: monthWindowStartIndex <= 0 ? 0.35 : 1, cursor: monthWindowStartIndex <= 0 ? "default" : "pointer" }}
+              title={tr("Previous month")}
+              aria-label="Previous month"
+            >
+              ‹
+            </button>
+            <div className="ledger-months" role="tablist" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              {visibleMonths.map(key => {
+                const isSelected = activeMonthKey === key;
+                return (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    className={isSelected ? "active" : ""}
+                    style={{ minWidth: "90px", textAlign: "center" }}
+                    onClick={() => setSelectedMonthKey(key)}
+                    key={key}
+                    ref={isSelected ? activeMonthBtnRef : undefined}
+                  >
+                    {monthLabel(key)}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              className="scroll-arrow-btn"
+              onClick={() => setMonthWindowStartIndex(prev => Math.min(Math.max(0, allMonths.length - 3), prev + 1))}
+              disabled={monthWindowStartIndex >= allMonths.length - 3}
+              style={{ opacity: monthWindowStartIndex >= allMonths.length - 3 ? 0.35 : 1, cursor: monthWindowStartIndex >= allMonths.length - 3 ? "default" : "pointer" }}
+              title={tr("Next month")}
+              aria-label="Next month"
+            >
+              ›
+            </button>
+          </div>
+        )}
+
+        {timeScope === "YEAR" && (
+          <div className="time-sub-controls" style={{ marginTop: "4px" }}>
+            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="time-select">
+              {distinctYears.map(y => <option value={y} key={y}>{tr("Year")} {y}</option>)}
+            </select>
+          </div>
+        )}
+
+        {timeScope === "QUARTER" && (
+          <div className="time-sub-controls" style={{ marginTop: "4px" }}>
+            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="time-select">
+              {distinctYears.map(y => <option value={y} key={y}>{tr("Year")} {y}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: "6px" }}>
+              {[1, 2, 3, 4].map(q => (
+                <button
+                  type="button"
+                  key={q}
+                  className={`pill-btn ${selectedQuarter === q ? "active" : ""}`}
+                  onClick={() => setSelectedQuarter(q)}
+                >
+                  {tr("Quarter")} {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {timeScope === "WEEK" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "4px", width: "100%", minWidth: 0 }}>
+            {/* Dòng 1: Chọn Tháng và Năm */}
+            <div>
+              <input
+                type="month"
+                value={`${selectedWeekYear}-${String(selectedWeekMonth).padStart(2, "0")}`}
+                onChange={e => {
+                  if (!e.target.value) return;
+                  const [y, m] = e.target.value.split("-").map(Number);
+                  setSelectedWeekYear(y);
+                  setSelectedWeekMonth(m);
+                }}
+                onClick={e => {
+                  try {
+                    e.currentTarget.showPicker?.();
+                  } catch {}
+                }}
+                className="time-input"
+                style={{
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  fontSize: "0.84rem",
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--line)",
+                  background: "var(--card)",
+                  color: "var(--text)",
+                  width: "auto",
+                  minWidth: "160px"
+                }}
+              />
+            </div>
+
+            {/* Dòng 2: Danh sách các tuần trong tháng, liền sau là Tuần trước & Tuần này */}
+            <div className="ledger-scroll-row-wrap">
+              <button
+                type="button"
+                className="scroll-arrow-btn"
+                onClick={() => weekScrollRef.current?.scrollBy({ left: -240, behavior: "smooth" })}
+                title={tr("Previous")}
+                aria-label="Previous weeks"
+              >
+                ‹
+              </button>
+              <div className="ledger-months scroll-container" role="tablist" ref={weekScrollRef}>
+                {currentMonthWeeks.map(w => {
+                  const isSelected = periodStart === w.start && periodEnd === w.end;
+                  return (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={isSelected}
+                      className={isSelected ? "active" : ""}
+                      onClick={() => {
+                        setSelectedWeekStart(w.start);
+                        setSelectedWeekEnd(w.end);
+                      }}
+                      key={w.start}
+                      ref={isSelected ? activeWeekBtnRef : undefined}
+                    >
+                      {w.label}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={periodStart === lastWeekStart && periodEnd === lastWeekEnd}
+                  className={periodStart === lastWeekStart && periodEnd === lastWeekEnd ? "active" : ""}
+                  onClick={() => {
+                    setSelectedWeekStart(lastWeekStart);
+                    setSelectedWeekEnd(lastWeekEnd);
+                  }}
+                  ref={periodStart === lastWeekStart && periodEnd === lastWeekEnd ? activeWeekBtnRef : undefined}
+                >
+                  {tr("Last week")}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={periodStart === thisWeekStart && periodEnd === thisWeekEnd}
+                  className={periodStart === thisWeekStart && periodEnd === thisWeekEnd ? "active" : ""}
+                  onClick={() => {
+                    setSelectedWeekStart(thisWeekStart);
+                    setSelectedWeekEnd(thisWeekEnd);
+                  }}
+                  ref={periodStart === thisWeekStart && periodEnd === thisWeekEnd ? activeWeekBtnRef : undefined}
+                >
+                  {tr("This week")}
+                </button>
+              </div>
+              <button
+                type="button"
+                className="scroll-arrow-btn"
+                onClick={() => weekScrollRef.current?.scrollBy({ left: 240, behavior: "smooth" })}
+                title={tr("Next")}
+                aria-label="Next weeks"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+        )}
+
+      {timeScope === "DAY" && (
+        <div className="time-sub-controls" style={{ marginTop: "4px", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", flexWrap: "nowrap" }}>
+          <button
+            type="button"
+            className="scroll-arrow-btn"
+            onClick={() => setDayWindowOffset(prev => prev - 1)}
+            title={tr("Previous")}
+            aria-label="Previous days"
+          >
+            ‹
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "nowrap" }}>
+            {visibleDays.map(d => (
+              <button
+                key={d}
+                type="button"
+                className={`pill-btn ${selectedDate === d ? "active" : ""}`}
+                style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                onClick={() => setSelectedDate(d)}
+              >
+                {formatShortDayLabel(language, d)}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="scroll-arrow-btn"
+            onClick={() => setDayWindowOffset(prev => prev + 1)}
+            title={tr("Next")}
+            aria-label="Next days"
+          >
+            ›
+          </button>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={e => onCalendarDateChange(e.target.value)}
+            onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }}
+            className="time-input"
+            style={{ cursor: "pointer", marginLeft: "4px", padding: "3px 6px", height: "28px", minHeight: "28px", fontSize: "0.82rem" }}
+            aria-label={tr("Select date")}
+          />
+        </div>
+      )}
+
+        {timeScope === "CUSTOM" && (
+          <div className="time-sub-controls" style={{ marginTop: "6px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="hint" style={{ whiteSpace: "nowrap", fontWeight: 600, minWidth: "60px" }}>{tr("From date")}:</span>
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={e => setCustomStartDate(e.target.value)}
+                onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }}
+                className="time-input"
+                style={{ cursor: "pointer", flex: 1, minHeight: "32px" }}
+              />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span className="hint" style={{ whiteSpace: "nowrap", fontWeight: 600, minWidth: "60px" }}>{tr("To date")}:</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={e => setCustomEndDate(e.target.value)}
+                onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }}
+                className="time-input"
+                style={{ cursor: "pointer", flex: 1, minHeight: "32px" }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
-    <div className="ledger-months" role="tablist">
-      {months.map(key => <button type="button" role="tab" aria-selected={activeMonthKey === key} className={activeMonthKey === key ? "active" : ""} onClick={() => setSelectedMonthKey(key)} key={key}>{monthLabel(key)}</button>)}
-      {hasFuture && <button type="button" role="tab" aria-selected={isFutureBucket} className={isFutureBucket ? "active" : ""} onClick={() => setSelectedMonthKey("FUTURE")}>{tr("Future")}</button>}
-    </div>
+
     <div className="ledger-summary">
       <div><span>{tr("Opening balance")}</span><strong>{fmtMoneyDisplay(openingBalance)}</strong></div>
       <div><span>{tr("Closing balance")}</span><strong>{fmtMoneyDisplay(closingBalance)}</strong></div>
@@ -3440,15 +7541,20 @@ function Ledger() {
         <Empty show={!eventsQ.isPending && periodEvents.length === 0} text="No transactions in this period." />
         {periodEvents.length > 0 && <div className="ledger-toolbar">
           <div className="ledger-toolbar-left">
-            <label className="ledger-select-all" onClick={e => e.stopPropagation()}>
+            <label
+              className="ledger-select-all"
+              style={{ display: "inline-flex", flexDirection: "row", alignItems: "center", gap: "6px", cursor: "pointer", userSelect: "none", margin: 0, padding: 0, whiteSpace: "nowrap" }}
+              onClick={e => e.stopPropagation()}
+            >
               <input
                 type="checkbox"
                 checked={allSelected}
                 ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
                 onChange={toggleSelectAll}
                 aria-label={tr("Select all")}
+                style={{ width: "14px", height: "14px", minHeight: "14px", margin: 0, flexShrink: 0, cursor: "pointer" }}
               />
-              <span>{tr("Select all")}</span>
+              <span style={{ fontSize: "0.74rem", fontWeight: 600, color: "var(--text)", lineHeight: 1 }}>{tr("Select all")}</span>
             </label>
             {someSelected && <span className="ledger-selected-count">{tr("Selected")}: {selectedEventIds.size}/{periodEvents.length}</span>}
           </div>
@@ -3581,33 +7687,28 @@ function Ledger() {
           <p>
             {tr("Are you sure you want to delete")} <strong>{selectedEventIds.size}</strong> {tr("transactions? This action cannot be undone.")}
           </p>
-          {(() => {
-            const selectedEvents = periodEvents.filter(e => selectedEventIds.has(e.id));
-            const protectedCount = selectedEvents.filter(e => !composerEventTypes.includes(e.event_type)).length;
-            return protectedCount > 0 ? (
-              <p className="hint warning-text">
-                {tr("Note: System-managed transactions (Savings, Assets, Adjustments) will be preserved.")}
-              </p>
-            ) : null;
-          })()}
         </> : <>
           <p>
             {tr("Are you sure you want to delete all transactions in this period? This action cannot be undone.")}
           </p>
           <p className="hint">
-            {tr("Period")}: <strong>{monthLabel(activeMonthKey)}</strong> ({periodEvents.length} {tr("transactions")})
+            {tr("Period")}: <strong>{getPeriodLabel()}</strong> ({periodEvents.length} {tr("transactions")})
           </p>
-          {(() => {
-            const protectedCount = periodEvents.filter(e => !composerEventTypes.includes(e.event_type)).length;
-            return protectedCount > 0 ? (
-              <p className="hint warning-text">
-                {tr("Note: System-managed transactions (Savings, Assets, Adjustments) will be preserved.")}
-              </p>
-            ) : null;
-          })()}
         </>}
+
+        <label className="checkbox-row" style={{ marginTop: "14px", display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={includeAssetEvents}
+            onChange={e => setIncludeAssetEvents(e.target.checked)}
+          />
+          <span style={{ fontSize: "0.88rem", fontWeight: 600, color: includeAssetEvents ? "#dc2626" : "inherit" }}>
+            {tr("Delete asset-related transactions as well (Savings, Metals, Crypto)")}
+          </span>
+        </label>
+
         {deleteError && <p className="error" role="alert">{deleteError}</p>}
-        <div className="form-actions">
+        <div className="form-actions" style={{ marginTop: "16px" }}>
           <button
             type="button"
             className="text-button danger"
@@ -3620,13 +7721,12 @@ function Ledger() {
                   ? Array.from(selectedEventIds)
                   : periodEvents.map(e => e.id);
                 const targetEvents = (eventsQ.data ?? []).filter(e => targetIds.includes(e.id));
-                const editableEvents = targetEvents.filter(e => composerEventTypes.includes(e.event_type));
-                if (editableEvents.length === 0) {
-                  setDeleteError(tr("No editable transactions selected."));
+                if (targetEvents.length === 0) {
+                  setDeleteError(tr("No transactions selected."));
                   setIsDeleting(false);
                   return;
                 }
-                await Promise.all(editableEvents.map(e => api.events.remove(e.id)));
+                await Promise.all(targetEvents.map(e => api.events.remove(e.id, true)));
                 setSelectedEventIds(new Set());
                 setConfirmModal(null);
                 if (detailEventId && targetIds.includes(detailEventId)) {
@@ -3700,7 +7800,7 @@ function CategoryPicker({ categories, selected, onChange, language }: { categori
 
 function Section({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) { const { tr } = useI18n(); return <section><div className="section-title"><h2>{tr(title)}</h2><p>{tr(subtitle)}</p></div>{children}</section>; }
 function Field({ label: text, children }: { label: string; children: React.ReactNode }) { const { tr } = useI18n(); return <label><span>{tr(text)}</span>{children}</label>; }
-function Submit({ pending, text }: { pending: boolean; text: string }) { const { tr } = useI18n(); return <button className="primary" disabled={pending}>{pending ? tr("Saving…") : tr(text)}</button>; }
+function Submit({ pending, text, className, style }: { pending: boolean; text: string; className?: string; style?: React.CSSProperties }) { const { tr } = useI18n(); return <button className={`primary ${className ?? ""}`.trim()} style={style} disabled={pending}>{pending ? tr("Saving…") : tr(text)}</button>; }
 function Status({ active }: { active: boolean }) { const { tr } = useI18n(); return <small className={`status ${active ? "active-status" : ""}`}>{tr(active ? "Active" : "Inactive")}</small>; }
 function Error({ error }: { error: Error | null }) { const { tr } = useI18n(); return error ? <p className="error" role="alert">{tr(transactionUiKeys.loadFailed)}</p> : null; }
 function Loading({ show }: { show: boolean }) { const { tr } = useI18n(); return show ? <p className="notice" role="status" aria-live="polite">{tr("Loading…")}</p> : null; }

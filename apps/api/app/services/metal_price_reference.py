@@ -8,8 +8,9 @@ live fetching right now (baotinmanhhai.vn and banggia.doji.vn were
 researched but are not directly reachable/verifiable from this
 environment -- see chat history 2026-08-27). Business rule, exactly as
 given:
-  - Ring ("nhẫn") and bar ("miếng") holdings of brand BTMC, BTMH, or DOJI
-    are all priced the same -- BTMC's own ring/bar row on btmc.vn.
+  - Ring ("nhẫn") and bar ("miếng") holdings of brand BTMC, BTMH, or DOJI,
+    as well as PNJ plain rings, are all priced the same -- BTMC's own ring/bar row on btmc.vn.
+  - DOJI jewelry ("trang sức") is priced at DOJI ring price (= BTMC ring price).
   - SJC-brand bar holdings are priced from btmc.vn's own "VÀNG MIẾNG SJC"
     reference row (btmc.vn publishes it alongside its own products).
   - RAW-brand holdings (any shape) are priced from btmc.vn's "VÀNG NGUYÊN
@@ -79,6 +80,15 @@ def _btmc_reference_products() -> dict[str, str]:
             # both categories point at the same reference row here.
             for suffix in _PURITY_SUFFIXES:
                 products[f"{brand}_{category}_{suffix}"] = _BTMC_RING_BAR_PRODUCT
+
+    # User rule (2026-08-27): PNJ plain rings priced at BTMC ring price
+    for suffix in _PURITY_SUFFIXES:
+        products[f"PNJ_PLAIN_RING_{suffix}"] = _BTMC_RING_BAR_PRODUCT
+
+    # User rule (2026-08-27): DOJI jewelry priced at DOJI ring price (= BTMC ring price)
+    for suffix in _PURITY_SUFFIXES:
+        products[f"DOJI_JEWELRY_{suffix}"] = _BTMC_RING_BAR_PRODUCT
+
     for suffix in _PURITY_SUFFIXES:
         products[f"SJC_GOLD_BAR_{suffix}"] = _SJC_BAR_PRODUCT
     for category in _RAW_CATEGORIES:

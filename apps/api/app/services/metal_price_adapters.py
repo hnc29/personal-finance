@@ -116,7 +116,8 @@ _VN_UPDATED_AT_RE: Final = re.compile(
 
 
 def _normalized(value: str) -> str:
-    decomposed = unicodedata.normalize("NFD", value)
+    clean = re.sub(r"\(.*?\)", "", value)
+    decomposed = unicodedata.normalize("NFD", clean)
     unaccented = "".join(char for char in decomposed if not unicodedata.combining(char))
     return " ".join(re.sub(r"[^a-z0-9]+", " ", unaccented.lower()).split())
 
@@ -168,33 +169,32 @@ class HtmlMetalPriceAdapter:
             raise PriceSourceError(
                 f"{self.provider_code} has no exact product mapping for {instrument}"
             )
+
         response = self._client.get(self._url, timeout=self._timeout)
         response.raise_for_status()
+
         parser = _PriceTableParser()
         parser.feed(response.text)
         record = self._find_exact_record(parser.rows, product_code)
         quoted_at = self._parse_quoted_at(
-            parser.quoted_at, "".join(parser.full_text_parts), fallback=as_of
+            parser.quoted_at, " ".join(parser.full_text_parts), fallback=as_of
         )
         if quoted_at > as_of:
             raise PriceSourceError("source quote cannot be after as_of")
 
         buy_price = _money(record["buy"]) * self._unit_scale
-        # User correction, 2026-08-27: some real rows (e.g. btmc.vn's "Vàng
-        # nguyên liệu", "Vàng hệ thống") only publish a buy price and show
-        # "Liên hệ" (contact us) for sell -- and the app only ever uses buy
-        # price for valuation (BA-SPEC 5.1: "luôn dùng giá mua vào, không
-        # bao giờ dùng giá bán ra"), so a missing/non-numeric sell price
-        # must not block getting the buy price.
         try:
-            sell_price: Decimal | None = _money(record["sell"]) * self._unit_scale
+            sell_price: Decimal | None = (
+                _money(record["sell"]) * self._unit_scale
+                if record.get("sell") and record["sell"].strip().lower() not in {"lien he", "—", "-", ""}
+                else None
+            )
         except PriceSourceError:
             sell_price = None
 
-        # Determine unit: if > 30,000,000 it is per lượng (37.5g), else per chỉ (3.75g)
-        source_unit = "CHI"
-        if buy_price > Decimal(30000000):
-            source_unit = "LUONG"
+        source_unit = record.get("source_unit")
+        if not source_unit:
+            source_unit = "LUONG" if buy_price > Decimal(30000000) else "CHI"
 
         metadata = {
             "provider": self.provider_code,
@@ -233,25 +233,37 @@ class HtmlMetalPriceAdapter:
         has_required = required.issubset(item for item in headers if item is not None)
         has_code = "product_code" in (item for item in headers if item is not None)
 
+        norm_target = _normalized(product_code)
+
+        if has_required or has_code:
+            for row in rows[1:]:
+                record = {
+                    header: row[index]
+                    for index, header in enumerate(headers)
+                    if header is not None and index < len(row)
+                }
+                row_code = record.get("product_code")
+                row_name = record.get("product_name")
+
+                if row_code and (row_code == product_code or _normalized(row_code) == norm_target):
+                    return record
+                if row_name and (_normalized(row_name) == norm_target or row_name == product_code):
+                    if "product_code" not in record:
+                        record["product_code"] = product_code
+                    return record
+
+        for row in rows[1:]:
+            for cell in row:
+                if (_normalized(cell) == norm_target or cell == product_code) and len(row) >= 3:
+                    return {
+                        "product_name": cell,
+                        "product_code": product_code,
+                        "buy": row[-2],
+                        "sell": row[-1],
+                    }
+
         if not has_required and not has_code:
             raise PriceSourceError("price table has unsupported headers")
-
-        norm_target = _normalized(product_code)
-        for row in rows[1:]:
-            record = {
-                header: row[index]
-                for index, header in enumerate(headers)
-                if header is not None and index < len(row)
-            }
-            row_code = record.get("product_code")
-            row_name = record.get("product_name")
-
-            if row_code and (row_code == product_code or _normalized(row_code) == norm_target):
-                return record
-            if row_name and (_normalized(row_name) == norm_target or row_name == product_code):
-                if "product_code" not in record:
-                    record["product_code"] = product_code
-                return record
 
         raise PriceSourceError(f"exact product {product_code!r} is unavailable")
 

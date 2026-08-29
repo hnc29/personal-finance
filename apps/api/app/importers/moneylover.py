@@ -70,16 +70,20 @@ def parse_moneylover_xlsx(source: bytes | BinaryIO) -> ParsedMoneyLoverFile:
         source_headers = tuple(str(value) for value in header_values)
         rows: list[ParsedMoneyLoverRow] = []
         for row_number, cells in enumerate(sheet.iter_rows(min_row=2), start=2):
+            if not any(cell.value is not None for cell in cells):
+                continue
+            raw_amount = cells[3].value if len(cells) > 3 else None
+            source_id = cells[0].value if cells else None
+            transaction_date = cells[1].value if len(cells) > 1 else None
+            if source_id is None and transaction_date is None and raw_amount is None:
+                continue
             values = [_json_value(cell.value) for cell in cells]
             payload = dict(zip(source_headers, values, strict=False))
-            raw_amount = cells[3].value if len(cells) > 3 else None
             amount = None if raw_amount is None else Decimal(str(raw_amount))
-            transaction_date = cells[1].value if len(cells) > 1 else None
             if isinstance(transaction_date, datetime):
                 transaction_date = transaction_date.date()
             if transaction_date is not None and not isinstance(transaction_date, date):
                 raise ValueError(f"invalid date at source row {row_number}")
-            source_id = cells[0].value if cells else None
             rows.append(ParsedMoneyLoverRow(
                 row_number,
                 None if source_id is None else str(source_id),

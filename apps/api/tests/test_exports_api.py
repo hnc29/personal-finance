@@ -12,6 +12,7 @@ import io
 import os
 import subprocess
 from collections.abc import Iterator
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -139,3 +140,67 @@ def test_export_xlsx_filters_by_account(client: TestClient) -> None:
     rows = list(ws.iter_rows(min_row=2, values_only=True))
     assert len(rows) == 1
     assert rows[0][3] == b
+
+
+def test_export_statement_data_and_running_balance(client: TestClient) -> None:
+    a = _make_account(client, "VPBank")
+    # Opening balance before 2026-07-01: +1,000,000
+    client.post(
+        "/api/v1/financial-events",
+        json={
+            "event_type": "INCOME",
+            "transaction_date": "2026-06-15",
+            "entries": [{"account_id": a, "amount": "1000000.0000"}],
+        },
+    )
+    # Transactions in July
+    _make_expense(client, a, "2026-07-10", "-200000.0000")
+    client.post(
+        "/api/v1/financial-events",
+        json={
+            "event_type": "INTEREST",
+            "transaction_date": "2026-07-20",
+            "entries": [{"account_id": a, "amount": "50000.0000"}],
+        },
+    )
+
+    response = client.get(
+        f"/api/v1/exports/statement/data?account_id={a}&start_date=2026-07-01&end_date=2026-07-31"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["account"]["name"] == "VPBank"
+    assert Decimal(data["opening_balance"]) == Decimal("1000000.0000")
+    assert Decimal(data["closing_balance"]) == Decimal("850000.0000")
+    assert Decimal(data["total_in"]) == Decimal("50000.0000")
+    assert Decimal(data["total_out"]) == Decimal("200000.0000")
+    assert len(data["transactions"]) == 2
+    # Row 1: -200,000 -> running = 800,000
+    assert data["transactions"][0]["amount"] == "-200000.0000"
+    assert data["transactions"][0]["running_balance"] == "800000.0000"
+    # Row 2: +50,000 -> running = 850,000
+    assert data["transactions"][1]["amount"] == "50000.0000"
+    assert data["transactions"][1]["running_balance"] == "850000.0000"
+
+
+def test_export_statement_xlsx_and_csv(client: TestClient) -> None:
+    from openpyxl import load_workbook
+
+    a = _make_account(client, "VPBank")
+    _make_expense(client, a, "2026-08-01", "-50000.0000")
+
+    # Test XLSX
+    resp_xlsx = client.get(f"/api/v1/exports/statement.xlsx?account_id={a}")
+    assert resp_xlsx.status_code == 200
+    wb = load_workbook(io.BytesIO(resp_xlsx.content))
+    ws = wb.active
+    assert ws["A1"].value == "SAO KÊ TÀI KHOẢN"
+
+    # Test CSV
+    resp_csv = client.get(f"/api/v1/exports/statement.csv?account_id={a}")
+    assert resp_csv.status_code == 200
+    assert resp_csv.content.startswith(b"\xef\xbb\xbf")  # UTF-8 BOM
+    text_content = resp_csv.content.decode("utf-8-sig")
+    assert "SAO KÊ TÀI KHOẢN" in text_content
+    assert "Số tiền giao dịch" in text_content
+

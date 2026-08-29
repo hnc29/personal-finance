@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
@@ -63,8 +64,66 @@ from app.services.moneylover_normalize import (
 
 TRANSFER_OUT_GROUP = "Tiền chuyển đi"
 TRANSFER_IN_GROUP = "Tiền chuyển đến"
-_DEST_NOTE_RE = re.compile(r"^Gửi đến (.+)$")
-_SRC_NOTE_RE = re.compile(r"^Nhận tiền từ (.+)$")
+_DEST_NOTE_PATTERNS = (
+    re.compile(r"^(?:Gửi đến|Gui den|Chuyển đến|Chuyen den|Chuyển tới|Chuyen toi|Chuyển sang|Chuyen sang|Chuyển khoản đến|Chuyen khoan den)\s+(.+)$", re.IGNORECASE),
+)
+_SRC_NOTE_PATTERNS = (
+    re.compile(r"^(?:Nhận tiền từ|Nhan tien tu|Nhận từ|Nhan tu|Nhận chuyển khoản từ|Nhan chuyen khoan tu)\s+(.+)$", re.IGNORECASE),
+)
+
+
+def extract_dest_wallet(note: str | None) -> str | None:
+    if not note:
+        return None
+    for pat in _DEST_NOTE_PATTERNS:
+        m = pat.match(note.strip())
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def extract_src_wallet(note: str | None) -> str | None:
+    if not note:
+        return None
+    for pat in _SRC_NOTE_PATTERNS:
+        m = pat.match(note.strip())
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def find_matching_existing_transfer(
+    session: Session,
+    src_account_id: int,
+    dst_account_id: int,
+    scaled: int,
+    tx_date: date,
+    current_row_id: int,
+) -> FinancialEvent | None:
+    """Find an already-persisted TRANSFER event matching the pair and amount on ~same date."""
+    min_date = tx_date - timedelta(days=2)
+    max_date = tx_date + timedelta(days=2)
+
+    candidates = session.scalars(
+        select(FinancialEvent)
+        .where(
+            FinancialEvent.event_type == FinancialEventType.TRANSFER,
+            FinancialEvent.transaction_date >= min_date,
+            FinancialEvent.transaction_date <= max_date,
+        )
+    ).all()
+
+    for ev in candidates:
+        if ev.raw_import_row_id == current_row_id or ev.raw_import_row_id_secondary == current_row_id:
+            continue
+        amounts = {entry.account_id: entry.amount_scaled for entry in ev.entries}
+        if (
+            amounts.get(src_account_id) == -scaled
+            and amounts.get(dst_account_id) == scaled
+            and ev.raw_import_row_id_secondary is None
+        ):
+            return ev
+    return None
 
 
 class BatchNotFoundError(Exception):
@@ -90,6 +149,88 @@ class ApplyResult:
     @property
     def unmatched_row_count(self) -> int:
         return sum(self.unmatched_wallets.values())
+
+
+_BANK_ALIASES: dict[str, str] = {
+    "vpb": "vpbank",
+    "vpbank": "vpb",
+    "tech": "techcombank",
+    "techcombank": "tech",
+    "tcb": "techcombank",
+    "vcb": "vietcombank",
+    "vietcombank": "vcb",
+    "mbb": "mbbank",
+    "mbbank": "mb",
+    "mb": "mbbank",
+    "bidv": "bidv",
+    "vib": "vib",
+    "shb": "shb",
+    "shinhan": "shinhan",
+}
+
+
+def match_moneylover_account(accounts: list[Account], wallet: str | None) -> Account | None:
+    if not wallet:
+        return None
+    w_clean = wallet.strip()
+    w_ci = w_clean.casefold()
+    w_alnum = re.sub(r"[^a-zA-Z0-9]+", "", w_ci)
+    is_card_wallet = any(k in w_ci for k in ("card", "the", "thẻ", "credit"))
+
+    # Priority 1: Exact match (case-sensitive then case-insensitive)
+    for a in accounts:
+        if a.name.strip() == w_clean:
+            return a
+    for a in accounts:
+        if a.name.strip().casefold() == w_ci:
+            return a
+
+    # Priority 2: Parentheses extraction in Account.name e.g. 'VPBank (VPB-Card)'
+    for a in accounts:
+        parens = re.findall(r"\((.*?)\)", a.name)
+        for p in parens:
+            p_clean = p.strip()
+            p_ci = p_clean.casefold()
+            if p_ci == w_ci or (w_alnum and re.sub(r"[^a-zA-Z0-9]+", "", p_ci) == w_alnum):
+                return a
+            # Prefix + parenthetical suffix e.g. 'BIDV' + '(-Card)' -> 'BIDV-Card'
+            prefix = re.sub(r"\(.*?\)", "", a.name).strip()
+            if p_clean.startswith(("-", " ")):
+                combined_ci = f"{prefix}{p_clean}".casefold()
+                if combined_ci == w_ci or (w_alnum and re.sub(r"[^a-zA-Z0-9]+", "", combined_ci) == w_alnum):
+                    return a
+
+    # Priority 3: Alphanumeric match with type awareness
+    candidates: list[tuple[int, Account]] = []
+    for a in accounts:
+        a_alnum = re.sub(r"[^a-zA-Z0-9]+", "", a.name.casefold())
+        if a_alnum == w_alnum:
+            candidates.append((10, a))
+        elif (
+            ((is_card_wallet and a.account_type.value == "CREDIT_CARD")
+             or (not is_card_wallet and a.account_type.value != "CREDIT_CARD"))
+            and w_alnum
+            and (w_alnum in a_alnum or a_alnum in w_alnum)
+        ):
+            candidates.append((5, a))
+
+    if candidates:
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        return candidates[0][1]
+
+    # Priority 4: Bank aliases + Card matching
+    for a in accounts:
+        a_ci = a.name.casefold()
+        matches_type = (
+            (is_card_wallet and a.account_type.value == "CREDIT_CARD")
+            or (not is_card_wallet and a.account_type.value != "CREDIT_CARD")
+        )
+        if matches_type:
+            for k, v in _BANK_ALIASES.items():
+                if (k in w_ci and (v in a_ci or k in a_ci)) or (v in w_ci and (k in a_ci or v in a_ci)):
+                    return a
+
+    return None
 
 
 def _text(value: object) -> str | None:
@@ -131,8 +272,28 @@ def apply_import_batch(session: Session, batch_id: int) -> ApplyResult:
         )
     )
 
-    accounts = {a.name: a for a in session.scalars(select(Account).where(Account.is_active.is_(True)))}
+    active_accounts = list(session.scalars(select(Account).where(Account.is_active.is_(True))))
+
+    def get_account(w: str | None) -> Account | None:
+        return match_moneylover_account(active_accounts, w)
+
     categories = {c.name: c for c in session.scalars(select(Category))}
+    categories_ci = {c.name.casefold(): c for c in categories.values()}
+
+    def get_category(raw_cat: str | None) -> Category | None:
+        if not raw_cat:
+            return None
+        # 1. Direct exact or case-insensitive match (e.g. "Ăn sáng", "Xăng cr")
+        cat = categories.get(raw_cat) or categories_ci.get(raw_cat.casefold())
+        if cat is not None:
+            return cat
+        # 2. Canonical mapping fallback (e.g. English canonical names)
+        canonical_name = VI_LABEL_TO_CANONICAL_NAME.get(raw_cat)
+        if canonical_name:
+            cat = categories.get(canonical_name) or categories_ci.get(canonical_name.casefold())
+            if cat is not None:
+                return cat
+        return None
 
     pending: list[RawImportRow] = []
     payloads: dict[int, dict[str, object]] = {}
@@ -152,14 +313,14 @@ def apply_import_batch(session: Session, batch_id: int) -> ApplyResult:
     out_rows = [r for r in pending if _text(payloads[r.id].get("Nhóm")) == TRANSFER_OUT_GROUP]
     in_rows = [r for r in pending if _text(payloads[r.id].get("Nhóm")) == TRANSFER_IN_GROUP]
 
+    # Pass 1: Intra-batch transfer pairing
     for out_row in out_rows:
         out_payload = payloads[out_row.id]
         own_wallet = _text(out_payload.get("Ví"))
         note = _text(out_payload.get("Ghi chú"))
-        dest_match = _DEST_NOTE_RE.match(note) if note else None
-        if own_wallet is None or dest_match is None:
-            continue  # falls through to the plain per-row path below
-        dest_wallet = dest_match.group(1).strip()
+        dest_wallet = extract_dest_wallet(note)
+        if own_wallet is None or dest_wallet is None:
+            continue
         try:
             out_amount = abs(Decimal(str(out_payload["Số tiền"])))
             out_date = parse_moneylover_date(out_payload["Ngày"])
@@ -174,8 +335,8 @@ def apply_import_batch(session: Session, batch_id: int) -> ApplyResult:
             if _text(in_payload.get("Ví")) != dest_wallet:
                 continue
             in_note = _text(in_payload.get("Ghi chú"))
-            src_match = _SRC_NOTE_RE.match(in_note) if in_note else None
-            if src_match is None or src_match.group(1).strip() != own_wallet:
+            src_wallet = extract_src_wallet(in_note)
+            if src_wallet != own_wallet:
                 continue
             try:
                 in_amount = abs(Decimal(str(in_payload["Số tiền"])))
@@ -189,21 +350,27 @@ def apply_import_batch(session: Session, batch_id: int) -> ApplyResult:
             continue
         search_used_in_ids.add(matched_in_row.id)
 
-        src_account = accounts.get(own_wallet)
-        dst_account = accounts.get(dest_wallet)
-        if src_account is None or dst_account is None:
-            # Leave BOTH legs for the plain per-row path -- the side whose
-            # wallet DOES match still gets booked correctly there (as a
-            # standalone EXPENSE/INCOME), only the truly-unmatched side is
-            # reported as unresolved. Forcing a transfer here would either
-            # silently drop the matched side's real balance movement or
-            # require guessing which account was meant.
+        src_account = get_account(own_wallet)
+        dst_account = get_account(dest_wallet)
+        if src_account is None or dst_account is None or src_account.id == dst_account.id:
             continue
         scaled = money_to_scaled(out_amount)
         if scaled == 0:
             consumed_ids.add(out_row.id)
             consumed_ids.add(matched_in_row.id)
             continue
+
+        # Check if already booked in an earlier batch
+        existing_ev = find_matching_existing_transfer(
+            session, src_account.id, dst_account.id, scaled, out_date, out_row.id
+        )
+        if existing_ev is not None:
+            existing_ev.raw_import_row_id_secondary = out_row.id
+            result.transfer_pairs_applied += 1
+            consumed_ids.add(out_row.id)
+            consumed_ids.add(matched_in_row.id)
+            continue
+
         event = FinancialEvent(
             event_type=FinancialEventType.TRANSFER,
             transaction_date=out_date,
@@ -220,12 +387,106 @@ def apply_import_batch(session: Session, batch_id: int) -> ApplyResult:
         consumed_ids.add(out_row.id)
         consumed_ids.add(matched_in_row.id)
 
+    # Pass 2: Single-leg transfer-in (e.g. statement of receiving account imported alone)
+    for in_row in in_rows:
+        if in_row.id in consumed_ids:
+            continue
+        in_payload = payloads[in_row.id]
+        own_wallet = _text(in_payload.get("Ví"))
+        note = _text(in_payload.get("Ghi chú"))
+        src_wallet = extract_src_wallet(note)
+        if own_wallet is None or src_wallet is None:
+            continue
+        try:
+            in_amount = abs(Decimal(str(in_payload["Số tiền"])))
+            in_date = parse_moneylover_date(in_payload["Ngày"])
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            continue
+        src_account = get_account(src_wallet)
+        dst_account = get_account(own_wallet)
+        if src_account is None or dst_account is None or src_account.id == dst_account.id:
+            continue
+        scaled = money_to_scaled(in_amount)
+        if scaled == 0:
+            consumed_ids.add(in_row.id)
+            continue
+
+        existing_ev = find_matching_existing_transfer(
+            session, src_account.id, dst_account.id, scaled, in_date, in_row.id
+        )
+        if existing_ev is not None:
+            existing_ev.raw_import_row_id_secondary = in_row.id
+            result.transfer_pairs_applied += 1
+            consumed_ids.add(in_row.id)
+            continue
+
+        event = FinancialEvent(
+            event_type=FinancialEventType.TRANSFER,
+            transaction_date=in_date,
+            note=note,
+            raw_import_row_id=in_row.id,
+            entries=[
+                AccountEntry(account_id=src_account.id, amount_scaled=-scaled),
+                AccountEntry(account_id=dst_account.id, amount_scaled=scaled),
+            ],
+        )
+        session.add(event)
+        result.transfer_pairs_applied += 1
+        consumed_ids.add(in_row.id)
+
+    # Pass 3: Single-leg transfer-out (e.g. statement of sending account imported alone)
+    for out_row in out_rows:
+        if out_row.id in consumed_ids:
+            continue
+        out_payload = payloads[out_row.id]
+        own_wallet = _text(out_payload.get("Ví"))
+        note = _text(out_payload.get("Ghi chú"))
+        dest_wallet = extract_dest_wallet(note)
+        if own_wallet is None or dest_wallet is None:
+            continue
+        try:
+            out_amount = abs(Decimal(str(out_payload["Số tiền"])))
+            out_date = parse_moneylover_date(out_payload["Ngày"])
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            continue
+        src_account = get_account(own_wallet)
+        dst_account = get_account(dest_wallet)
+        if src_account is None or dst_account is None or src_account.id == dst_account.id:
+            continue
+        scaled = money_to_scaled(out_amount)
+        if scaled == 0:
+            consumed_ids.add(out_row.id)
+            continue
+
+        existing_ev = find_matching_existing_transfer(
+            session, src_account.id, dst_account.id, scaled, out_date, out_row.id
+        )
+        if existing_ev is not None:
+            existing_ev.raw_import_row_id_secondary = out_row.id
+            result.transfer_pairs_applied += 1
+            consumed_ids.add(out_row.id)
+            continue
+
+        event = FinancialEvent(
+            event_type=FinancialEventType.TRANSFER,
+            transaction_date=out_date,
+            note=note,
+            raw_import_row_id=out_row.id,
+            entries=[
+                AccountEntry(account_id=src_account.id, amount_scaled=-scaled),
+                AccountEntry(account_id=dst_account.id, amount_scaled=scaled),
+            ],
+        )
+        session.add(event)
+        result.transfer_pairs_applied += 1
+        consumed_ids.add(out_row.id)
+
     for row in pending:
         if row.id in consumed_ids:
             continue
         payload = payloads[row.id]
         wallet = _text(payload.get("Ví"))
-        account = accounts.get(wallet) if wallet else None
+        account = get_account(wallet)
         if account is None:
             key = wallet or "(trống)"
             result.unmatched_wallets[key] = result.unmatched_wallets.get(key, 0) + 1
@@ -238,8 +499,7 @@ def apply_import_batch(session: Session, batch_id: int) -> ApplyResult:
         if scaled == 0:
             continue  # a zero-amount row is not a financial event; silently skipped, same as normalize_moneylover_row
         raw_category = _text(payload.get("Nhóm"))
-        canonical_name = VI_LABEL_TO_CANONICAL_NAME.get(raw_category) if raw_category else None
-        category = categories.get(canonical_name) if canonical_name else None
+        category = get_category(raw_category)
         if category is not None:
             result.categorized_rows += 1
         else:

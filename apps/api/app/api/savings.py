@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.core.money import money_to_scaled
 from app.models.account import Account, AccountType
+from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
 from app.models.savings import (
     DayCountConvention,
     InterestPaymentMethod,
@@ -75,7 +76,7 @@ class SavingsAccountCreate(BaseModel):
     product_name: str = "Tiết kiệm có kỳ hạn"
     name: str
     principal: Decimal
-    funding_account_id: int
+    funding_account_id: int | None = None
     opened_date: datetime.date
     term_months: int
     annual_rate: Decimal
@@ -261,7 +262,8 @@ def list_savings(db: DbSession) -> list[dict[str, object]]:
 
 @router.post("", status_code=201)
 def create_savings(data: SavingsAccountCreate, db: DbSession) -> dict[str, object]:
-    _require_wallet_account(db, data.funding_account_id, field="funding_account_id")
+    if data.funding_account_id is not None:
+        _require_wallet_account(db, data.funding_account_id, field="funding_account_id")
     product = _find_or_create_product(
         db, institution=data.institution, name=data.product_name
     )
@@ -434,3 +436,81 @@ def renew_savings_route(
         db.rollback()
         raise HTTPException(400, str(exc)) from exc
     return _account_json(account, as_of=_today(), include_terms=True)
+
+
+@router.delete("/{account_id}")
+def delete_savings_account_route(
+    account_id: int, db: DbSession
+) -> dict[str, object]:
+    """Permanently delete a savings account, its terms, and associated financial events."""
+    account = db.get(SavingsAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Savings account not found")
+
+    terms = list(
+        db.scalars(
+            select(SavingsTerm).where(
+                SavingsTerm.savings_account_id == account_id
+            ).order_by(SavingsTerm.sequence)
+        )
+    )
+
+    # 1. Delete associated ledger events to refund the wallet account and clean up history
+    events_to_delete: list[FinancialEvent] = []
+
+    if account.funding_account_id and terms:
+        initial_principal = terms[0].principal_scaled
+        # Find matching SAVINGS_DEPOSIT event created when opening this savings book
+        deposit_events = list(
+            db.scalars(
+                select(FinancialEvent)
+                .join(AccountEntry)
+                .where(
+                    FinancialEvent.event_type == FinancialEventType.SAVINGS_DEPOSIT,
+                    FinancialEvent.transaction_date == account.opened_date,
+                    AccountEntry.account_id == account.funding_account_id,
+                    AccountEntry.amount_scaled == -initial_principal,
+                )
+            )
+        )
+        for ev in deposit_events:
+            if ev not in events_to_delete:
+                events_to_delete.append(ev)
+
+    # Find any withdrawal or interest events created on settlement/renewal
+    for term in terms:
+        if term.closed_at:
+            close_events = list(
+                db.scalars(
+                    select(FinancialEvent)
+                    .join(AccountEntry)
+                    .where(
+                        FinancialEvent.event_type.in_([
+                            FinancialEventType.SAVINGS_WITHDRAWAL,
+                            FinancialEventType.INTEREST,
+                        ]),
+                        FinancialEvent.transaction_date == term.closed_at,
+                    )
+                )
+            )
+            for ev in close_events:
+                if ev not in events_to_delete:
+                    events_to_delete.append(ev)
+
+    for ev in events_to_delete:
+        db.delete(ev)
+    db.flush()
+
+    # 2. Break self-referential term foreign keys before deletion
+    for term in terms:
+        term.renewed_from_term_id = None
+    db.flush()
+
+    for term in terms:
+        db.delete(term)
+    db.flush()
+
+    db.delete(account)
+    db.commit()
+    return {"status": "ok", "deleted_account_id": account_id}
+

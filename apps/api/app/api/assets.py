@@ -10,11 +10,13 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.money import money_to_scaled
+from app.models.account import Account
 from app.models.crypto import (
     CryptoHolding,
     CryptoLot,
     crypto_quantity_to_scaled,
 )
+from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
 from app.models.precious_metal import (
     SUPPORTED_PRECIOUS_METAL_BRANDS,
     PreciousMetalBrand,
@@ -27,7 +29,10 @@ from app.services.crypto_coin_catalog import (
     CoinCatalogUnavailableError,
     CoinGeckoCoinListProvider,
 )
+from app.services.crypto_pricing import sync_crypto_holdings_prices
 from app.services.http_client import UrllibHttpClient
+from app.services.metal_price_reference import get_or_refresh_metal_quote
+from app.services.pricing import resolve_metal_instrument
 
 router = APIRouter(prefix="/api/v1/assets", tags=["assets"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -59,6 +64,7 @@ class MetalCreate(BaseModel):
     purchase_price: Decimal
     total_cost: Decimal
     pricing_instrument: str | None = None
+    funding_account_id: int | None = None
     # User request, 2026-08-26: "không tính vào báo cáo" also applies to
     # newly-added assets -- opt-in, defaults False.
     excluded_from_reports: bool = False
@@ -87,6 +93,7 @@ class CryptoCreate(BaseModel):
     purchase_price: Decimal
     total_cost: Decimal
     pricing_instrument: str | None = None
+    funding_account_id: int | None = None
     excluded_from_reports: bool = False
 
     @field_validator("coingecko_id", "symbol")
@@ -164,11 +171,14 @@ def list_metals(db: DbSession):
 @router.post("/metals", status_code=201)
 def create_metal(data: MetalCreate, db: DbSession):
     try:
+        pricing_inst = data.pricing_instrument or resolve_metal_instrument(
+            data.brand.value, data.product_type, data.purity
+        )
         holding = PreciousMetalHolding(
             metal_type=PreciousMetalType(data.metal_type),
             brand=data.brand,
             product_type=data.product_type,
-            pricing_instrument=data.pricing_instrument,
+            pricing_instrument=pricing_inst,
             excluded_from_reports=data.excluded_from_reports,
         )
         holding.purity = data.purity
@@ -178,8 +188,32 @@ def create_metal(data: MetalCreate, db: DbSession):
         lot.total_cost = data.total_cost
         holding.lots = [lot]
         db.add(holding)
+
+        if data.funding_account_id is not None:
+            wallet = db.get(Account, data.funding_account_id)
+            if wallet is None:
+                raise HTTPException(400, "Funding wallet account not found")
+            cost_scaled = money_to_scaled(data.total_cost)
+            if cost_scaled > 0:
+                event = FinancialEvent(
+                    event_type=FinancialEventType.ASSET_PURCHASE,
+                    transaction_date=data.purchase_date,
+                    note=f"Mua vàng {data.product_type} ({data.brand.value})",
+                    excluded_from_reports=data.excluded_from_reports,
+                    entries=[
+                        AccountEntry(
+                            account_id=data.funding_account_id,
+                            amount_scaled=-cost_scaled,
+                        )
+                    ],
+                )
+                db.add(event)
+
         db.commit()
         db.refresh(holding)
+    except HTTPException:
+        db.rollback()
+        raise
     except ValueError as exc:
         db.rollback()
         raise HTTPException(400, str(exc)) from exc
@@ -215,6 +249,10 @@ def update_metal(holding_id: int, data: MetalUpdate, db: DbSession):
         holding.purity = data.purity
     if data.pricing_instrument is not None:
         holding.pricing_instrument = data.pricing_instrument
+    elif data.brand is not None or data.product_type is not None or data.purity is not None:
+        holding.pricing_instrument = resolve_metal_instrument(
+            holding.brand.value, holding.product_type, holding.purity
+        )
     if data.excluded_from_reports is not None:
         holding.excluded_from_reports = data.excluded_from_reports
     if holding.lots:
@@ -303,17 +341,42 @@ def create_crypto(data: CryptoCreate, db: DbSession):
             purchase_price_scaled=money_to_scaled(data.purchase_price),
             total_cost_scaled=money_to_scaled(data.total_cost),
         )
+        pricing_inst = data.pricing_instrument or f"CRYPTO/{data.symbol.upper()}/USD"
         holding = CryptoHolding(
             coingecko_id=data.coingecko_id.lower(),
             symbol=data.symbol.lower(),
             display_name=data.display_name,
-            pricing_instrument=data.pricing_instrument,
+            pricing_instrument=pricing_inst,
             excluded_from_reports=data.excluded_from_reports,
             lots=[lot],
         )
         db.add(holding)
+
+        if data.funding_account_id is not None:
+            wallet = db.get(Account, data.funding_account_id)
+            if wallet is None:
+                raise HTTPException(400, "Funding wallet account not found")
+            cost_scaled = money_to_scaled(data.total_cost)
+            if cost_scaled > 0:
+                event = FinancialEvent(
+                    event_type=FinancialEventType.ASSET_PURCHASE,
+                    transaction_date=data.purchase_date,
+                    note=f"Mua {data.symbol.upper()} - SL: {data.quantity}",
+                    excluded_from_reports=data.excluded_from_reports,
+                    entries=[
+                        AccountEntry(
+                            account_id=data.funding_account_id,
+                            amount_scaled=-cost_scaled,
+                        )
+                    ],
+                )
+                db.add(event)
+
         db.commit()
         db.refresh(holding)
+    except HTTPException:
+        db.rollback()
+        raise
     except ValueError as exc:
         db.rollback()
         raise HTTPException(400, str(exc)) from exc
@@ -345,6 +408,8 @@ def update_crypto(holding_id: int, data: CryptoUpdate, db: DbSession):
         holding.display_name = data.display_name
     if data.pricing_instrument is not None:
         holding.pricing_instrument = data.pricing_instrument
+    elif data.symbol is not None:
+        holding.pricing_instrument = f"CRYPTO/{holding.symbol.upper()}/USD"
     if data.excluded_from_reports is not None:
         holding.excluded_from_reports = data.excluded_from_reports
     if holding.lots:
@@ -380,3 +445,50 @@ def delete_crypto(holding_id: int, db: DbSession):
     db.delete(holding)
     db.commit()
     return {"id": holding_id, "deleted": True}
+
+
+@router.post("/crypto/sync-prices")
+def sync_crypto_prices(db: DbSession):
+    try:
+        result = sync_crypto_holdings_prices(db)
+        return result
+    except Exception as exc:
+        raise HTTPException(500, f"Error syncing CoinMarketCap prices: {exc}") from exc
+
+
+@router.post("/metals/sync-prices")
+def sync_metal_prices(db: DbSession):
+    try:
+        metals = list(
+            db.scalars(
+                select(PreciousMetalHolding)
+                .where(PreciousMetalHolding.is_net_worth.is_(True))
+            )
+        )
+        as_of = datetime.datetime.now(datetime.UTC)
+        updated_items = []
+        for m in metals:
+            inst = m.pricing_instrument or resolve_metal_instrument(
+                m.brand.value, m.product_type, m.purity
+            )
+            m.pricing_instrument = inst
+            quote = get_or_refresh_metal_quote(
+                db, inst, as_of, refresh_interval=datetime.timedelta(seconds=0)
+            )
+            if quote and quote.valuation_price is not None:
+                updated_items.append({
+                    "id": m.id,
+                    "brand": m.brand.value,
+                    "product_type": m.product_type,
+                    "instrument": inst,
+                    "valuation_price": str(quote.valuation_price),
+                    "provider": quote.provider.code if quote.provider else "BTMC",
+                    "state": quote.state.value if hasattr(quote.state, "value") else str(quote.state),
+                })
+        db.commit()
+        return {
+            "updated_count": len(updated_items),
+            "items": updated_items,
+        }
+    except Exception as exc:
+        raise HTTPException(500, f"Error syncing metal prices: {exc}") from exc

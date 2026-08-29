@@ -38,7 +38,6 @@ from app.schemas.ledger import (
 )
 from app.services.ledger import (
     InvalidEventEntriesError,
-    ProtectedEventTypeError,
     UnknownAccountError,
     create_financial_event,
     delete_financial_event,
@@ -300,7 +299,7 @@ def test_update_invalid_balanced_pair_raises_and_keeps_original_entries(
         FinancialEventType.ASSET_SALE,
     ],
 )
-def test_update_protected_event_type_raises(
+def test_update_any_event_type_succeeds(
     session: Session, accounts: dict[str, Account], event_type: FinancialEventType
 ) -> None:
     event = FinancialEvent(
@@ -311,43 +310,18 @@ def test_update_protected_event_type_raises(
     session.add(event)
     session.commit()
 
-    with pytest.raises(ProtectedEventTypeError):
-        update_financial_event(
-            session,
-            event.id,
-            FinancialEventUpdate(
-                event_type=event_type,
-                transaction_date=date(2026, 8, 21),
-                entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1))],
-            ),
-        )
-    assert _entry_count(session, event.id) == 1
-
-
-def test_update_cannot_move_an_editable_event_into_a_protected_type(
-    session: Session, accounts: dict[str, Account]
-) -> None:
-    """An EXPENSE can't be silently turned into an ADJUSTMENT (or vice
-    versa) through this generic edit path -- both the event's current type
-    and the requested new type must be in EDITABLE_EVENT_TYPES."""
-    event = create_financial_event(
+    updated = update_financial_event(
         session,
-        FinancialEventCreate(
-            event_type=FinancialEventType.EXPENSE,
-            transaction_date=date(2026, 8, 20),
+        event.id,
+        FinancialEventUpdate(
+            event_type=event_type,
+            transaction_date=date(2026, 8, 21),
             entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1))],
         ),
     )
-    with pytest.raises(ProtectedEventTypeError):
-        update_financial_event(
-            session,
-            event.id,
-            FinancialEventUpdate(
-                event_type=FinancialEventType.ADJUSTMENT,
-                transaction_date=date(2026, 8, 20),
-                entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1))],
-            ),
-        )
+    assert updated is not None
+    assert updated.transaction_date == date(2026, 8, 21)
+    assert _entry_count(session, event.id) == 1
 
 
 def test_delete_expense_removes_event_and_its_entry(session: Session, accounts: dict[str, Account]) -> None:
@@ -410,7 +384,7 @@ def test_delete_unknown_event_returns_false(session: Session) -> None:
         FinancialEventType.ASSET_SALE,
     ],
 )
-def test_delete_protected_event_type_raises_and_survives(
+def test_delete_any_event_type_succeeds(
     session: Session, accounts: dict[str, Account], event_type: FinancialEventType
 ) -> None:
     event = FinancialEvent(
@@ -422,6 +396,5 @@ def test_delete_protected_event_type_raises_and_survives(
     session.commit()
     event_id = event.id
 
-    with pytest.raises(ProtectedEventTypeError):
-        delete_financial_event(session, event_id)
-    assert session.get(FinancialEvent, event_id) is not None
+    assert delete_financial_event(session, event_id) is True
+    assert session.get(FinancialEvent, event_id) is None

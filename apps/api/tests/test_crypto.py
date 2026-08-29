@@ -18,6 +18,7 @@ from app.models import Account, AccountType, FinancialEvent, FinancialEventType
 from app.models.crypto import CryptoHolding, CryptoLot
 from app.services.crypto_pricing import (
     CoinGeckoPriceAdapter,
+    CoinMarketCapPriceAdapter,
     UnconfiguredCryptoPriceProvider,
 )
 
@@ -179,3 +180,47 @@ def test_coingecko_adapter_uses_exact_mapping_and_decimal_json() -> None:
     assert quote.product_code == "bitcoin/usd"
     assert quote.buy_price == Decimal("65000.1234")
     assert quote.sell_price == Decimal("65000.1234")
+
+
+def test_coinmarketcap_adapter_converts_usd_to_vnd_via_exchange_rate() -> None:
+    cmc_response = Mock()
+    cmc_response.text = json.dumps({
+        "data": {
+            "cryptoCurrencyList": [
+                {
+                    "name": "Bitcoin",
+                    "symbol": "BTC",
+                    "slug": "bitcoin",
+                    "quotes": [
+                        {
+                            "name": "USD",
+                            "price": 80000.5,
+                            "lastUpdated": "2026-08-27T10:00:00.000Z",
+                        }
+                    ],
+                }
+            ]
+        }
+    })
+    fx_response = Mock()
+    fx_response.text = json.dumps({"rates": {"VND": 26000.0}})
+
+    client = Mock()
+    client.get.side_effect = [fx_response, cmc_response]
+
+    as_of = datetime.datetime(2026, 8, 27, 12, tzinfo=datetime.UTC)
+    adapter = CoinMarketCapPriceAdapter(client)
+
+    quotes = adapter.fetch_all_quotes(as_of)
+    assert "BTC" in quotes
+    price_usd, price_vnd, quote = quotes["BTC"]
+
+    assert price_usd == Decimal("80000.5")
+    assert price_vnd == Decimal("2080013000.0000")  # 80000.5 * 26000 = 2,080,013,000
+    assert quote.provider.code == "COINMARKETCAP"
+    assert quote.buy_price == Decimal("2080013000.0000")
+    meta = json.loads(quote.source_metadata or "{}")
+    assert meta["symbol"] == "BTC"
+    assert meta["price_usd"] == "80000.5"
+    assert meta["usd_vnd_rate"] == "26000.0"
+

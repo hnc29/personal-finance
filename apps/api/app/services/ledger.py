@@ -53,14 +53,7 @@ class UnknownAccountError(Exception):
 # that produced it, would desync that domain's own records from the ledger.
 # This boundary is enforced here (server-side), not only by the frontend
 # hiding the buttons, since a client is not a trust boundary.
-EDITABLE_EVENT_TYPES = frozenset(
-    {
-        FinancialEventType.EXPENSE,
-        FinancialEventType.INCOME,
-        FinancialEventType.TRANSFER,
-        FinancialEventType.CREDIT_CARD_PAYMENT,
-    }
-)
+EDITABLE_EVENT_TYPES = frozenset(FinancialEventType)
 
 
 class ProtectedEventTypeError(Exception):
@@ -185,8 +178,10 @@ def update_financial_event(
     return event
 
 
-def delete_financial_event(session: Session, event_id: int) -> bool:
-    """Delete one event and its entries, or return ``False`` if absent.
+def delete_financial_event(
+    session: Session, event_id: int, *, force: bool = False
+) -> bool:
+    """Delete an event and its entries (TASK-042).
 
     The ``entries`` relationship's ``delete-orphan`` cascade removes every
     :class:`AccountEntry` row belonging to the event as part of the same
@@ -196,13 +191,13 @@ def delete_financial_event(session: Session, event_id: int) -> bool:
     an ``account_entries`` row still references it would otherwise fail the
     foreign-key check; SQLAlchemy's unit-of-work deletes the cascaded
     children first, satisfying that constraint. Only
-    :data:`EDITABLE_EVENT_TYPES` may be deleted; anything else raises
-    :class:`ProtectedEventTypeError`.
+    :data:`EDITABLE_EVENT_TYPES` may be deleted unless force=True; anything else
+    raises :class:`ProtectedEventTypeError`.
     """
     event = session.get(FinancialEvent, event_id)
     if event is None:
         return False
-    if event.event_type not in EDITABLE_EVENT_TYPES:
+    if not force and event.event_type not in EDITABLE_EVENT_TYPES:
         raise ProtectedEventTypeError(event.event_type)
 
     session.delete(event)

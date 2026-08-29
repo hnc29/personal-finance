@@ -46,7 +46,7 @@ export interface SavingsAccount {
 }
 export interface SavingsCreateInput {
   institution: string; product_name?: string; name: string; principal: string;
-  funding_account_id: number; opened_date: string; term_months: number;
+  funding_account_id?: number | null; opened_date: string; term_months: number;
   annual_rate: string; non_term_rate?: string; day_count_convention?: SavingsDayCount;
   interest_payment_method?: SavingsInterestPayment; maturity_action?: SavingsMaturityAction; notes?: string | null;
   excluded_from_reports?: boolean;
@@ -66,6 +66,7 @@ export interface MetalInput {
   metal_type: "GOLD" | "SILVER"; brand: string; product_type: string;
   purity: string; quantity_grams: string; purchase_date: string;
   purchase_price: string; total_cost: string; pricing_instrument?: string;
+  funding_account_id?: number;
   excluded_from_reports?: boolean;
 }
 export type MetalUpdateInput = Partial<MetalInput>;
@@ -78,7 +79,9 @@ export interface CryptoHolding {
 export interface CryptoInput {
   coingecko_id: string; symbol: string; display_name?: string;
   quantity: string; purchase_date: string; purchase_price: string;
-  total_cost: string; pricing_instrument?: string; excluded_from_reports?: boolean;
+  total_cost: string; pricing_instrument?: string;
+  funding_account_id?: number;
+  excluded_from_reports?: boolean;
 }
 export type CryptoUpdateInput = Partial<CryptoInput>;
 
@@ -87,19 +90,23 @@ export interface CoinSummary { id: string; symbol: string; name: string }
 // must auto-convert to VND (the app's one storage currency) using a rate
 // that "tự động cập nhật" (auto-updates) -- see app/api/fx.py.
 export interface FxRate { rate: string; as_of: string; source: string }
+
+export interface BackupItem {
+  filename: string;
+  size_bytes: number;
+  created_at: string;
+  formatted_date: string;
+  is_db: boolean;
+}
+
 export const api = {
   accounts: { list: () => request<Account[]>("/accounts"), balance: (id: number) => request<AccountBalance>(`/accounts/${id}/balance`), create: (input: AccountInput) => request<Account>("/accounts", { method: "POST", body: JSON.stringify(input) }), update: (id: number, input: AccountUpdate) => request<Account>(`/accounts/${id}`, { method: "PATCH", body: JSON.stringify(input) }) },
   categories: { list: () => request<Category[]>("/categories"), create: (input: CategoryInput) => request<Category>("/categories", { method: "POST", body: JSON.stringify(input) }), update: (id: number, input: CategoryUpdate) => request<Category>(`/categories/${id}`, { method: "PATCH", body: JSON.stringify(input) }) },
   events: {
     list: () => request<FinancialEvent[]>("/financial-events"),
     create: (input: EventInput) => request<FinancialEvent>("/financial-events", { method: "POST", body: JSON.stringify(input) }),
-    // TASK-042: view/edit/delete a transaction. `remove` returns a small
-    // JSON ack ({id, deleted}) rather than a bare 204 -- `request()`
-    // above always calls response.json(), which would throw on an empty
-    // 204 body, so the backend deliberately answers DELETE with 200 + a
-    // body instead of touching that shared helper for one endpoint.
     update: (id: number, input: EventUpdate) => request<FinancialEvent>(`/financial-events/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
-    remove: (id: number) => request<{ id: number; deleted: boolean }>(`/financial-events/${id}`, { method: "DELETE" }),
+    remove: (id: number, force?: boolean) => request<{ id: number; deleted: boolean }>(`/financial-events/${id}${force ? "?force=true" : ""}`, { method: "DELETE" }),
   },
   portfolio: { overview: () => request<PortfolioOverview>("/portfolio/overview") },
   imports: { list: () => request<ImportBatch[]>("/import-batches"), apply: (id: number) => request<ImportApplyResult>(`/imports/${id}/apply`, { method: "POST" }) },
@@ -110,6 +117,7 @@ export const api = {
       get: (id: number) => request<SavingsAccount>(`/assets/savings/${id}`),
       create: (input: SavingsCreateInput) => request<SavingsAccount>("/assets/savings", { method: "POST", body: JSON.stringify(input) }),
       update: (id: number, input: SavingsPatchInput) => request<SavingsAccount>(`/assets/savings/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+      remove: (id: number) => request<{ status: string; deleted_account_id: number }>(`/assets/savings/${id}`, { method: "DELETE" }),
       close: (id: number, input: SavingsCloseInput) => request<SavingsAccount>(`/assets/savings/${id}/close`, { method: "POST", body: JSON.stringify(input) }),
       earlyClose: (id: number, input: SavingsEarlyCloseInput) => request<SavingsAccount>(`/assets/savings/${id}/early-close`, { method: "POST", body: JSON.stringify(input) }),
       renew: (id: number, input: SavingsRenewInput) => request<SavingsAccount>(`/assets/savings/${id}/renew`, { method: "POST", body: JSON.stringify(input) }),
@@ -120,6 +128,7 @@ export const api = {
       create: (input: MetalInput) => request<MetalHolding>("/assets/metals", { method: "POST", body: JSON.stringify(input) }),
       update: (id: number, input: MetalUpdateInput) => request<MetalHolding>(`/assets/metals/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
       remove: (id: number) => request<{ id: number; deleted: boolean }>(`/assets/metals/${id}`, { method: "DELETE" }),
+      syncPrices: () => request<{ updated_count: number; items: Array<{ id: number; brand: string; product_type: string; instrument: string; valuation_price: string; provider: string; state: string }> }>("/assets/metals/sync-prices", { method: "POST" }),
     },
     crypto: {
       list: () => request<CryptoHolding[]>("/assets/crypto"),
@@ -127,7 +136,87 @@ export const api = {
       update: (id: number, input: CryptoUpdateInput) => request<CryptoHolding>(`/assets/crypto/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
       remove: (id: number) => request<{ id: number; deleted: boolean }>(`/assets/crypto/${id}`, { method: "DELETE" }),
       searchCoins: (q: string) => request<CoinSummary[]>(`/assets/crypto/coins?q=${encodeURIComponent(q)}`),
+      syncPrices: () => request<{ updated_count: number; usd_vnd_rate: string; items: Array<{ id: number; symbol: string; display_name: string | null; price_usd: string; price_vnd: string; usd_vnd_rate: string }> }>("/assets/crypto/sync-prices", { method: "POST" }),
     },
   },
   fx: { usdVnd: () => request<FxRate>("/fx/usd-vnd") },
+  exports: {
+    statementData: (params: { account_id?: number | string; start_date?: string; end_date?: string }) => {
+      const q = new URLSearchParams();
+      if (params.account_id) q.set("account_id", String(params.account_id));
+      if (params.start_date) q.set("start_date", params.start_date);
+      if (params.end_date) q.set("end_date", params.end_date);
+      return request<StatementData>(`/exports/statement/data${q.toString() ? `?${q.toString()}` : ""}`);
+    },
+    statementXlsxUrl: (params: { account_id?: number | string; start_date?: string; end_date?: string }) => {
+      const q = new URLSearchParams();
+      if (params.account_id) q.set("account_id", String(params.account_id));
+      if (params.start_date) q.set("start_date", params.start_date);
+      if (params.end_date) q.set("end_date", params.end_date);
+      return `${API_URL}/api/v1/exports/statement.xlsx${q.toString() ? `?${q.toString()}` : ""}`;
+    },
+    statementCsvUrl: (params: { account_id?: number | string; start_date?: string; end_date?: string }) => {
+      const q = new URLSearchParams();
+      if (params.account_id) q.set("account_id", String(params.account_id));
+      if (params.start_date) q.set("start_date", params.start_date);
+      if (params.end_date) q.set("end_date", params.end_date);
+      return `${API_URL}/api/v1/exports/statement.csv${q.toString() ? `?${q.toString()}` : ""}`;
+    },
+    eventsCsvUrl: (params: { account_id?: number | string; start_date?: string; end_date?: string }) => {
+      const q = new URLSearchParams();
+      if (params.account_id) q.set("account_id", String(params.account_id));
+      if (params.start_date) q.set("start_date", params.start_date);
+      if (params.end_date) q.set("end_date", params.end_date);
+      return `${API_URL}/api/v1/exports/events.csv${q.toString() ? `?${q.toString()}` : ""}`;
+    },
+    eventsXlsxUrl: (params: { account_id?: number | string; start_date?: string; end_date?: string }) => {
+      const q = new URLSearchParams();
+      if (params.account_id) q.set("account_id", String(params.account_id));
+      if (params.start_date) q.set("start_date", params.start_date);
+      if (params.end_date) q.set("end_date", params.end_date);
+      return `${API_URL}/api/v1/exports/events.xlsx${q.toString() ? `?${q.toString()}` : ""}`;
+    },
+  },
+  backup: {
+    list: () => request<BackupItem[]>("/backup/list"),
+    createProject: () => request<{ status: string; filename: string; size_bytes: number; message: string }>("/backup/create", { method: "POST", body: JSON.stringify({ mode: "project" }) }),
+    restoreProject: (filename: string) => request<{ status: string; message: string }>("/backup/restore/project", { method: "POST", body: JSON.stringify({ filename }) }),
+    remove: (filename: string) => request<{ status: string; message: string }>(`/backup/${encodeURIComponent(filename)}`, { method: "DELETE" }),
+  },
 };
+
+export interface StatementTransaction {
+  id: number;
+  entry_id: number;
+  account_id: number;
+  transaction_date: string;
+  effective_date: string;
+  event_type: string;
+  event_type_label: string;
+  description: string;
+  ref_no: string;
+  amount: string;
+  amount_scaled: number;
+  running_balance: string;
+  running_balance_scaled: number;
+}
+
+export interface StatementData {
+  account: {
+    id: number | null;
+    name: string;
+    account_type: string;
+    account_type_label: string;
+    currency: string;
+  };
+  period: {
+    start_date: string | null;
+    end_date: string | null;
+  };
+  opening_balance: string;
+  closing_balance: string;
+  total_in: string;
+  total_out: string;
+  transaction_count: number;
+  transactions: StatementTransaction[];
+}

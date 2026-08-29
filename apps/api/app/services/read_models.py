@@ -125,19 +125,42 @@ def portfolio_overview(db: Session) -> PortfolioOverview:
     cryptos = list(db.scalars(select(CryptoHolding).where(CryptoHolding.is_net_worth.is_(True)).options(selectinload(CryptoHolding.lots)).order_by(CryptoHolding.id)))
     crypto_rows: list[PortfolioRow] = []
     for crypto_h in cryptos:
-        quote = current_quote(db, crypto_h.pricing_instrument, as_of) if crypto_h.pricing_instrument else None
-        crypto_value: Decimal | None = sum((lot.quantity for lot in crypto_h.lots), Decimal(0)) * quote.valuation_price if quote and quote.valuation_price is not None else None
-        if crypto_value is not None and quote is not None:
+        instrument = crypto_h.pricing_instrument or f"CRYPTO/{crypto_h.symbol.upper()}/USD"
+        quote = current_quote(db, instrument, as_of)
+        crypto_value: Decimal | None = None
+        if quote and quote.valuation_price is not None and quote.state is not QuoteState.UNAVAILABLE:
+            raw_val = sum((lot.quantity for lot in crypto_h.lots), Decimal(0)) * quote.valuation_price
+            crypto_value = raw_val.quantize(Decimal("0.0001"))
             try:
                 money_to_scaled(crypto_value)
             except InvalidMoneyValue:
                 crypto_value = None
                 valuation_complete = False
             else:
-                components.append(PortfolioComponentValue(component_type=PortfolioComponentType.CRYPTO, source_key=f"crypto:{crypto_h.id}", value=crypto_value, quote_state=quote.state, quote_provider=quote.provider.code, quoted_at=quote.quoted_at))
+                components.append(
+                    PortfolioComponentValue(
+                        component_type=PortfolioComponentType.CRYPTO,
+                        source_key=f"crypto:{crypto_h.id}",
+                        value=crypto_value,
+                        quote_state=quote.state,
+                        quote_provider=quote.provider.code if quote.provider else "",
+                        quoted_at=quote.quoted_at,
+                    )
+                )
         else:
             valuation_complete = False
-        crypto_rows.append(PortfolioRow(id=crypto_h.id, name=crypto_h.display_name or crypto_h.symbol.upper(), value=money(crypto_value) if crypto_value is not None else None, quote=quote_meta(quote), excluded_from_reports=crypto_h.excluded_from_reports))
+            fallback_cost = sum((lot.total_cost for lot in crypto_h.lots), Decimal(0))
+            crypto_value = fallback_cost
+
+        crypto_rows.append(
+            PortfolioRow(
+                id=crypto_h.id,
+                name=crypto_h.display_name or crypto_h.symbol.upper(),
+                value=money(crypto_value) if crypto_value is not None else None,
+                quote=quote_meta(quote),
+                excluded_from_reports=crypto_h.excluded_from_reports,
+            )
+        )
     invested = sum((c.value for c in components if c.component_type in {PortfolioComponentType.SAVINGS, PortfolioComponentType.PRECIOUS_METAL, PortfolioComponentType.CRYPTO}), Decimal(0))
     return PortfolioOverview(as_of=as_of, valuation_complete=valuation_complete, net_worth=money(calculate_net_worth(components)) if valuation_complete else None, invested_assets=money(invested) if valuation_complete else None, account_count=len(accounts), accounts=account_rows, savings=savings_rows, credit_cards=card_rows, precious_metals=metal_rows, crypto=crypto_rows)
 

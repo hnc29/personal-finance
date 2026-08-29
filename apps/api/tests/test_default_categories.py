@@ -23,25 +23,25 @@ def db(tmp_path) -> Session:
 
 
 def test_empty_database_gets_expected_hierarchy(db: Session) -> None:
-    assert merge_default_categories(db)["inserted"] == 69
+    assert merge_default_categories(db)["inserted"] == 79
     rows = list(db.scalars(select(Category)))
     by_name = {row.name: row for row in rows}
-    assert by_name["Groceries"].parent is by_name["Food & Drinks"]
-    assert by_name["Food & Drinks"].parent is by_name["Expenses"]
-    assert by_name["Salary"].parent is by_name["Income"]
+    assert by_name["Ăn sáng"].parent is by_name["Ăn uống"]
+    assert by_name["Ăn uống"].parent is by_name["Expenses"]
+    assert by_name["Lương"].parent is by_name["Income"]
 
 
 def test_second_seed_is_idempotent(db: Session) -> None:
     merge_default_categories(db)
     assert merge_default_categories(db)["inserted"] == 0
-    assert len(list(db.scalars(select(Category)))) == 69
+    assert len(list(db.scalars(select(Category)))) == 79
 
 
 def test_non_empty_database_preserves_custom_and_merges(db: Session) -> None:
     custom = Category(name="My category", is_active=False)
     db.add(custom)
     db.commit()
-    assert merge_default_categories(db)["inserted"] == 69
+    assert merge_default_categories(db)["inserted"] == 79
     db.refresh(custom)
     assert (custom.name, custom.parent_id, custom.is_active) == ("My category", None, False)
 
@@ -59,21 +59,21 @@ def test_catalog_depth_is_at_most_three(db: Session) -> None:
 
 def test_partial_tree_is_completed_without_duplicates(db: Session) -> None:
     expenses = Category(name="Expenses")
-    food = Category(name="Food & Drinks", parent=expenses)
+    food = Category(name="Ăn uống", parent=expenses)
     db.add_all([expenses, food])
     db.commit()
-    assert merge_default_categories(db)["inserted"] == 67
+    assert merge_default_categories(db)["inserted"] == 77
     assert merge_default_categories(db)["inserted"] == 0
-    assert len(list(db.scalars(select(Category)))) == 69
+    assert len(list(db.scalars(select(Category)))) == 79
 
 
 def test_conflict_is_preserved_and_reported(db: Session) -> None:
     custom = Category(name="Custom")
-    groceries = Category(name="Groceries", parent=custom, is_active=False)
-    db.add_all([custom, groceries])
+    an_sang = Category(name="Ăn sáng", parent=custom, is_active=False)
+    db.add_all([custom, an_sang])
     db.commit()
     result = merge_default_categories(db)
-    db.refresh(groceries)
+    db.refresh(an_sang)
     assert result["conflicts"] == 1
-    assert (groceries.parent_id, groceries.is_active) == (custom.id, False)
+    assert (an_sang.parent_id, an_sang.is_active) == (custom.id, False)
     assert missing_default_categories(db) == 0

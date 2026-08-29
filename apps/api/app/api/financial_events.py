@@ -109,15 +109,22 @@ def update_financial_event(
 
 
 @router.delete("/{event_id}", response_model=DeletedEventRead)
-def delete_financial_event(event_id: int, db: DbSession) -> DeletedEventRead:
+def delete_financial_event(
+    event_id: int, db: DbSession, force: bool = False
+) -> DeletedEventRead:
     """Delete an event and its entries (TASK-042).
 
     404 for an unknown event, 409 for an event type (ADJUSTMENT, INTEREST,
     SAVINGS_*, ASSET_*) that is owned by another domain flow and cannot be
-    deleted here.
+    deleted here without force=True.
     """
     try:
-        deleted = ledger_service.delete_financial_event(db, event_id)
+        if force:
+            deleted = ledger_service.delete_financial_event(
+                db, event_id, force=True
+            )
+        else:
+            deleted = ledger_service.delete_financial_event(db, event_id)
     except ProtectedEventTypeError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

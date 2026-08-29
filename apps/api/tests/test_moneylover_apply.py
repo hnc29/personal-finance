@@ -254,3 +254,125 @@ def test_unknown_batch_raises() -> None:
 
     with pytest.raises(BatchNotFoundError):
         apply_import_batch(_EmptySession(), 999)  # type: ignore[arg-type]
+
+
+def test_credit_card_parenthetical_wallet_matching(session: Session) -> None:
+    vpb_card = Account(name="VPBank (VPB-Card)", account_type=AccountType.CREDIT_CARD, currency="VND")
+    bidv_card = Account(name="BIDV (-Card)", account_type=AccountType.CREDIT_CARD, currency="VND")
+    tech_card = Account(name="TECH-Card", account_type=AccountType.CREDIT_CARD, currency="VND")
+    session.add_all([vpb_card, bidv_card, tech_card])
+    session.commit()
+
+    data = _xlsx([
+        _row("1", date(2026, 8, 21), "Ăn uống", -120_000, "VPB-Card"),
+        _row("2", date(2026, 8, 22), "Mua sắm", -350_000, "BIDV-Card"),
+        _row("3", date(2026, 8, 23), "Đi lại", -50_000, "TECH-Card"),
+    ])
+    batch = import_moneylover(session, data, "synthetic_cards.xlsx")
+    session.commit()
+
+    result = apply_import_batch(session, batch.id)
+    session.commit()
+
+    assert result.total_rows == 3
+    assert result.applied_rows == 3
+    assert result.unmatched_wallets == {}
+
+
+def test_single_leg_transfer_in_creates_balanced_event_and_second_batch_deduplicates(session: Session) -> None:
+    """When a statement/export with only the receiving account is imported,
+    it creates a balanced TRANSFER (+Receiver, -Sender).
+    When the sender account's statement is imported in a second batch later,
+    it matches the existing TRANSFER and does not create a duplicate."""
+    cash = Account(name="Cash", account_type=AccountType.CASH, currency="VND")
+    bank = Account(name="Bank", account_type=AccountType.BANK, currency="VND")
+    session.add_all([cash, bank])
+    session.commit()
+
+    # Batch 1: Only receiving account (Bank) is imported
+    data_1 = _xlsx([
+        _row("1", date(2026, 8, 15), "Tiền chuyển đến", 500_000, "Bank", note="Nhận tiền từ Cash", excluded=True),
+    ])
+    batch_1 = import_moneylover(session, data_1, "bank_only.xlsx")
+    session.commit()
+
+    result_1 = apply_import_batch(session, batch_1.id)
+    session.commit()
+
+    assert result_1.transfer_pairs_applied == 1
+    assert result_1.expense_income_rows_applied == 0
+    assert result_1.applied_rows == 2
+
+    # Check that BOTH accounts are updated in the ledger
+    events = list(session.scalars(select(FinancialEvent)))
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type is FinancialEventType.TRANSFER
+    amounts = {e.account_id: e.amount for e in event.entries}
+    assert amounts[cash.id] == Decimal("-500000.0000")
+    assert amounts[bank.id] == Decimal("500000.0000")
+    assert event.raw_import_row_id == batch_1.rows[0].id
+    assert event.raw_import_row_id_secondary is None
+
+    # Batch 2: Later, sending account (Cash) is imported
+    data_2 = _xlsx([
+        _row("2", date(2026, 8, 15), "Tiền chuyển đi", -500_000, "Cash", note="Gửi đến Bank", excluded=True),
+    ])
+    batch_2 = import_moneylover(session, data_2, "cash_later.xlsx")
+    session.commit()
+
+    result_2 = apply_import_batch(session, batch_2.id)
+    session.commit()
+
+    assert result_2.transfer_pairs_applied == 1
+    assert result_2.expense_income_rows_applied == 0
+
+    # Must still be ONLY 1 event in the database, never duplicated!
+    events_after = list(session.scalars(select(FinancialEvent)))
+    assert len(events_after) == 1
+    updated_event = events_after[0]
+    assert updated_event.raw_import_row_id == batch_1.rows[0].id
+    assert updated_event.raw_import_row_id_secondary == batch_2.rows[0].id
+
+
+def test_single_leg_transfer_out_creates_balanced_event_and_second_batch_deduplicates(session: Session) -> None:
+    """When a statement/export with only the sending account is imported first,
+    it creates a balanced TRANSFER (+Receiver, -Sender).
+    When the receiving account's statement is imported in a second batch later,
+    it matches the existing TRANSFER and does not create a duplicate."""
+    cash = Account(name="Cash", account_type=AccountType.CASH, currency="VND")
+    bank = Account(name="Bank", account_type=AccountType.BANK, currency="VND")
+    session.add_all([cash, bank])
+    session.commit()
+
+    # Batch 1: Only sending account (Cash) is imported
+    data_1 = _xlsx([
+        _row("1", date(2026, 8, 18), "Tiền chuyển đi", -1_000_000, "Cash", note="Gửi đến Bank", excluded=True),
+    ])
+    batch_1 = import_moneylover(session, data_1, "cash_first.xlsx")
+    session.commit()
+
+    result_1 = apply_import_batch(session, batch_1.id)
+    session.commit()
+
+    assert result_1.transfer_pairs_applied == 1
+    assert len(list(session.scalars(select(FinancialEvent)))) == 1
+
+    # Batch 2: Later, receiving account (Bank) is imported
+    data_2 = _xlsx([
+        _row("2", date(2026, 8, 18), "Tiền chuyển đến", 1_000_000, "Bank", note="Nhận tiền từ Cash", excluded=True),
+    ])
+    batch_2 = import_moneylover(session, data_2, "bank_second.xlsx")
+    session.commit()
+
+    result_2 = apply_import_batch(session, batch_2.id)
+    session.commit()
+
+    assert result_2.transfer_pairs_applied == 1
+    # Must still be ONLY 1 event in the database, never duplicated!
+    events_after = list(session.scalars(select(FinancialEvent)))
+    assert len(events_after) == 1
+    amounts = {e.account_id: e.amount for e in events_after[0].entries}
+    assert amounts[cash.id] == Decimal("-1000000.0000")
+    assert amounts[bank.id] == Decimal("1000000.0000")
+
