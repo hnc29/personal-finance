@@ -18,7 +18,7 @@ from openpyxl.styles import (  # type: ignore[import-untyped]
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.money import scaled_to_money
+from app.core.money import MONEY_SCALE, money_to_scaled, scaled_to_money
 from app.models.account import Account, AccountType
 from app.models.category import Category
 from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
@@ -44,6 +44,15 @@ def _sanitize_statement_text(value: str) -> str:
     if value.startswith(_SPREADSHEET_FORMULA_PREFIXES):
         return f"'{value}"
     return value
+
+
+def _format_scaled_money(value: int) -> str:
+    """Format exact scaled money with grouping and up to four decimal places."""
+    sign = "-" if value < 0 else ""
+    whole, fractional = divmod(abs(value), MONEY_SCALE)
+    formatted = f"{sign}{whole:,}"
+    fractional_text = f"{fractional:04d}".rstrip("0")
+    return f"{formatted}.{fractional_text}" if fractional_text else formatted
 
 
 def _extract_ref_number(event: FinancialEvent) -> str:
@@ -225,22 +234,22 @@ def generate_statement_xlsx(
 
     ws["A5"] = "Số dư đầu kỳ:"
     ws["A5"].font = meta_bold_font
-    ws["B5"] = f"{float(data['opening_balance']):,.0f} {data['account']['currency']}"
+    ws["B5"] = f"{_format_scaled_money(money_to_scaled(data['opening_balance']))} {data['account']['currency']}"
     ws["B5"].font = meta_font
 
     ws["D5"] = "Số dư cuối kỳ:"
     ws["D5"].font = meta_bold_font
-    ws["E5"] = f"{float(data['closing_balance']):,.0f} {data['account']['currency']}"
+    ws["E5"] = f"{_format_scaled_money(money_to_scaled(data['closing_balance']))} {data['account']['currency']}"
     ws["E5"].font = meta_font
 
     ws["A6"] = "Tổng tiền vào (+):"
     ws["A6"].font = meta_bold_font
-    ws["B6"] = f"+{float(data['total_in']):,.0f} {data['account']['currency']}"
+    ws["B6"] = f"+{_format_scaled_money(money_to_scaled(data['total_in']))} {data['account']['currency']}"
     ws["B6"].font = Font(name="Arial", size=10, color="16A34A", bold=True)
 
     ws["D6"] = "Tổng tiền ra (-):"
     ws["D6"].font = meta_bold_font
-    ws["E6"] = f"-{float(data['total_out']):,.0f} {data['account']['currency']}"
+    ws["E6"] = f"-{_format_scaled_money(money_to_scaled(data['total_out']))} {data['account']['currency']}"
     ws["E6"].font = Font(name="Arial", size=10, color="DC2626", bold=True)
 
     # 3. Table Headers
@@ -258,9 +267,11 @@ def generate_statement_xlsx(
     # 4. Table Rows
     curr_row = header_row_idx + 1
     for tx in data["transactions"]:
-        amt = float(tx["amount"])
-        amt_str = f"+{amt:,.0f}" if amt > 0 else f"{amt:,.0f}"
-        run_bal_str = f"{float(tx['running_balance']):,.0f}"
+        amount_scaled = tx["amount_scaled"]
+        amt_str = _format_scaled_money(amount_scaled)
+        if amount_scaled > 0:
+            amt_str = f"+{amt_str}"
+        run_bal_str = _format_scaled_money(tx["running_balance_scaled"])
 
         row_values = [
             tx["transaction_date"],
@@ -283,7 +294,7 @@ def generate_statement_xlsx(
 
         for c in range(1, 8):
             cell = ws.cell(row=curr_row, column=c)
-            cell.font = green_font if c == 6 and amt > 0 else (red_font if c == 6 and amt < 0 else row_font)
+            cell.font = green_font if c == 6 and amount_scaled > 0 else (red_font if c == 6 and amount_scaled < 0 else row_font)
             cell.border = thin_border
 
         curr_row += 1
