@@ -253,8 +253,53 @@ def test_statement_exports_sanitize_only_untrusted_text_cells(
     rows = list(csv.reader(io.StringIO(csv_response.content.decode("utf-8-sig"))))
     assert rows[0][1] == "'=SYNTHETIC_ACCOUNT()"
     assert rows[6][3] == "'@SYNTHETIC_NOTE() – tiếng Việt"
-    assert rows[6][5] == "-12"
-    assert rows[6][6] == "-12"
+    assert rows[6][5] == "-12.34"
+    assert rows[6][6] == "-12.34"
+
+
+def test_statement_csv_preserves_exact_scaled_money_values(
+    client: TestClient,
+) -> None:
+    account_id = _make_account(client, "Synthetic exact CSV money")
+    amounts = (
+        ("INCOME", "900000000000000.1234"),
+        ("INCOME", "0.0001"),
+        ("EXPENSE", "-0.0001"),
+        ("EXPENSE", "-12.3456"),
+    )
+    for event_type, amount in amounts:
+        response = client.post(
+            "/api/v1/financial-events",
+            json={
+                "event_type": event_type,
+                "transaction_date": "2026-08-03",
+                "entries": [{"account_id": account_id, "amount": amount}],
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.get(
+        f"/api/v1/exports/statement.csv?account_id={account_id}"
+    )
+    assert response.status_code == 200
+    rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
+
+    exported_amounts = [row[5] for row in rows[6:]]
+    assert exported_amounts == [
+        "+900,000,000,000,000.1234",
+        "+0.0001",
+        "-0.0001",
+        "-12.3456",
+    ]
+    assert [Decimal(value.replace(",", "")) for value in exported_amounts] == [
+        Decimal(amount) for _, amount in amounts
+    ]
+    assert [row[6] for row in rows[6:]] == [
+        "900,000,000,000,000.1234",
+        "900,000,000,000,000.1235",
+        "900,000,000,000,000.1234",
+        "899,999,999,999,987.7778",
+    ]
 
 
 def test_statement_xlsx_preserves_exact_scaled_money_values(

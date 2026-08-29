@@ -334,9 +334,11 @@ def generate_statement_csv(
     # Table headers
     writer.writerow(["Ngày", "Ngày hiệu lực", "Loại giao dịch", "Nội dung", "Ref#", "Số tiền giao dịch", "Số dư"])
     for tx in data["transactions"]:
-        amt = float(tx["amount"])
-        amt_str = f"+{amt:,.0f}" if amt > 0 else f"{amt:,.0f}"
-        run_bal_str = f"{float(tx['running_balance']):,.0f}"
+        amount_scaled = tx["amount_scaled"]
+        amt_str = _format_scaled_money(amount_scaled)
+        if amount_scaled > 0:
+            amt_str = f"+{amt_str}"
+        run_bal_str = _format_scaled_money(tx["running_balance_scaled"])
         writer.writerow([
             tx["transaction_date"],
             tx["effective_date"],
