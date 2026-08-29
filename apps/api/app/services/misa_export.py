@@ -20,6 +20,7 @@ from app.models.misa_export import (
     MisaExportRun,
 )
 from app.schemas.misa_export import MisaExportConfigurationCreate
+from app.services.statement_export import _sanitize_statement_text
 
 
 class InvalidMisaAccountMappingError(ValueError):
@@ -262,18 +263,22 @@ def export_misa_workbook(
             amount = scaled_to_money(abs(entry.amount_scaled))
             receipt = amount if entry.amount_scaled > 0 else None
             payment = amount if entry.amount_scaled < 0 else None
+            row = (
+                event.transaction_date,
+                event.transaction_date,
+                f"PF-{event.id}",
+                description,
+                mapping.target_account_code,
+                mapping.target_account_name,
+                receipt,
+                payment,
+                configuration.currency,
+                event.id,
+            )
             worksheet.append(
-                (
-                    event.transaction_date,
-                    event.transaction_date,
-                    f"PF-{event.id}",
-                    description,
-                    mapping.target_account_code,
-                    mapping.target_account_name,
-                    receipt,
-                    payment,
-                    configuration.currency,
-                    event.id,
+                tuple(
+                    _sanitize_statement_text(value) if isinstance(value, str) else value
+                    for value in row
                 )
             )
 
