@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import get_db
 from app.main import app
+from app.services.statement_export import _sanitize_statement_text
 
 
 @pytest.fixture
@@ -204,3 +205,144 @@ def test_export_statement_xlsx_and_csv(client: TestClient) -> None:
     assert "SAO KÊ TÀI KHOẢN" in text_content
     assert "Số tiền giao dịch" in text_content
 
+
+@pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r", "\n"])
+def test_statement_text_sanitizer_neutralizes_formula_and_control_prefixes(
+    prefix: str,
+) -> None:
+    value = f"{prefix}SYNTHETIC()"
+    assert _sanitize_statement_text(value) == f"'{value}"
+
+
+@pytest.mark.parametrize("value", ["", "Normal text", "Tiền điện tháng Tám", "漢字"])
+def test_statement_text_sanitizer_preserves_normal_and_unicode_text(value: str) -> None:
+    assert _sanitize_statement_text(value) == value
+
+
+def test_statement_exports_sanitize_only_untrusted_text_cells(
+    client: TestClient,
+) -> None:
+    from openpyxl import load_workbook
+
+    account_id = _make_account(client, "=SYNTHETIC_ACCOUNT()")
+    response = client.post(
+        "/api/v1/financial-events",
+        json={
+            "event_type": "EXPENSE",
+            "transaction_date": "2026-08-02",
+            "note": "@SYNTHETIC_NOTE() – tiếng Việt",
+            "entries": [{"account_id": account_id, "amount": "-12.3400"}],
+        },
+    )
+    assert response.status_code == 201
+
+    xlsx_response = client.get(
+        f"/api/v1/exports/statement.xlsx?account_id={account_id}"
+    )
+    assert xlsx_response.status_code == 200
+    worksheet = load_workbook(io.BytesIO(xlsx_response.content)).active
+    assert worksheet["B4"].value == "'=SYNTHETIC_ACCOUNT()"
+    assert worksheet["D9"].value == "'@SYNTHETIC_NOTE() – tiếng Việt"
+    assert worksheet["F9"].value == "-12.34"
+    assert worksheet["G9"].value == "-12.34"
+
+    csv_response = client.get(
+        f"/api/v1/exports/statement.csv?account_id={account_id}"
+    )
+    assert csv_response.status_code == 200
+    rows = list(csv.reader(io.StringIO(csv_response.content.decode("utf-8-sig"))))
+    assert rows[0][1] == "'=SYNTHETIC_ACCOUNT()"
+    assert rows[6][3] == "'@SYNTHETIC_NOTE() – tiếng Việt"
+    assert rows[6][5] == "-12.34"
+    assert rows[6][6] == "-12.34"
+
+
+def test_statement_csv_preserves_exact_scaled_money_values(
+    client: TestClient,
+) -> None:
+    account_id = _make_account(client, "Synthetic exact CSV money")
+    amounts = (
+        ("INCOME", "900000000000000.1234"),
+        ("INCOME", "0.0001"),
+        ("EXPENSE", "-0.0001"),
+        ("EXPENSE", "-12.3456"),
+    )
+    for event_type, amount in amounts:
+        response = client.post(
+            "/api/v1/financial-events",
+            json={
+                "event_type": event_type,
+                "transaction_date": "2026-08-03",
+                "entries": [{"account_id": account_id, "amount": amount}],
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.get(
+        f"/api/v1/exports/statement.csv?account_id={account_id}"
+    )
+    assert response.status_code == 200
+    rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
+
+    exported_amounts = [row[5] for row in rows[6:]]
+    assert exported_amounts == [
+        "+900,000,000,000,000.1234",
+        "+0.0001",
+        "-0.0001",
+        "-12.3456",
+    ]
+    assert [Decimal(value.replace(",", "")) for value in exported_amounts] == [
+        Decimal(amount) for _, amount in amounts
+    ]
+    assert [row[6] for row in rows[6:]] == [
+        "900,000,000,000,000.1234",
+        "900,000,000,000,000.1235",
+        "900,000,000,000,000.1234",
+        "899,999,999,999,987.7778",
+    ]
+
+
+def test_statement_xlsx_preserves_exact_scaled_money_values(
+    client: TestClient,
+) -> None:
+    from openpyxl import load_workbook
+
+    account_id = _make_account(client, "Synthetic exact money")
+    for event_type, amount in (
+        ("INCOME", "900000000000000.1234"),
+        ("INCOME", "0.0001"),
+        ("EXPENSE", "-0.0001"),
+        ("EXPENSE", "-12.3456"),
+    ):
+        response = client.post(
+            "/api/v1/financial-events",
+            json={
+                "event_type": event_type,
+                "transaction_date": "2026-08-03",
+                "entries": [{"account_id": account_id, "amount": amount}],
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.get(
+        f"/api/v1/exports/statement.xlsx?account_id={account_id}"
+    )
+    assert response.status_code == 200
+    worksheet = load_workbook(io.BytesIO(response.content)).active
+
+    assert worksheet["B5"].value == "0 VND"
+    assert worksheet["E5"].value == "899,999,999,999,987.7778 VND"
+    assert worksheet["B6"].value == "+900,000,000,000,000.1235 VND"
+    assert worksheet["E6"].value == "-12.3457 VND"
+    assert [worksheet[f"F{row}"].value for row in range(9, 13)] == [
+        "+900,000,000,000,000.1234",
+        "+0.0001",
+        "-0.0001",
+        "-12.3456",
+    ]
+    assert [worksheet[f"G{row}"].value for row in range(9, 13)] == [
+        "900,000,000,000,000.1234",
+        "900,000,000,000,000.1235",
+        "900,000,000,000,000.1234",
+        "899,999,999,999,987.7778",
+    ]

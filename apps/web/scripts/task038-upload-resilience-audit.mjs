@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 // both halves plus the i18n coverage for the new "Uploading..." string. ---
 
 const page = readFileSync("app/page.tsx", "utf8");
+const apiClient = readFileSync("lib/api.ts", "utf8");
 const dataPageMatch = page.match(/function DataPage\(\) \{[\s\S]*?\n\}/);
 assert.ok(dataPageMatch, "TASK-038: could not locate DataPage() in app/page.tsx");
 const dataPage = dataPageMatch[0];
@@ -22,7 +23,7 @@ const dataPage = dataPageMatch[0];
 // --- The filename must be percent-encoded before it becomes a header
 // value -- this is what stops the synchronous Headers/ByteString throw. ---
 assert.ok(
-  /"X-Filename":\s*encodeURIComponent\(file\.name\)/.test(dataPage),
+  /"X-Filename":\s*encodeURIComponent\(filename\)/.test(apiClient),
   "TASK-038: X-Filename header is no longer encodeURIComponent-encoded -- Vietnamese/diacritic filenames will throw again"
 );
 
@@ -33,7 +34,7 @@ assert.ok(/try\s*\{/.test(dataPage) && /catch\s*\(error\)/.test(dataPage), "TASK
 assert.ok(/setStatus\(/.test(dataPage), "TASK-038: upload() no longer surfaces a visible status message");
 
 // --- A malformed/non-JSON error response must not itself throw unhandled. ---
-assert.ok(/response\.json\(\)\.catch\(/.test(dataPage), "TASK-038: response.json() is no longer guarded against a non-JSON body");
+assert.ok(/response\.json\(\)\.catch\(/.test(apiClient), "TASK-038: response.json() is no longer guarded against a non-JSON body");
 
 // --- Button must reflect in-flight state (disabled + "Uploading..." label)
 // so a slow/failed request doesn't look like "nothing happened" either. ---

@@ -323,3 +323,47 @@ def test_exports_structured_workbook_and_records_history(session: Session) -> No
 
     with pytest.raises(ValueError, match="already exported"):
         export_misa_workbook(session, configuration.id, "repeat.xlsx", [event.id])
+
+
+def test_misa_workbook_sanitizes_text_without_stringifying_dates_or_money(
+    session: Session,
+) -> None:
+    account = _account("Synthetic")
+    session.add(account)
+    session.flush()
+    configuration = create_configuration(
+        session,
+        MisaExportConfigurationCreate(
+            name="Formula safety",
+            mappings=[
+                MisaAccountMappingCreate(
+                    source_account_id=account.id,
+                    target_account_code="+SYNTHETIC_CODE()",
+                    target_account_name="=SYNTHETIC_NAME()",
+                )
+            ],
+        ),
+    )
+    event = FinancialEvent(
+        event_type=FinancialEventType.EXPENSE,
+        transaction_date=datetime.date(2026, 8, 29),
+        note="@SYNTHETIC_NOTE()",
+        entries=[AccountEntry(account_id=account.id, amount_scaled=-123_456)],
+    )
+    session.add(event)
+    session.commit()
+
+    exported = export_misa_workbook(session, configuration.id, "safe.xlsx")
+
+    workbook = load_workbook(io.BytesIO(exported.content), read_only=True, data_only=False)
+    row = next(workbook["Bank statement"].iter_rows(min_row=2))
+    assert row[3].value == "'@SYNTHETIC_NOTE()"
+    assert row[4].value == "'+SYNTHETIC_CODE()"
+    assert row[5].value == "'=SYNTHETIC_NAME()"
+    assert row[0].is_date
+    assert row[1].is_date
+    assert row[7].data_type == "n"
+    assert Decimal(str(row[7].value)) == Decimal("12.3456")
+    assert row[9].data_type == "n"
+    assert row[9].value == event.id
+    workbook.close()

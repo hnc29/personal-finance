@@ -1,13 +1,19 @@
 """Focused tests for the Alembic migration chain (TASK-003 3G).
 
-These tests read the migration scripts through Alembic's ``ScriptDirectory``.
-They do not run migrations and never open ``data/finance.db``.
+These tests inspect the migration scripts and run the full chain only against a
+disposable temporary database. They never open ``data/finance.db``.
 """
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, inspect, text
+
+from app.models import Base
 
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
@@ -114,3 +120,34 @@ def test_migration_chain_order() -> None:
         "0002_ledger",
         "0001_core",
     ]
+
+
+def test_fresh_database_upgrades_to_model_coherent_single_head(tmp_path: Path) -> None:
+    database_path = tmp_path / "fresh.db"
+    script = _script_directory()
+    heads = script.get_heads()
+    assert len(heads) == 1
+
+    env = os.environ.copy()
+    env["PF_DATABASE_PATH"] = str(database_path)
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "-c", str(ALEMBIC_INI), "upgrade", "head"],
+        check=True,
+        cwd=ALEMBIC_INI.parent,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    try:
+        migrated_tables = set(inspect(engine).get_table_names())
+        with engine.connect() as connection:
+            current_revision = connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+    assert current_revision == heads[0]
+    assert migrated_tables == set(Base.metadata.tables) | {"alembic_version"}
