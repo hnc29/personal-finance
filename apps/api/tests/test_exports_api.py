@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import get_db
 from app.main import app
+from app.services.statement_export import _sanitize_statement_text
 
 
 @pytest.fixture
@@ -204,3 +205,53 @@ def test_export_statement_xlsx_and_csv(client: TestClient) -> None:
     assert "SAO KÊ TÀI KHOẢN" in text_content
     assert "Số tiền giao dịch" in text_content
 
+
+@pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r", "\n"])
+def test_statement_text_sanitizer_neutralizes_formula_and_control_prefixes(
+    prefix: str,
+) -> None:
+    value = f"{prefix}SYNTHETIC()"
+    assert _sanitize_statement_text(value) == f"'{value}"
+
+
+@pytest.mark.parametrize("value", ["", "Normal text", "Tiền điện tháng Tám", "漢字"])
+def test_statement_text_sanitizer_preserves_normal_and_unicode_text(value: str) -> None:
+    assert _sanitize_statement_text(value) == value
+
+
+def test_statement_exports_sanitize_only_untrusted_text_cells(
+    client: TestClient,
+) -> None:
+    from openpyxl import load_workbook
+
+    account_id = _make_account(client, "=SYNTHETIC_ACCOUNT()")
+    response = client.post(
+        "/api/v1/financial-events",
+        json={
+            "event_type": "EXPENSE",
+            "transaction_date": "2026-08-02",
+            "note": "@SYNTHETIC_NOTE() – tiếng Việt",
+            "entries": [{"account_id": account_id, "amount": "-12.3400"}],
+        },
+    )
+    assert response.status_code == 201
+
+    xlsx_response = client.get(
+        f"/api/v1/exports/statement.xlsx?account_id={account_id}"
+    )
+    assert xlsx_response.status_code == 200
+    worksheet = load_workbook(io.BytesIO(xlsx_response.content)).active
+    assert worksheet["B4"].value == "'=SYNTHETIC_ACCOUNT()"
+    assert worksheet["D9"].value == "'@SYNTHETIC_NOTE() – tiếng Việt"
+    assert worksheet["F9"].value == "-12"
+    assert worksheet["G9"].value == "-12"
+
+    csv_response = client.get(
+        f"/api/v1/exports/statement.csv?account_id={account_id}"
+    )
+    assert csv_response.status_code == 200
+    rows = list(csv.reader(io.StringIO(csv_response.content.decode("utf-8-sig"))))
+    assert rows[0][1] == "'=SYNTHETIC_ACCOUNT()"
+    assert rows[6][3] == "'@SYNTHETIC_NOTE() – tiếng Việt"
+    assert rows[6][5] == "-12"
+    assert rows[6][6] == "-12"

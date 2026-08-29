@@ -36,6 +36,15 @@ _EVENT_TYPE_VI_LABELS: dict[FinancialEventType, str] = {
     FinancialEventType.ADJUSTMENT: "Điều chỉnh",
 }
 
+_SPREADSHEET_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _sanitize_statement_text(value: str) -> str:
+    """Neutralize untrusted text that spreadsheets may interpret as a formula."""
+    if value.startswith(_SPREADSHEET_FORMULA_PREFIXES):
+        return f"'{value}"
+    return value
+
 
 def _extract_ref_number(event: FinancialEvent) -> str:
     """Extract or synthesize a bank reference number (e.g. FT..., AZ-...)."""
@@ -206,7 +215,7 @@ def generate_statement_xlsx(
     # 2. Account Metadata Block
     ws["A4"] = "Tài khoản:"
     ws["A4"].font = meta_bold_font
-    ws["B4"] = data["account"]["name"]
+    ws["B4"] = _sanitize_statement_text(data["account"]["name"])
     ws["B4"].font = meta_font
 
     ws["D4"] = "Loại tài khoản:"
@@ -257,8 +266,8 @@ def generate_statement_xlsx(
             tx["transaction_date"],
             tx["effective_date"],
             tx["event_type_label"],
-            tx["description"],
-            tx["ref_no"],
+            _sanitize_statement_text(tx["description"]),
+            _sanitize_statement_text(tx["ref_no"]),
             amt_str,
             run_bal_str,
         ]
@@ -302,10 +311,13 @@ def generate_statement_csv(
     writer = csv.writer(out)
 
     # Header metadata
-    writer.writerow(["SAO KÊ TÀI KHOẢN", data["account"]["name"]])
+    writer.writerow(
+        ["SAO KÊ TÀI KHOẢN", _sanitize_statement_text(data["account"]["name"])]
+    )
     writer.writerow(["Thời gian truy vấn", f"{data['period']['start_date'] or 'Từ đầu'} - {data['period']['end_date'] or 'Đến nay'}"])
-    writer.writerow(["Số dư đầu kỳ", data["opening_balance"], data["account"]["currency"]])
-    writer.writerow(["Số dư cuối kỳ", data["closing_balance"], data["account"]["currency"]])
+    currency = _sanitize_statement_text(data["account"]["currency"])
+    writer.writerow(["Số dư đầu kỳ", data["opening_balance"], currency])
+    writer.writerow(["Số dư cuối kỳ", data["closing_balance"], currency])
     writer.writerow([])
 
     # Table headers
@@ -318,8 +330,8 @@ def generate_statement_csv(
             tx["transaction_date"],
             tx["effective_date"],
             tx["event_type_label"],
-            tx["description"],
-            tx["ref_no"],
+            _sanitize_statement_text(tx["description"]),
+            _sanitize_statement_text(tx["ref_no"]),
             amt_str,
             run_bal_str,
         ])
