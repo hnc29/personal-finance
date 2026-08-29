@@ -9,6 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
+    "fe03-api-transport-audit": "node scripts/fe03-api-transport-audit.mjs",
     "task026-ui-audit": "node scripts/task026-ui-audit.mjs",
     "task027-ui-audit": "node scripts/task027-ui-audit.mjs",
     "task029-ui-audit": "node scripts/task029-ui-audit.mjs",

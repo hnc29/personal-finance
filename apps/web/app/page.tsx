@@ -2662,7 +2662,6 @@ function applySummary(tr: (text: string) => string, apply: ImportApplyResult | n
 function BackupPanel() {
   const { tr, language } = useI18n();
   const qc = useQueryClient();
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
   const backupsQ = useQuery({
     queryKey: ["backups"],
@@ -2703,21 +2702,7 @@ function BackupPanel() {
     } else {
       setIsBackingUp(true);
       try {
-        const url = `${base}/api/v1/backup/create`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "download" }),
-        });
-        if (!res.ok) {
-          throw new globalThis.Error(`HTTP ${res.status}: ${res.statusText}`);
-        }
-        const blob = await res.blob();
-        const disposition = res.headers.get("Content-Disposition");
-        let filename = "backup_data.db";
-        if (disposition && disposition.includes("filename=")) {
-          filename = disposition.split("filename=")[1].replace(/["']/g, "").trim();
-        }
+        const { blob, filename } = await api.backup.createDownload();
         const downloadUrl = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = downloadUrl;
@@ -2744,15 +2729,7 @@ function BackupPanel() {
         setStatusMsg({ type: "success", text: res.message || tr("Restore completed successfully.") });
       } else if (confirmModal.mode === "upload" && confirmModal.file) {
         const fileBytes = await confirmModal.file.arrayBuffer();
-        const res = await fetch(`${base}/api/v1/backup/restore/upload`, {
-          method: "POST",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: fileBytes,
-        });
-        const data = (await res.json().catch(() => ({}))) as { detail?: string; message?: string };
-        if (!res.ok) {
-          throw new globalThis.Error(data.detail || `Restore failed (HTTP ${res.status})`);
-        }
+        const data = await api.backup.restoreUpload(fileBytes);
         setStatusMsg({ type: "success", text: data.message || tr("Restore completed successfully.") });
         setUploadRestoreFile(null);
       }
@@ -2933,7 +2910,7 @@ function BackupPanel() {
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       <div style={{ display: "inline-flex", alignItems: "center", gap: "14px" }}>
                         <a
-                          href={`${base}/api/v1/backup/download/${encodeURIComponent(b.filename)}`}
+                          href={api.backup.downloadUrl(b.filename)}
                           download={b.filename}
                           style={{
                             textDecoration: "none",
@@ -3416,7 +3393,6 @@ function BankStatementModal({
 function DataPage() {
   const { tr, label, language } = useI18n();
   const qc = useQueryClient();
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
   const [subTab, setSubTab] = useState<"io" | "review" | "backup">("io");
 
   // IO State
@@ -3453,17 +3429,12 @@ function DataPage() {
     setUploading(true);
     setStatus(tr("Uploading..."));
     try {
-      const response = await fetch(`${base}/api/v1/imports/money-lover`, {
-        method: "POST",
-        headers: { "Content-Type": "application/octet-stream", "X-Filename": encodeURIComponent(file.name) },
-        body: await file.arrayBuffer(),
-      });
-      const body = await response.json().catch(() => null);
-      if (response.ok && body) {
+      const { ok, status: responseStatus, data: body } = await api.imports.uploadMoneyLover(file.name, await file.arrayBuffer());
+      if (ok && body) {
         setStatus(`${tr("Imported rows")}: ${body.row_count}${applySummary(tr, body.apply)}`);
         invalidateAllFinancialQueries(qc);
       } else {
-        setStatus(body?.detail ?? `${tr("Load failed")} (HTTP ${response.status})`);
+        setStatus(body?.detail ?? `${tr("Load failed")} (HTTP ${responseStatus})`);
       }
     } catch (error) {
       const message = error instanceof globalThis.Error ? error.message : String(error);

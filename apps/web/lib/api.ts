@@ -19,10 +19,15 @@ export interface PortfolioRow { id: number; name: string; value: string | null; 
 export interface PortfolioOverview { as_of: string; valuation_complete: boolean; net_worth: string | null; invested_assets: string | null; account_count: number; accounts: PortfolioRow[]; savings: PortfolioRow[]; credit_cards: PortfolioRow[]; precious_metals: PortfolioRow[]; crypto: PortfolioRow[] }
 export interface ImportBatch { id: number; source: string; original_filename: string; imported_at: string; row_count: number; applied_row_count: number }
 export interface ImportApplyResult { batch_id: number; total_rows: number; already_applied_rows: number; transfer_pairs_applied: number; expense_income_rows_applied: number; applied_rows: number; categorized_rows: number; uncategorized_rows: number; invalid_rows: number[]; unmatched_wallets: Record<string, number>; unmatched_row_count: number }
+export interface ImportUploadResult { row_count: number; apply?: ImportApplyResult | null }
 export interface ReconciliationCandidate { id: number; state: string; raw_row_id: number; source_row_number: number; source_row_id: string | null; financial_event_id: number; transaction_date: string; event_type: string }
 
+function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${API_URL}/api/v1${path}`, { ...init, cache: "no-store" });
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}/api/v1${path}`, { ...init, headers: { "Content-Type": "application/json", ...init?.headers }, cache: "no-store" });
+  const response = await apiFetch(path, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? `Request failed (${response.status})`);
   return response.json() as Promise<T>;
 }
@@ -109,7 +114,19 @@ export const api = {
     remove: (id: number, force?: boolean) => request<{ id: number; deleted: boolean }>(`/financial-events/${id}${force ? "?force=true" : ""}`, { method: "DELETE" }),
   },
   portfolio: { overview: () => request<PortfolioOverview>("/portfolio/overview") },
-  imports: { list: () => request<ImportBatch[]>("/import-batches"), apply: (id: number) => request<ImportApplyResult>(`/imports/${id}/apply`, { method: "POST" }) },
+  imports: {
+    list: () => request<ImportBatch[]>("/import-batches"),
+    uploadMoneyLover: async (filename: string, body: ArrayBuffer) => {
+      const response = await apiFetch("/imports/money-lover", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream", "X-Filename": encodeURIComponent(filename) },
+        body,
+      });
+      const data = await response.json().catch(() => null) as (ImportUploadResult & { detail?: string }) | null;
+      return { ok: response.ok, status: response.status, data };
+    },
+    apply: (id: number) => request<ImportApplyResult>(`/imports/${id}/apply`, { method: "POST" }),
+  },
   reconciliation: { list: () => request<ReconciliationCandidate[]>("/reconciliation-candidates") },
   assets: {
     savings: {
@@ -180,7 +197,30 @@ export const api = {
   backup: {
     list: () => request<BackupItem[]>("/backup/list"),
     createProject: () => request<{ status: string; filename: string; size_bytes: number; message: string }>("/backup/create", { method: "POST", body: JSON.stringify({ mode: "project" }) }),
+    createDownload: async () => {
+      const response = await apiFetch("/backup/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "download" }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const disposition = response.headers.get("Content-Disposition");
+      let filename = "backup_data.db";
+      if (disposition?.includes("filename=")) filename = disposition.split("filename=")[1].replace(/["']/g, "").trim();
+      return { blob: await response.blob(), filename };
+    },
     restoreProject: (filename: string) => request<{ status: string; message: string }>("/backup/restore/project", { method: "POST", body: JSON.stringify({ filename }) }),
+    restoreUpload: async (body: ArrayBuffer) => {
+      const response = await apiFetch("/backup/restore/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body,
+      });
+      const data = await response.json().catch(() => ({})) as { detail?: string; message?: string };
+      if (!response.ok) throw new Error(data.detail || `Restore failed (HTTP ${response.status})`);
+      return data;
+    },
+    downloadUrl: (filename: string) => `${API_URL}/api/v1/backup/download/${encodeURIComponent(filename)}`,
     remove: (filename: string) => request<{ status: string; message: string }>(`/backup/${encodeURIComponent(filename)}`, { method: "DELETE" }),
   },
 };
