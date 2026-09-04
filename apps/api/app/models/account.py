@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum, Integer, String, text
+from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -31,6 +31,13 @@ class Account(Base):
     __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String, nullable=False)
     account_type: Mapped[AccountType] = mapped_column(
         Enum(AccountType, native_enum=False),

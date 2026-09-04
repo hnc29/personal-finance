@@ -1,7 +1,10 @@
 "use client";
 
 import { createContext, FormEvent, useContext, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "../context/AuthContext";
 import { api, Account, AccountBalance, AccountType, Category, CryptoHolding, CryptoUpdateInput, EventInput, EventType, FinancialEvent, ImportApplyResult, MetalHolding, MetalUpdateInput, SavingsAccount, SavingsCreateInput, SavingsPatchInput } from "../lib/api";
 import { categoryLabel, copy, enumLabel, Language, transactionUiKeys, ui, useLanguage } from "../lib/i18n";
 import { buildCategoryTree, categoriesForEventType, categoryDepth, categoryIsValidForEventType, categoryPath, filterCategoryTree, toggleCategoryExpansion, canMoveCategory, categoryRoot, getCategoryDepth } from "../lib/category-tree";
@@ -79,9 +82,18 @@ function useI18n() {
 }
 
 export default function Home() {
+  const router = useRouter();
+  const { user, logout, isLoading: authLoading } = useAuth();
   const [view, setView] = useState<View>("transactions");
   const [language, setLanguage] = useLanguage();
   const t = copy[language];
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/login");
+    }
+  }, [user, authLoading, router]);
+
   return <LanguageContext.Provider value={language}><div className="app-shell">
     <aside className="sidebar">
       <button
@@ -101,7 +113,33 @@ export default function Home() {
       <nav aria-label={ui(language, "Main navigation")}>{navItems.map(({ view: item, icon }) => <button type="button" className={view === item ? "active" : ""} aria-current={view === item ? "page" : undefined} onClick={() => setView(item)} key={item}><span className="nav-icon" aria-hidden="true"><IconGlyph iconKey={icon} size={20} /></span><span>{t[item as keyof typeof t] ?? item}</span></button>)}</nav>
     </aside>
     <div className="app-content">
-      <header className="topbar"><div className="header-tools"><div className="language" role="group" aria-label={t.language}><button type="button" aria-pressed={language === "vi"} className={language === "vi" ? "active" : ""} onClick={() => setLanguage("vi")}>🇻🇳 <span>Tiếng Việt</span></button><button type="button" aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>🇺🇸 <span>English</span></button></div></div></header>
+      <header className="topbar">
+        <div className="header-tools">
+          <div className="topbar-user-section">
+            {user ? (
+              <>
+                <div className="user-badge-pill">
+                  <span style={{ fontWeight: 600 }}>{user.display_name || user.username}</span>
+                  {user.is_admin && <span className="user-role-admin">Admin</span>}
+                </div>
+                {user.is_admin && (
+                  <Link href="/users" className="btn-user-action">
+                    Quản lý user
+                  </Link>
+                )}
+                <button type="button" className="btn-user-action" onClick={logout}>
+                  Đăng xuất
+                </button>
+              </>
+            ) : (
+              <Link href="/login" className="btn-user-action" style={{ background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}>
+                Đăng nhập
+              </Link>
+            )}
+          </div>
+          <div className="language" role="group" aria-label={t.language}><button type="button" aria-pressed={language === "vi"} className={language === "vi" ? "active" : ""} onClick={() => setLanguage("vi")}>🇻🇳 <span>Tiếng Việt</span></button><button type="button" aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>🇺🇸 <span>English</span></button></div>
+        </div>
+      </header>
       <main>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "reports" ? <Reports /> : view === "assets" ? <Assets /> : view === "data" ? <DataPage /> : view === "ledger" ? <Ledger /> : <Transactions />}</main>
     </div>
   </div></LanguageContext.Provider>;
@@ -6093,6 +6131,7 @@ function Transactions() {
   });
 
   const categoriesMap = new Map(categories.data?.map(c => [c.id, c]));
+  const accountsMap = new Map(accounts.data?.map(a => [a.id, a]));
   const validCategories = categoriesForEventType(type, categories.data ?? []).filter(x => x.is_active);
   const activeAccounts = accounts.data?.filter(x => x.is_active) ?? [];
   const creditCardAccounts = activeAccounts.filter(x => x.account_type === "CREDIT_CARD");
@@ -6331,8 +6370,25 @@ function Transactions() {
                       itemTitle = label(x.event_type);
                     }
 
+                    let accountText = "";
+                    if (isTransfer) {
+                      const fromEntry = x.entries.find(e => Number(e.amount) < 0) ?? x.entries[0];
+                      const toEntry = x.entries.find(e => Number(e.amount) > 0 && e !== fromEntry) ?? x.entries[1];
+                      const fromName = fromEntry ? (accountsMap.get(fromEntry.account_id)?.name ?? "") : "";
+                      const toName = toEntry ? (accountsMap.get(toEntry.account_id)?.name ?? "") : "";
+                      if (fromName && toName) {
+                        accountText = `${fromName} → ${toName}`;
+                      } else {
+                        accountText = fromName || toName;
+                      }
+                    } else {
+                      const primaryEntry = x.entries[0];
+                      accountText = primaryEntry ? (accountsMap.get(primaryEntry.account_id)?.name ?? "") : "";
+                    }
+
                     const noteOrDetail = x.note ?? x.payee_text ?? x.trip_event_text ?? "";
-                    const subtitle = noteOrDetail && noteOrDetail !== itemTitle ? noteOrDetail : "";
+                    const cleanNote = noteOrDetail && noteOrDetail !== itemTitle && noteOrDetail !== accountText ? noteOrDetail : "";
+                    const subtitle = [accountText, cleanNote].filter(Boolean).join(" • ");
 
                     let primaryAmount = 0;
                     if (isTransfer) {

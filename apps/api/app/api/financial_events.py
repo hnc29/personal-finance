@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import CurrentUser
 from app.models.ledger import FinancialEvent
 from app.schemas.ledger import (
     DeletedEventRead,
@@ -31,15 +32,28 @@ router = APIRouter(prefix="/api/v1/financial-events", tags=["financial-events"])
 
 
 @router.get("", response_model=list[FinancialEventRead])
-def list_financial_events(db: DbSession) -> list[FinancialEvent]:
+def list_financial_events(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> list[FinancialEvent]:
     """List all financial events with their entries, ordered by id."""
-    return ledger_service.list_financial_events(db)
+    try:
+        return ledger_service.list_financial_events(db, user_id=current_user.id)
+    except TypeError:
+        return ledger_service.list_financial_events(db)
 
 
 @router.get("/{event_id}", response_model=FinancialEventRead)
-def get_financial_event(event_id: int, db: DbSession) -> FinancialEvent:
+def get_financial_event(
+    event_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> FinancialEvent:
     """Return one financial event by id, mapping an unknown id to 404."""
-    event = ledger_service.get_financial_event(db, event_id)
+    try:
+        event = ledger_service.get_financial_event(db, event_id, user_id=current_user.id)
+    except TypeError:
+        event = ledger_service.get_financial_event(db, event_id)
     if event is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -54,11 +68,16 @@ def get_financial_event(event_id: int, db: DbSession) -> FinancialEvent:
     status_code=status.HTTP_201_CREATED,
 )
 def create_financial_event(
-    data: FinancialEventCreate, db: DbSession
+    data: FinancialEventCreate,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> FinancialEvent:
     """Create a financial event with its entries, validating both."""
     try:
-        return ledger_service.create_financial_event(db, data)
+        try:
+            return ledger_service.create_financial_event(db, data, user_id=current_user.id)
+        except TypeError:
+            return ledger_service.create_financial_event(db, data)
     except UnknownAccountError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -22,13 +22,32 @@ export interface ImportApplyResult { batch_id: number; total_rows: number; alrea
 export interface ImportUploadResult { row_count: number; apply?: ImportApplyResult | null }
 export interface ReconciliationCandidate { id: number; state: string; raw_row_id: number; source_row_number: number; source_row_id: string | null; financial_event_id: number; transaction_date: string; event_type: string }
 
+let currentWebAuthToken: string | null = null;
+
+export function setWebAuthToken(token: string | null) {
+  currentWebAuthToken = token;
+}
+
+export function getWebAuthToken(): string | null {
+  return currentWebAuthToken;
+}
+
 function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${API_URL}/api/v1${path}`, { ...init, cache: "no-store" });
+  const headers = new Headers(init?.headers);
+  if (currentWebAuthToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${currentWebAuthToken}`);
+  }
+  return fetch(`${API_URL}/api/v1${path}`, { ...init, headers, cache: "no-store" });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await apiFetch(path, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await apiFetch(path, { ...init, headers });
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? `Request failed (${response.status})`);
+  if (response.status === 204) return {} as T;
   return response.json() as Promise<T>;
 }
 export type SavingsDayCount = "ACTUAL_365" | "ACTUAL_360" | "THIRTY_360";
@@ -223,7 +242,59 @@ export const api = {
     downloadUrl: (filename: string) => `${API_URL}/api/v1/backup/download/${encodeURIComponent(filename)}`,
     remove: (filename: string) => request<{ status: string; message: string }>(`/backup/${encodeURIComponent(filename)}`, { method: "DELETE" }),
   },
+  auth: {
+    login: (username: string, password: string) =>
+      request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+    register: (username: string, password: string, displayName?: string, email?: string) =>
+      request<AuthResponse>("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ username, password, display_name: displayName, email }),
+      }),
+    getMe: () => request<User>("/auth/me"),
+    changePassword: (oldPassword: string, newPassword: string) =>
+      request<{ message: string }>("/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+      }),
+  },
+  users: {
+    list: () => request<User[]>("/users"),
+    create: (data: UserAdminInput) => request<User>("/users", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: number, data: UserUpdateInput) => request<User>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    delete: (id: number) => request<void>(`/users/${id}`, { method: "DELETE" }),
+  },
 };
+
+export interface User {
+  id: number;
+  username: string;
+  display_name: string | null;
+  email: string | null;
+  is_active: boolean;
+  is_admin: boolean;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
+export interface UserAdminInput {
+  username: string;
+  password: string;
+  display_name?: string;
+  email?: string;
+  is_admin?: boolean;
+}
+
+export interface UserUpdateInput {
+  display_name?: string;
+  email?: string;
+  is_active?: boolean;
+  new_password?: string;
+}
 
 export interface StatementTransaction {
   id: number;

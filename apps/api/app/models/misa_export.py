@@ -83,6 +83,13 @@ class MisaExportRun(Base):
     __tablename__ = "misa_export_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        default=1,
+        server_default="1",
+        index=True,
+    )
     configuration_id: Mapped[int] = mapped_column(
         ForeignKey("misa_export_configurations.id"), nullable=False
     )

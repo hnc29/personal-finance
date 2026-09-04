@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     database_path: Path = PROJECT_ROOT / "data" / "finance.db"
+    secret_key: str = "personal-finance-secret-key-production-local"
+    jwt_expiration_days: int = 30
 
     default_currency: str = "VND"
     default_timezone: str = "Asia/Ho_Chi_Minh"

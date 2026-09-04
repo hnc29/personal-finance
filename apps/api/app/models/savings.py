@@ -89,6 +89,13 @@ class SavingsAccount(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+        index=True,
+    )
     product_id: Mapped[int] = mapped_column(
         ForeignKey("savings_products.id"), nullable=False
     )

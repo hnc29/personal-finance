@@ -53,6 +53,13 @@ class FinancialEvent(Base):
     __tablename__ = "financial_events"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+        index=True,
+    )
     event_type: Mapped[FinancialEventType] = mapped_column(
         Enum(FinancialEventType, native_enum=False),
         nullable=False,

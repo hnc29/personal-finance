@@ -49,6 +49,41 @@ def get_coin_catalog() -> CoinGeckoCoinListProvider:
     return _coin_catalog_provider
 
 
+def _not_blank(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise ValueError("must not be blank")
+    return stripped
+
+
+def _exact_nonnegative_money(value: Decimal) -> Decimal:
+    scaled = money_to_scaled(value)
+    if scaled < 0:
+        raise ValueError("must be nonnegative")
+    return value
+
+
+def _positive_metal_quantity(value: Decimal) -> Decimal:
+    scaled = money_to_scaled(value)
+    if scaled <= 0:
+        raise ValueError("quantity must be positive")
+    return value
+
+
+def _positive_crypto_quantity(value: Decimal) -> Decimal:
+    crypto_quantity_to_scaled(value)
+    return value
+
+
+def _purity_in_unit_range(value: Decimal) -> Decimal:
+    money_to_scaled(value)
+    if not (0 < value <= 1):
+        raise ValueError(
+            "purity must be a fraction between 0 (exclusive) and 1 (inclusive)"
+        )
+    return value
+
+
 class MetalCreate(BaseModel):
     metal_type: Literal["GOLD", "SILVER"]
     brand: PreciousMetalBrand = PreciousMetalBrand.RAW
@@ -79,9 +114,17 @@ class MetalCreate(BaseModel):
     @field_validator("purity")
     @classmethod
     def purity_in_unit_range(cls, value: Decimal) -> Decimal:
-        if not (0 < value <= 1):
-            raise ValueError("purity must be a fraction between 0 (exclusive) and 1 (inclusive), e.g. 0.999 for 999/1000 gold")
-        return value
+        return _purity_in_unit_range(value)
+
+    @field_validator("quantity_grams")
+    @classmethod
+    def quantity_is_positive(cls, value: Decimal) -> Decimal:
+        return _positive_metal_quantity(value)
+
+    @field_validator("purchase_price", "total_cost")
+    @classmethod
+    def money_is_exact_and_nonnegative(cls, value: Decimal) -> Decimal:
+        return _exact_nonnegative_money(value)
 
 
 class CryptoCreate(BaseModel):
@@ -99,10 +142,17 @@ class CryptoCreate(BaseModel):
     @field_validator("coingecko_id", "symbol")
     @classmethod
     def not_blank(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("must not be blank")
-        return stripped
+        return _not_blank(value)
+
+    @field_validator("quantity")
+    @classmethod
+    def quantity_is_positive(cls, value: Decimal) -> Decimal:
+        return _positive_crypto_quantity(value)
+
+    @field_validator("purchase_price", "total_cost")
+    @classmethod
+    def money_is_exact_and_nonnegative(cls, value: Decimal) -> Decimal:
+        return _exact_nonnegative_money(value)
 
 
 class MetalUpdate(BaseModel):
@@ -119,9 +169,17 @@ class MetalUpdate(BaseModel):
     @field_validator("purity")
     @classmethod
     def purity_in_unit_range(cls, value: Decimal | None) -> Decimal | None:
-        if value is not None and not (0 < value <= 1):
-            raise ValueError("purity must be a fraction between 0 (exclusive) and 1 (inclusive)")
-        return value
+        return None if value is None else _purity_in_unit_range(value)
+
+    @field_validator("quantity_grams")
+    @classmethod
+    def quantity_is_positive(cls, value: Decimal | None) -> Decimal | None:
+        return None if value is None else _positive_metal_quantity(value)
+
+    @field_validator("purchase_price", "total_cost")
+    @classmethod
+    def money_is_exact_and_nonnegative(cls, value: Decimal | None) -> Decimal | None:
+        return None if value is None else _exact_nonnegative_money(value)
 
 
 class CryptoUpdate(BaseModel):
@@ -133,6 +191,21 @@ class CryptoUpdate(BaseModel):
     total_cost: Decimal | None = None
     pricing_instrument: str | None = None
     excluded_from_reports: bool | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def not_blank(cls, value: str | None) -> str | None:
+        return None if value is None else _not_blank(value)
+
+    @field_validator("quantity")
+    @classmethod
+    def quantity_is_positive(cls, value: Decimal | None) -> Decimal | None:
+        return None if value is None else _positive_crypto_quantity(value)
+
+    @field_validator("purchase_price", "total_cost")
+    @classmethod
+    def money_is_exact_and_nonnegative(cls, value: Decimal | None) -> Decimal | None:
+        return None if value is None else _exact_nonnegative_money(value)
 
 
 @router.get("/metal-brands")

@@ -17,6 +17,13 @@ class Category(Base):
     __tablename__ = "categories"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String, nullable=False)
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id"),

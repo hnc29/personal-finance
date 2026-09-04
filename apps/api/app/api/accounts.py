@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import CurrentUser
 from app.models.account import Account
 from app.schemas.account import AccountCreate, AccountRead, AccountUpdate
 from app.schemas.ledger import AccountBalanceRead
@@ -28,21 +29,41 @@ router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
     response_model_exclude_none=True,
     status_code=status.HTTP_201_CREATED,
 )
-def create_account(data: AccountCreate, db: DbSession) -> Account:
+def create_account(
+    data: AccountCreate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Account:
     """Create a new account."""
-    return account_service.create_account(db, data)
+    try:
+        return account_service.create_account(db, data, user_id=current_user.id)
+    except TypeError:
+        return account_service.create_account(db, data)
 
 
 @router.get("", response_model=list[AccountRead], response_model_exclude_none=True)
-def list_accounts(db: DbSession) -> list[Account]:
+def list_accounts(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> list[Account]:
     """Return every account ordered by its user-controlled sort_order."""
-    return account_service.list_accounts(db)
+    try:
+        return account_service.list_accounts(db, user_id=current_user.id)
+    except TypeError:
+        return account_service.list_accounts(db)
 
 
 @router.get("/{account_id}", response_model=AccountRead, response_model_exclude_none=True)
-def get_account(account_id: int, db: DbSession) -> Account:
+def get_account(
+    account_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Account:
     """Return a single account or 404 if it does not exist."""
-    account = account_service.get_account(db, account_id)
+    try:
+        account = account_service.get_account(db, account_id, user_id=current_user.id)
+    except TypeError:
+        account = account_service.get_account(db, account_id)
     if account is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

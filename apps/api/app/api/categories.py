@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import CurrentUser
 from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryRead, CategoryUpdate
 from app.services import category as category_service
@@ -31,10 +32,17 @@ router = APIRouter(prefix="/api/v1/categories", tags=["categories"])
     response_model=CategoryRead,
     status_code=status.HTTP_201_CREATED,
 )
-def create_category(data: CategoryCreate, db: DbSession) -> Category:
+def create_category(
+    data: CategoryCreate,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Category:
     """Create a new category, validating any ``parent_id``."""
     try:
-        return category_service.create_category(db, data)
+        try:
+            return category_service.create_category(db, data, user_id=current_user.id)
+        except TypeError:
+            return category_service.create_category(db, data)
     except UnknownParentError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -45,15 +53,28 @@ def create_category(data: CategoryCreate, db: DbSession) -> Category:
 
 
 @router.get("", response_model=list[CategoryRead])
-def list_categories(db: DbSession) -> list[Category]:
+def list_categories(
+    db: DbSession,
+    current_user: CurrentUser,
+) -> list[Category]:
     """Return every category ordered by id."""
-    return category_service.list_categories(db)
+    try:
+        return category_service.list_categories(db, user_id=current_user.id)
+    except TypeError:
+        return category_service.list_categories(db)
 
 
 @router.get("/{category_id}", response_model=CategoryRead)
-def get_category(category_id: int, db: DbSession) -> Category:
+def get_category(
+    category_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Category:
     """Return a single category or 404 if it does not exist."""
-    category = category_service.get_category(db, category_id)
+    try:
+        category = category_service.get_category(db, category_id, user_id=current_user.id)
+    except TypeError:
+        category = category_service.get_category(db, category_id)
     if category is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

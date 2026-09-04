@@ -44,27 +44,32 @@ def _depths(db: Session, category_id: int, parent_id: int | None) -> bool:
     return True
 
 
-def create_category(db: Session, data: CategoryCreate) -> Category:
+def create_category(db: Session, data: CategoryCreate, user_id: int = 1) -> Category:
     """Create and persist a category, validating any ``parent_id``."""
     if data.parent_id is not None and db.get(Category, data.parent_id) is None:
         raise UnknownParentError(data.parent_id)
     if not _depths(db, -1, data.parent_id):
         raise InvalidHierarchyError(data.parent_id)
 
-    category = Category(**data.model_dump())
+    category = Category(**data.model_dump(), user_id=user_id)
     db.add(category)
     db.commit()
     db.refresh(category)
     return category
 
 
-def list_categories(db: Session) -> list[Category]:
+def list_categories(db: Session, user_id: int | None = None) -> list[Category]:
     """Return every category ordered by id."""
-    return list(db.scalars(select(Category).order_by(Category.id)))
+    stmt = select(Category).order_by(Category.id)
+    if user_id is not None:
+        stmt = stmt.where(Category.user_id == user_id)
+    return list(db.scalars(stmt))
 
 
-def get_category(db: Session, category_id: int) -> Category | None:
+def get_category(db: Session, category_id: int, user_id: int | None = None) -> Category | None:
     """Return the category with ``category_id`` or ``None`` if absent."""
+    if user_id is not None:
+        return db.scalar(select(Category).where(Category.id == category_id, Category.user_id == user_id))
     return db.get(Category, category_id)
 
 

@@ -102,7 +102,7 @@ def _build_and_validate_entries(
 
 
 def create_financial_event(
-    session: Session, payload: FinancialEventCreate
+    session: Session, payload: FinancialEventCreate, user_id: int = 1
 ) -> FinancialEvent:
     """Build and persist one :class:`FinancialEvent` and its entries.
 
@@ -117,6 +117,7 @@ def create_financial_event(
     entries = _build_and_validate_entries(session, payload.event_type, payload.entries)
 
     event = FinancialEvent(
+        user_id=user_id,
         event_type=payload.event_type,
         transaction_date=payload.transaction_date,
         occurred_at=payload.occurred_at,
@@ -209,23 +210,26 @@ def delete_financial_event(
     return True
 
 
-def list_financial_events(session: Session) -> list[FinancialEvent]:
+def list_financial_events(
+    session: Session, user_id: int | None = None
+) -> list[FinancialEvent]:
     """Return every financial event ordered by id, entries eagerly loaded.
 
     Each event's :class:`AccountEntry` rows are loaded with ``selectinload`` so
     the events can be serialised without a per-event follow-up query.
     """
-    return list(
-        session.scalars(
-            select(FinancialEvent)
-            .options(selectinload(FinancialEvent.entries))
-            .order_by(FinancialEvent.id)
-        )
+    stmt = (
+        select(FinancialEvent)
+        .options(selectinload(FinancialEvent.entries))
+        .order_by(FinancialEvent.id)
     )
+    if user_id is not None:
+        stmt = stmt.where(FinancialEvent.user_id == user_id)
+    return list(session.scalars(stmt))
 
 
 def get_financial_event(
-    session: Session, event_id: int
+    session: Session, event_id: int, user_id: int | None = None
 ) -> FinancialEvent | None:
     """Return one financial event by id with entries eagerly loaded, or ``None``.
 
@@ -234,11 +238,14 @@ def get_financial_event(
     serialised without a follow-up query. Returns ``None`` when no event has
     ``event_id``, so the routing layer can map the absence to 404.
     """
-    return session.scalars(
+    stmt = (
         select(FinancialEvent)
         .options(selectinload(FinancialEvent.entries))
         .where(FinancialEvent.id == event_id)
-    ).one_or_none()
+    )
+    if user_id is not None:
+        stmt = stmt.where(FinancialEvent.user_id == user_id)
+    return session.scalars(stmt).one_or_none()
 
 
 def account_balance_scaled(session: Session, account_id: int) -> int:

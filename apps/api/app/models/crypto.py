@@ -45,6 +45,13 @@ def crypto_quantity_to_scaled(value: Decimal | str | int) -> int:
 class CryptoHolding(Base):
     __tablename__ = "crypto_holdings"
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+        index=True,
+    )
     coingecko_id: Mapped[str] = mapped_column(String, nullable=False)
     symbol: Mapped[str] = mapped_column(String, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String)

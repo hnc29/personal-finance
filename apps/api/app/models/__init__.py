@@ -63,6 +63,7 @@ from app.models.savings import (
     SavingsTerm,
     SavingsTermStatus,
 )
+from app.models.user import User
 
 __all__ = [
     "CRYPTO_QUANTITY_SCALE",
@@ -111,5 +112,6 @@ __all__ = [
     "SavingsProduct",
     "SavingsTerm",
     "SavingsTermStatus",
+    "User",
     "quantity_to_grams",
 ]

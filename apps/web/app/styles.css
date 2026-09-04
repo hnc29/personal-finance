@@ -589,7 +589,9 @@ input[type="date"]{cursor:pointer}
   @page{size:A4 portrait;margin:12mm 10mm}
 }
 
-
-
-
-
+.topbar-user-section{display:flex;align-items:center;gap:10px}
+.user-badge-pill{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:4px 12px;font-size:13px;color:var(--text,#e2e8f0)}
+.user-role-admin{background:rgba(245,158,11,0.18);color:#f59e0b;font-size:11px;font-weight:700;padding:2px 6px;border-radius:6px}
+.btn-user-action{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:var(--text,#cbd5e1);padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s ease;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.btn-user-action:hover{background:rgba(255,255,255,0.12);color:#fff}
+.sidebar-user-footer{margin-top:auto;padding-top:16px;border-top:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:8px}

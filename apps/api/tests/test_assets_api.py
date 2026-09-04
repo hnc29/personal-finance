@@ -328,6 +328,189 @@ def test_patch_crypto_unknown_id_returns_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/api/v1/assets/metals",
+            {
+                "metal_type": "GOLD",
+                "product_type": "Synthetic ring",
+                "purity": "0.9999",
+                "quantity_grams": "1.2345",
+                "purchase_date": "2026-08-01",
+                "purchase_price": "2.3456",
+                "total_cost": "3.4567",
+            },
+        ),
+        (
+            "/api/v1/assets/crypto",
+            {
+                "coingecko_id": "synthetic-coin",
+                "symbol": "syn",
+                "quantity": "1.23456789",
+                "purchase_date": "2026-08-01",
+                "purchase_price": "2.3456",
+                "total_cost": "3.4567",
+            },
+        ),
+    ],
+)
+def test_create_asset_accepts_supported_exact_precision(
+    client: TestClient, path: str, payload: dict[str, object]
+) -> None:
+    response = client.post(path, json=payload)
+    assert response.status_code == 201
+    assert response.json()["purchase_price"] == "2.3456"
+    assert response.json()["total_cost"] == "3.4567"
+
+
+@pytest.mark.parametrize("asset_type", ["metals", "crypto"])
+@pytest.mark.parametrize("field", ["purchase_price", "total_cost"])
+@pytest.mark.parametrize("invalid_value", ["1.23456", "-0.0001"])
+def test_create_and_patch_reject_invalid_money_consistently_without_mutation(
+    client: TestClient, asset_type: str, field: str, invalid_value: str
+) -> None:
+    if asset_type == "metals":
+        create_payload = {
+            "metal_type": "GOLD",
+            "product_type": "Synthetic ring",
+            "quantity_grams": "3.7500",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "10.0000",
+            "total_cost": "20.0000",
+        }
+    else:
+        create_payload = {
+            "coingecko_id": "synthetic-coin",
+            "symbol": "syn",
+            "quantity": "1.00000000",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "10.0000",
+            "total_cost": "20.0000",
+        }
+
+    invalid_create = client.post(
+        f"/api/v1/assets/{asset_type}",
+        json={**create_payload, field: invalid_value},
+    )
+    assert invalid_create.status_code == 422
+
+    created = client.post(f"/api/v1/assets/{asset_type}", json=create_payload)
+    assert created.status_code == 201
+    holding_id = created.json()["id"]
+    identity_field = "product_type" if asset_type == "metals" else "symbol"
+    original_identity = create_payload[identity_field]
+
+    invalid_patch = client.patch(
+        f"/api/v1/assets/{asset_type}/{holding_id}",
+        json={field: invalid_value, identity_field: "would-mutate"},
+    )
+    assert invalid_patch.status_code == 422
+
+    persisted = client.get(f"/api/v1/assets/{asset_type}").json()[0]
+    assert persisted[field] == create_payload[field]
+    assert persisted[identity_field] == original_identity
+
+
+def test_create_and_patch_metal_reject_excess_purity_precision_without_mutation(
+    client: TestClient,
+) -> None:
+    payload = {
+        "metal_type": "GOLD",
+        "product_type": "Synthetic ring",
+        "purity": "0.9999",
+        "quantity_grams": "3.75",
+        "purchase_date": "2026-08-01",
+        "purchase_price": "10",
+        "total_cost": "20",
+    }
+    assert client.post(
+        "/api/v1/assets/metals", json={**payload, "purity": "0.99999"}
+    ).status_code == 422
+
+    created = client.post("/api/v1/assets/metals", json=payload)
+    response = client.patch(
+        f"/api/v1/assets/metals/{created.json()['id']}",
+        json={"purity": "0.99999", "product_type": "would-mutate"},
+    )
+    assert response.status_code == 422
+    persisted = client.get("/api/v1/assets/metals").json()[0]
+    assert persisted["purity"] == "0.9999"
+    assert persisted["product_type"] == "Synthetic ring"
+
+
+@pytest.mark.parametrize(
+    ("asset_type", "quantity_field", "invalid_value"),
+    [
+        ("metals", "quantity_grams", "0"),
+        ("metals", "quantity_grams", "-0.0001"),
+        ("metals", "quantity_grams", "1.23456"),
+        ("crypto", "quantity", "0"),
+        ("crypto", "quantity", "-0.00000001"),
+        ("crypto", "quantity", "1.000000001"),
+    ],
+)
+def test_create_and_patch_enforce_existing_quantity_rules_consistently(
+    client: TestClient,
+    asset_type: str,
+    quantity_field: str,
+    invalid_value: str,
+) -> None:
+    if asset_type == "metals":
+        create_payload = {
+            "metal_type": "GOLD",
+            "product_type": "Synthetic ring",
+            "quantity_grams": "3.75",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "10",
+            "total_cost": "20",
+        }
+    else:
+        create_payload = {
+            "coingecko_id": "synthetic-coin",
+            "symbol": "syn",
+            "quantity": "1",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "10",
+            "total_cost": "20",
+        }
+
+    assert client.post(
+        f"/api/v1/assets/{asset_type}",
+        json={**create_payload, quantity_field: invalid_value},
+    ).status_code == 422
+
+    created = client.post(f"/api/v1/assets/{asset_type}", json=create_payload)
+    assert created.status_code == 201
+    invalid_patch = client.patch(
+        f"/api/v1/assets/{asset_type}/{created.json()['id']}",
+        json={quantity_field: invalid_value},
+    )
+    assert invalid_patch.status_code == 422
+
+
+def test_patch_crypto_rejects_blank_symbol_without_mutation(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/assets/crypto",
+        json={
+            "coingecko_id": "synthetic-coin",
+            "symbol": "syn",
+            "quantity": "1",
+            "purchase_date": "2026-08-01",
+            "purchase_price": "10",
+            "total_cost": "20",
+        },
+    )
+    holding_id = created.json()["id"]
+
+    response = client.patch(
+        f"/api/v1/assets/crypto/{holding_id}", json={"symbol": "   "}
+    )
+    assert response.status_code == 422
+    assert client.get("/api/v1/assets/crypto").json()[0]["symbol"] == "syn"
+
+
 def test_create_metal_with_funding_account_debits_balance(client: TestClient) -> None:
     # 1. Create a bank account with 10,000,000 balance
     acc = client.post(
@@ -505,6 +688,4 @@ def test_sync_metal_prices_endpoint(client: TestClient) -> None:
         assert len(data["items"]) == 1
         assert data["items"][0]["brand"] == "SJC"
         assert data["items"][0]["valuation_price"] == "14700000.0000"
-
-
 

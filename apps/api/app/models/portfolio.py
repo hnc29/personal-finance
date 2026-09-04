@@ -36,10 +36,17 @@ class PortfolioComponentType(str, enum.Enum):
 class PortfolioSnapshot(Base):
     __tablename__ = "portfolio_snapshots"
     __table_args__ = (
-        UniqueConstraint("snapshot_date", name="uq_portfolio_snapshot_date"),
+        UniqueConstraint("user_id", "snapshot_date", name="uq_portfolio_snapshot_user_date"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        default=1,
+        server_default="1",
+        index=True,
+    )
     snapshot_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
     captured_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

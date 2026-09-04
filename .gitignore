@@ -54,3 +54,5 @@ project-context.md
 # Project local backups and temp archives
 backup/
 _to_delete/
+.sync-tmp*
+*.tar.gz
