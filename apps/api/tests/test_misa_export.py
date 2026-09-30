@@ -42,7 +42,9 @@ def session(tmp_path: Path) -> Session:
     database_path = tmp_path / "synthetic.db"
     env = os.environ.copy()
     env["PF_DATABASE_PATH"] = str(database_path)
-    subprocess.run(["alembic", "upgrade", "head"], check=True, env=env, capture_output=True)
+    subprocess.run(
+        ["alembic", "upgrade", "head"], check=True, env=env, capture_output=True
+    )
     engine = create_engine(f"sqlite:///{database_path}")
     with Session(engine) as database_session:
         database_session.execute(text("PRAGMA foreign_keys=ON"))
@@ -54,7 +56,9 @@ def _account(name: str) -> Account:
     return Account(name=name, account_type=AccountType.BANK, currency="VND")
 
 
-def _configuration_payload(first_id: int, second_id: int) -> MisaExportConfigurationCreate:
+def _configuration_payload(
+    first_id: int, second_id: int
+) -> MisaExportConfigurationCreate:
     return MisaExportConfigurationCreate(
         name="Synthetic MISA",
         mappings=[
@@ -78,14 +82,20 @@ def test_configuration_persists_explicit_many_to_one_mapping(session: Session) -
     session.add_all([first, second])
     session.commit()
 
-    configuration = create_configuration(session, _configuration_payload(first.id, second.id))
+    configuration = create_configuration(
+        session, _configuration_payload(first.id, second.id)
+    )
 
     assert len(configuration.account_mappings) == 2
-    assert {mapping.source_account_id for mapping in configuration.account_mappings} == {
+    assert {
+        mapping.source_account_id for mapping in configuration.account_mappings
+    } == {
         first.id,
         second.id,
     }
-    assert {mapping.target_account_code for mapping in configuration.account_mappings} == {"1121"}
+    assert {
+        mapping.target_account_code for mapping in configuration.account_mappings
+    } == {"1121"}
 
 
 def test_configuration_rejects_duplicate_or_unknown_source(session: Session) -> None:
@@ -96,10 +106,14 @@ def test_configuration_rejects_duplicate_or_unknown_source(session: Session) -> 
         name="Duplicate",
         mappings=[
             MisaAccountMappingCreate(
-                source_account_id=account.id, target_account_code="1", target_account_name="One"
+                source_account_id=account.id,
+                target_account_code="1",
+                target_account_name="One",
             ),
             MisaAccountMappingCreate(
-                source_account_id=account.id, target_account_code="2", target_account_name="Two"
+                source_account_id=account.id,
+                target_account_code="2",
+                target_account_name="Two",
             ),
         ],
     )
@@ -110,7 +124,9 @@ def test_configuration_rejects_duplicate_or_unknown_source(session: Session) -> 
         name="Unknown",
         mappings=[
             MisaAccountMappingCreate(
-                source_account_id=999, target_account_code="1", target_account_name="One"
+                source_account_id=999,
+                target_account_code="1",
+                target_account_name="One",
             )
         ],
     )
@@ -118,7 +134,9 @@ def test_configuration_rejects_duplicate_or_unknown_source(session: Session) -> 
         create_configuration(session, unknown)
 
 
-def test_configuration_normalizes_values_and_rejects_invalid_targets(session: Session) -> None:
+def test_configuration_normalizes_values_and_rejects_invalid_targets(
+    session: Session,
+) -> None:
     first = _account("Synthetic A")
     second = _account("Synthetic B")
     second.currency = "USD"
@@ -164,7 +182,9 @@ def test_configuration_normalizes_values_and_rejects_invalid_targets(session: Se
         create_configuration(session, wrong_currency)
 
 
-def test_export_history_filters_and_prevents_unintentional_reexport(session: Session) -> None:
+def test_export_history_filters_and_prevents_unintentional_reexport(
+    session: Session,
+) -> None:
     mapped = _account("Mapped")
     unmapped = _account("Unmapped")
     session.add_all([mapped, unmapped])
@@ -198,7 +218,9 @@ def test_export_history_filters_and_prevents_unintentional_reexport(session: Ses
     session.add_all([exportable, not_fully_mapped])
     session.commit()
 
-    assert [event.id for event in list_exportable_events(session, configuration.id)] == [exportable.id]
+    assert [
+        event.id for event in list_exportable_events(session, configuration.id)
+    ] == [exportable.id]
 
     run = record_export(
         session,
@@ -224,7 +246,9 @@ def test_export_history_filters_and_prevents_unintentional_reexport(session: Ses
     assert session.query(MisaExportedEvent).count() == 1
 
 
-def test_export_history_requires_run_and_event_configuration_to_match(session: Session) -> None:
+def test_export_history_requires_run_and_event_configuration_to_match(
+    session: Session,
+) -> None:
     account = _account("Synthetic")
     session.add(account)
     session.commit()
@@ -280,7 +304,9 @@ def test_exports_structured_workbook_and_records_history(session: Session) -> No
     second = _account("Synthetic B")
     session.add_all([first, second])
     session.flush()
-    configuration = create_configuration(session, _configuration_payload(first.id, second.id))
+    configuration = create_configuration(
+        session, _configuration_payload(first.id, second.id)
+    )
     event = FinancialEvent(
         event_type=FinancialEventType.TRANSFER,
         transaction_date=datetime.date(2026, 8, 23),
@@ -300,7 +326,9 @@ def test_exports_structured_workbook_and_records_history(session: Session) -> No
         exported_at=datetime.datetime(2026, 8, 23, tzinfo=datetime.UTC),
     )
 
-    workbook = load_workbook(io.BytesIO(exported.content), read_only=True, data_only=True)
+    workbook = load_workbook(
+        io.BytesIO(exported.content), read_only=True, data_only=True
+    )
     worksheet = workbook["Bank statement"]
     rows = list(worksheet.iter_rows(values_only=True))
     workbook.close()
@@ -355,7 +383,9 @@ def test_misa_workbook_sanitizes_text_without_stringifying_dates_or_money(
 
     exported = export_misa_workbook(session, configuration.id, "safe.xlsx")
 
-    workbook = load_workbook(io.BytesIO(exported.content), read_only=True, data_only=False)
+    workbook = load_workbook(
+        io.BytesIO(exported.content), read_only=True, data_only=False
+    )
     row = next(workbook["Bank statement"].iter_rows(min_row=2))
     assert row[3].value == "'@SYNTHETIC_NOTE()"
     assert row[4].value == "'+SYNTHETIC_CODE()"

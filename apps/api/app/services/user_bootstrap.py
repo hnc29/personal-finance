@@ -27,7 +27,9 @@ def bootstrap_user_data(db: Session, user: User) -> None:
         db.add(cash_account)
 
     # 2. Seed Default Categories for this user
-    def add_nodes(nodes: Sequence[CategoryNode], parent: Category | None = None) -> None:
+    def add_nodes(
+        nodes: Sequence[CategoryNode], parent: Category | None = None
+    ) -> None:
         for name, children in nodes:
             parent_id = parent.id if parent else None
             cat = Category(

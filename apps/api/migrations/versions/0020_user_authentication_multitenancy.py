@@ -4,6 +4,7 @@ Revision ID: 0020_user_authentication_multitenancy
 Revises: 0019_excluded_from_reports
 Create Date: 2026-09-02
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -49,8 +50,12 @@ def upgrade() -> None:
             sa.Column("email", sa.String(length=255), nullable=True),
             sa.Column("password_hash", sa.String(length=255), nullable=False),
             sa.Column("display_name", sa.String(length=128), nullable=True),
-            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
-            sa.Column("is_admin", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+            sa.Column(
+                "is_active", sa.Boolean(), nullable=False, server_default=sa.text("1")
+            ),
+            sa.Column(
+                "is_admin", sa.Boolean(), nullable=False, server_default=sa.text("0")
+            ),
             sa.Column(
                 "created_at",
                 sa.DateTime(timezone=True),
@@ -95,7 +100,9 @@ def upgrade() -> None:
                 op.execute(
                     f"ALTER TABLE {table_name} ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1"
                 )
-            op.execute(f"CREATE INDEX IF NOT EXISTS ix_{table_name}_user_id ON {table_name}(user_id)")
+            op.execute(
+                f"CREATE INDEX IF NOT EXISTS ix_{table_name}_user_id ON {table_name}(user_id)"
+            )
 
 
 def downgrade() -> None:

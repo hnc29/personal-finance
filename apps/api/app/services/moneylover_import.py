@@ -19,12 +19,30 @@ class DuplicateImportFile(ValueError):
 
 
 def import_moneylover(
-    session: Session, source: bytes | BinaryIO, original_filename: str = "moneylover.xlsx"
+    session: Session,
+    source: bytes | BinaryIO,
+    original_filename: str = "moneylover.xlsx",
+    user_id: int = 1,
 ) -> ImportBatch:
     parsed = parse_moneylover_xlsx(source)
-    if session.scalar(select(ImportBatch).where(ImportBatch.file_sha256 == parsed.file_sha256)) is not None:
+    if (
+        session.scalar(
+            select(ImportBatch).where(
+                ImportBatch.user_id == user_id,
+                ImportBatch.file_sha256 == parsed.file_sha256,
+            )
+        )
+        is not None
+    ):
         raise DuplicateImportFile(f"file already imported: {parsed.file_sha256}")
-    batch = ImportBatch(source="money_lover", original_filename=original_filename, file_sha256=parsed.file_sha256, imported_at=datetime.now(UTC).replace(tzinfo=None), row_count=len(parsed.rows))
+    batch = ImportBatch(
+        user_id=user_id,
+        source="money_lover",
+        original_filename=original_filename,
+        file_sha256=parsed.file_sha256,
+        imported_at=datetime.now(UTC).replace(tzinfo=None),
+        row_count=len(parsed.rows),
+    )
     batch.rows = [
         RawImportRow(
             source_row_number=row.source_row_number,

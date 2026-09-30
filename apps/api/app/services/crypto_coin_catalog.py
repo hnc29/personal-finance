@@ -73,9 +73,14 @@ class CoinGeckoCoinListProvider:
         response.raise_for_status()
         payload = json.loads(response.text)
         coins = [
-            CoinSummary(id=str(item["id"]), symbol=str(item["symbol"]), name=str(item["name"]))
+            CoinSummary(
+                id=str(item["id"]), symbol=str(item["symbol"]), name=str(item["name"])
+            )
             for item in payload
-            if isinstance(item, dict) and "id" in item and "symbol" in item and "name" in item
+            if isinstance(item, dict)
+            and "id" in item
+            and "symbol" in item
+            and "name" in item
         ]
         self._coins = coins
         self._cached_at = now

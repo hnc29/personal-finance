@@ -114,16 +114,23 @@ fieldset { margin:0; min-width:0 } legend { padding:0 5px }.hint { color:var(--m
 .note-row .row-icon{color:var(--muted)}
 .note-input{flex:1;min-height:auto;border:0;background:transparent;padding:0}
 .note-input:focus{outline:0}
-.date-row{display:flex;align-items:center;gap:8px;min-height:56px;padding:6px 10px}
+.date-row{display:flex;align-items:center;gap:10px;min-height:48px;padding:4px 0;width:100%}
+.date-cal-btn{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;border:0;background:transparent;color:#0f172a;cursor:pointer;padding:0;transition:all .15s ease}
+.date-cal-btn:hover{background:#f1f5f9}
 .asset-form .amount-row,.savings-form .amount-row{min-height:38px;height:38px;padding:0 8px 0 10px;border:1px solid #cbd1c9;border-radius:8px;background:#fff;gap:8px}
 .asset-form .amount-row .amount-input,.savings-form .amount-row .amount-input{font-size:.92rem;font-weight:550;height:100%;padding:0}
 .asset-form .amount-row .currency-badge,.savings-form .amount-row .currency-badge{min-height:24px;height:24px;padding:0 7px;font-size:.74rem}
-.asset-form .date-row,.savings-form .date-row{min-height:38px;height:38px;padding:0;gap:6px}
-.asset-form .date-nav,.savings-form .date-nav{width:32px;height:32px;min-height:32px;font-size:.95rem}
-.asset-form .date-center,.savings-form .date-center{min-height:38px;height:38px;font-size:.86rem}
-.date-nav{flex:0 0 auto;width:36px;height:36px;border-radius:999px;border:0;background:#eceee8;color:var(--ink);font-size:1.1rem;line-height:1;display:inline-flex;align-items:center;justify-content:center}
-.date-center{position:relative;flex:1;display:flex;align-items:center;justify-content:center;min-height:44px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:650;text-align:center;overflow:hidden;cursor:pointer}
-.date-native{position:absolute;inset:0;opacity:0;border:0;min-height:auto;cursor:pointer}
+.asset-form .date-row,.savings-form .date-row{min-height:38px;height:38px;padding:0;gap:8px}
+.asset-form .date-cal-btn,.savings-form .date-cal-btn{width:32px;height:32px}
+.asset-form .date-nav,.savings-form .date-nav{width:34px;height:34px;min-height:34px}
+.asset-form .date-center,.savings-form .date-center{min-height:38px;height:38px;font-size:.9rem;padding:4px 12px;border-radius:10px}
+.date-nav{flex:0 0 auto;width:38px;height:38px;min-height:38px;border-radius:50%;border:0;background:#f1f5f9;color:#16a34a;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s ease;padding:0}
+.date-nav:hover{background:#e2e8f0;color:#15803d}
+.date-nav:active{transform:scale(0.92)}
+.date-center{position:relative;flex:1;display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px 18px;border-radius:12px;background:#f1f5f9;color:#16a34a;font-weight:600;font-size:.98rem;text-align:center;overflow:hidden;cursor:pointer;transition:all .15s ease}
+.date-center:hover{background:#e2e8f0}
+.date-center span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:none}
+.date-native{position:absolute;inset:0;opacity:0;border:0;width:100%;height:100%;min-height:auto;cursor:pointer}
 /* TASK-036: category icon picker -- lets a category be assigned any icon
    from the library instead of only the name-inferred default. */
 .icon-picker{position:relative}
@@ -281,6 +288,17 @@ fieldset { margin:0; min-width:0 } legend { padding:0 5px }.hint { color:var(--m
 .category-tree-actions{display:flex;align-items:center;gap:6px}
 .category-children{display:flex;flex-direction:column;gap:4px;margin-left:24px;padding-left:12px;border-left:2px solid #e2e5dc;margin-top:2px}
 
+/* Accounts Layout & Controls */
+.accounts-section{width:100%;max-width:100%;box-sizing:border-box}
+.account-add-btn{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:#0284c7;cursor:pointer;transition:all .15s ease;flex-shrink:0}
+.account-add-btn:hover{background:#f1f5f9;border-color:#94a3b8;color:#0369a1}
+.account-add-btn:active{transform:scale(0.95)}
+.status-icon-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:12px;font-weight:800;line-height:1;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.status-icon-badge.active{background:#22c55e;color:#ffffff}
+.status-icon-badge.inactive{background:#ef4444;color:#ffffff}
+.account-card-clickable.is-selected{border-color:#0084d6!important;box-shadow:0 0 0 2px rgba(0,132,214,.25),0 8px 20px rgba(0,0,0,.06)}
+.account-card-actions-wrapper{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px}
+
 /* Clean Account Form Layout */
 .account-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media (max-width:640px){.account-form-grid{grid-template-columns:1fr}}
@@ -373,6 +391,9 @@ fieldset { margin:0; min-width:0 } legend { padding:0 5px }.hint { color:var(--m
 .net-worth-hero{padding:20px 24px;border-radius:18px;background:linear-gradient(135deg,#00629b 0%,#0084d6 55%,#0ea5e9 100%);color:#fff;display:flex;flex-direction:column;gap:12px;box-shadow:0 8px 24px rgba(0,132,214,.28)}
 .net-worth-hero-top{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px}
 .net-worth-hero-label{font-size:.82rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#bae6fd}
+.btn-mask-balance{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:50%;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:all .2s ease;flex-shrink:0}
+.btn-mask-balance:hover{background:rgba(255,255,255,.32);transform:scale(1.08)}
+.btn-mask-balance:active{transform:scale(.95)}
 .net-worth-hero-amount{font-size:2.1rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1;letter-spacing:-.02em}
 .net-worth-hero-subtotals{display:flex;gap:20px;flex-wrap:wrap}
 .net-worth-subtotal{display:flex;flex-direction:column;gap:2px}
@@ -434,6 +455,19 @@ fieldset { margin:0; min-width:0 } legend { padding:0 5px }.hint { color:var(--m
 .pnl-positive{background:#dcfce7;color:#15803d}
 .pnl-negative{background:#fee2e2;color:#b91c1c}
 .pnl-neutral{background:#f3f4f6;color:#6b7280}
+
+/* Concise Asset Items List */
+.asset-items-list{display:flex;flex-direction:column;gap:10px;width:100%;margin-top:14px}
+.asset-item-card{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--card);border:1px solid var(--line);border-radius:14px;cursor:pointer;transition:all .15s ease;gap:14px}
+.asset-item-card:hover{background:#f8fafc;border-color:#94a3b8;transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.04)}
+.asset-item-card:active{transform:scale(0.99)}
+.asset-item-left{display:flex;align-items:center;gap:14px;min-width:0;flex:1}
+.asset-item-icon{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.asset-item-content{display:flex;flex-direction:column;gap:3px;min-width:0}
+.asset-item-title{font-size:.96rem;font-weight:650;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.asset-item-sub{font-size:.84rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.asset-item-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.asset-item-val{font-size:1rem;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
 
 /* Reports & Financial Analytics Dashboards */
 .reports-page{display:flex;flex-direction:column;gap:16px;width:100%}
@@ -595,3 +629,714 @@ input[type="date"]{cursor:pointer}
 .btn-user-action{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);border-radius:8px;color:var(--text,#cbd5e1);padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s ease;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 .btn-user-action:hover{background:rgba(255,255,255,0.12);color:#fff}
 .sidebar-user-footer{margin-top:auto;padding-top:16px;border-top:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:8px}
+
+/* ==========================================================================
+   MOBILE-FIRST APP UI & TOUCH SYSTEM (< 768px ONLY)
+   Desktop (>= 769px) is 100% UNTOUCHED
+   ========================================================================== */
+
+.mobile-bottom-nav{display:none!important}
+.mobile-drawer-backdrop{display:none!important}
+.ml-mobile-header{display:none!important}
+.ml-balance-card{display:none!important}
+.ml-view-report-link-wrap{display:none!important}
+.mobile-detail-modal-wrap{display:none!important}
+
+@media (max-width:768px){
+  /* Hide desktop sidebar and desktop topbar */
+  .sidebar{display:none!important}
+  .topbar{display:none!important}
+  .desktop-only{display:none!important}
+
+  /* App shell & content container on mobile */
+  .app-shell{flex-direction:column!important;min-height:100dvh;background:#f3f4f6}
+  .app-content{width:100%!important;min-width:0!important;background:#f3f4f6}
+  .app-content main{
+    padding:calc(8px + env(safe-area-inset-top, 0px)) 12px calc(80px + env(safe-area-inset-bottom,20px))!important;
+    max-width:100%!important;
+  }
+
+  /* Money Lover Top Header on Mobile */
+  .ml-mobile-header{
+    display:flex!important;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding:4px 4px 6px;
+    background:transparent;
+    width:100%;
+  }
+  .ml-header-circle-btn{
+    width:36px;
+    height:36px;
+    border-radius:50%;
+    background:#ffffff;
+    border:1px solid #e2e8f0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:#334155;
+    cursor:pointer;
+    flex-shrink:0;
+    box-shadow:0 1px 3px rgba(0,0,0,0.05);
+    touch-action:manipulation;
+  }
+  .ml-header-circle-btn:active{transform:scale(0.92);background:#f1f5f9}
+  .ml-header-account-pill{
+    flex:1;
+    max-width:210px;
+    display:flex;
+    justify-content:center;
+  }
+  .ml-header-account-pill .row-picker{
+    width:100%;
+    border-bottom:0;
+  }
+  .ml-header-account-pill .row-trigger{
+    background:#ffffff;
+    border:1px solid #e2e8f0;
+    border-radius:999px;
+    padding:5px 12px;
+    box-shadow:0 1px 4px rgba(0,0,0,0.06);
+    gap:6px;
+    justify-content:center;
+    min-height:36px;
+  }
+  .ml-header-account-pill .row-label{
+    font-size:.86rem;
+    font-weight:700;
+    color:#0f172a;
+    max-width:120px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .ml-header-account-pill .row-balance{display:none}
+  .ml-header-account-pill .row-chevron{
+    font-size:.85rem;
+    color:#64748b;
+    transform:rotate(90deg);
+  }
+  .ml-header-right-btns{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-shrink:0;
+  }
+
+  /* Money Lover Search Bar in Header */
+  .ml-header-search-bar{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    width:100%;
+    background:#ffffff;
+    border:1px solid #cbd5e1;
+    border-radius:999px;
+    padding:3px 12px;
+    box-shadow:0 1px 3px rgba(0,0,0,0.05);
+    min-height:36px;
+  }
+  .ml-search-icon{
+    color:#64748b;
+    display:flex;
+    align-items:center;
+    flex-shrink:0;
+  }
+  .ml-search-input{
+    flex:1;
+    border:none;
+    outline:none;
+    background:transparent;
+    font-size:0.92rem;
+    color:#0f172a;
+    padding:4px 0;
+  }
+  .ml-search-clear-btn{
+    background:none;
+    border:none;
+    color:#94a3b8;
+    font-size:15px;
+    cursor:pointer;
+    padding:4px 6px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:50%;
+    flex-shrink:0;
+  }
+  .ml-search-clear-btn:active{color:#0f172a;background:#f1f5f9}
+
+  /* Money Lover More Options Popup Menu */
+  .ml-popup-backdrop{
+    position:fixed!important;
+    inset:0;
+    background:rgba(0,0,0,0.32);
+    z-index:9999;
+    display:flex!important;
+    justify-content:flex-end;
+    align-items:flex-start;
+    padding:calc(50px + env(safe-area-inset-top, 0px)) 12px 0;
+  }
+  .ml-popup-card{
+    background:#ffffff;
+    border-radius:28px;
+    padding:16px 14px;
+    width:calc(100vw - 24px);
+    max-width:310px;
+    box-shadow:0 14px 40px rgba(0,0,0,0.22);
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    animation:mlPopupIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes mlPopupIn {
+    from{opacity:0;transform:scale(0.92) translateY(-10px)}
+    to{opacity:1;transform:scale(1) translateY(0)}
+  }
+  .ml-popup-pill-btn{
+    width:100%;
+    min-height:46px;
+    border-radius:999px;
+    background:#e2e8f0;
+    border:none;
+    font-size:15px;
+    font-weight:600;
+    color:#1e293b;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    padding:10px 16px;
+    touch-action:manipulation;
+    transition:background-color 0.15s, transform 0.1s;
+    user-select:none;
+  }
+  .ml-popup-pill-btn:active{
+    background:#cbd5e1;
+    transform:scale(0.98);
+  }
+  .ml-popup-pill-btn.active{
+    background:#0f172a;
+    color:#ffffff;
+  }
+  .ml-popup-pill-btn.danger{
+    color:#dc2626;
+    background:#fee2e2;
+  }
+  .ml-popup-pill-btn.danger:active{
+    background:#fecaca;
+  }
+
+  /* Money Lover Balance Card */
+  .ml-balance-card{
+    display:flex!important;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:6px 12px 10px;
+    background:#ffffff;
+    border-radius:16px 16px 0 0;
+  }
+  .ml-balance-label{
+    font-size:.8rem;
+    color:#64748b;
+    font-weight:500;
+    margin-bottom:2px;
+  }
+  .ml-balance-amount{
+    font-size:1.65rem;
+    font-weight:800;
+    color:#0f172a;
+    letter-spacing:-0.02em;
+    line-height:1.2;
+    font-variant-numeric:tabular-nums;
+  }
+
+  /* Ledger Time Controls on Mobile */
+  .ledger-page{
+    gap:0!important;
+    padding-bottom:20px!important;
+  }
+  .ledger-top-row{
+    display:flex!important;
+    flex-direction:column!important;
+    gap:0!important;
+    background:#ffffff;
+  }
+  .ledger-time-filter-wrap{
+    background:#ffffff!important;
+    border:0!important;
+    border-radius:0!important;
+    padding:2px 6px 6px!important;
+  }
+  .ledger-time-tabs{display:none!important}
+  .ledger-months{
+    gap:0!important;
+    justify-content:center!important;
+    width:100%!important;
+    border-bottom:1px solid #f1f5f9;
+  }
+  .ledger-months button{
+    flex:1!important;
+    background:transparent!important;
+    border:0!important;
+    border-radius:0!important;
+    font-size:.82rem!important;
+    font-weight:700!important;
+    color:#94a3b8!important;
+    padding:8px 8px!important;
+    border-bottom:2.5px solid transparent!important;
+    text-transform:uppercase!important;
+    text-align:center!important;
+    min-width:auto!important;
+  }
+  .ledger-months button.active{
+    color:#0f172a!important;
+    border-bottom-color:#0f172a!important;
+    background:transparent!important;
+  }
+  .ml-month-scroll-row .scroll-arrow-btn{
+    background:transparent;
+    border:0;
+    color:#94a3b8;
+    font-size:1.1rem;
+    padding:4px 6px;
+  }
+
+  /* Ledger Summary on Mobile (Money Lover Clean Card) */
+  .ledger-summary{
+    display:flex!important;
+    flex-direction:column!important;
+    gap:0!important;
+    background:#ffffff!important;
+    border:0!important;
+    border-radius:0 0 16px 16px!important;
+    padding:10px 18px 6px!important;
+    box-shadow:0 3px 10px rgba(0,0,0,0.03)!important;
+    margin-bottom:12px!important;
+  }
+  .ledger-summary-item{
+    display:flex!important;
+    justify-content:space-between!important;
+    align-items:center!important;
+    padding:4px 0!important;
+    border:0!important;
+    background:transparent!important;
+  }
+  .ledger-summary-item span{
+    color:#64748b!important;
+    font-size:.86rem!important;
+    font-weight:500!important;
+    text-transform:none!important;
+  }
+  .ledger-summary-item strong{
+    font-size:.94rem!important;
+    font-weight:600!important;
+    color:#1e293b!important;
+    margin:0!important;
+  }
+  .ledger-summary-item.net-change-item{
+    border-top:1px solid #f1f5f9!important;
+    padding-top:8px!important;
+    margin-top:4px!important;
+    justify-content:flex-end!important;
+  }
+  .ledger-summary-item.net-change-item span{display:none!important}
+  .ledger-summary-item.net-change-item strong{
+    font-size:1.05rem!important;
+    font-weight:800!important;
+    letter-spacing:-0.01em;
+  }
+
+  /* Money Lover Action Link */
+  .ml-view-report-link-wrap{
+    display:flex!important;
+    justify-content:center!important;
+    padding:4px 0 12px!important;
+  }
+  .ml-view-report-btn{
+    background:transparent!important;
+    border:0!important;
+    color:#059669!important;
+    font-weight:650!important;
+    font-size:.88rem!important;
+    cursor:pointer!important;
+    padding:4px 8px!important;
+    text-decoration:none!important;
+  }
+  .ml-view-report-btn:active{opacity:0.7}
+
+  /* Ledger Body & List on Mobile */
+  .ledger-body{
+    display:block!important;
+    background:transparent!important;
+  }
+  .ledger-detail{display:none!important}
+  .ledger-fab{display:none!important}
+  .ledger-list{gap:12px!important}
+
+  /* Date Card (Money Lover Style) */
+  .ledger-day{
+    background:#ffffff!important;
+    border:1px solid rgba(0,0,0,0.04)!important;
+    border-radius:16px!important;
+    box-shadow:0 1px 4px rgba(0,0,0,0.04)!important;
+    overflow:hidden!important;
+    margin-bottom:12px!important;
+  }
+  .ledger-day-heading{
+    background:#ffffff!important;
+    border-bottom:1px solid #f8fafc!important;
+    padding:12px 16px 8px!important;
+    display:flex!important;
+    justify-content:space-between!important;
+    align-items:center!important;
+  }
+  .ledger-day-left{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .ledger-day-num{
+    font-size:1.65rem;
+    font-weight:750;
+    color:#0f172a;
+    line-height:1;
+    letter-spacing:-0.03em;
+  }
+  .ledger-day-meta{
+    display:flex;
+    flex-direction:column;
+    gap:1px;
+  }
+  .ledger-day-weekday{
+    font-size:.78rem;
+    font-weight:650;
+    color:#475569;
+  }
+  .ledger-day-monthyear{
+    font-size:.72rem;
+    color:#94a3b8;
+    font-weight:500;
+  }
+  .ledger-day-total{
+    font-size:.96rem;
+    font-weight:750;
+    color:#0f172a;
+    font-variant-numeric:tabular-nums;
+  }
+
+  /* Transaction Item Row (Money Lover Style) */
+  .ledger-row{
+    background:#ffffff!important;
+    padding:12px 16px!important;
+    border-top:1px solid #f8fafc!important;
+    display:flex!important;
+    align-items:center!important;
+    gap:12px!important;
+    touch-action:manipulation;
+  }
+  .ledger-row:active{background:#f8fafc!important}
+  .ledger-row .ledger-checkbox{display:none!important}
+  .ledger-row-icon-wrap{
+    flex:0 0 38px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .ledger-row-content{
+    flex:1;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+  }
+  .ledger-row-title{
+    font-size:.94rem;
+    font-weight:650;
+    color:#0f172a;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .ledger-row-sub{
+    font-size:.76rem;
+    color:#64748b;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .ledger-row-amount{
+    flex:0 0 auto;
+    font-size:.95rem;
+    font-weight:650;
+    font-variant-numeric:tabular-nums;
+  }
+  .ledger-row-amount.negative{color:#ef4444!important}
+  .ledger-row-amount.positive{color:#0284c7!important}
+
+  .mobile-detail-modal-wrap{
+    display:block!important;
+  }
+
+  /* Mobile Bottom Navigation Bar (Money Lover Style) */
+  .mobile-bottom-nav{
+    display:grid!important;
+    grid-template-columns:repeat(5,1fr);
+    align-items:center;
+    position:fixed;
+    bottom:0;
+    left:0;
+    right:0;
+    z-index:90;
+    background:rgba(255,255,255,0.95);
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    border-top:1px solid rgba(226,232,240,0.85);
+    box-shadow:0 -4px 20px rgba(0,0,0,0.06);
+    padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));
+  }
+  .mobile-nav-item{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:3px;
+    background:transparent;
+    border:0;
+    padding:4px 0;
+    cursor:pointer;
+    color:#64748b;
+    transition:all .15s ease;
+    border-radius:10px;
+    touch-action:manipulation;
+  }
+  .mobile-nav-item:active{transform:scale(0.92)}
+  .mobile-nav-item.active{color:#0084d6;font-weight:700}
+  .mobile-nav-icon{display:inline-flex;align-items:center;justify-content:center}
+  .mobile-nav-label{font-size:.68rem;font-weight:600;line-height:1}
+  .mobile-nav-item.active .mobile-nav-label{color:#0084d6;font-weight:750}
+
+  .mobile-nav-fab-wrap{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+    top:-12px;
+  }
+  .mobile-fab-btn{
+    width:52px;
+    height:52px;
+    border-radius:50%;
+    background:linear-gradient(135deg,#0084d6,#0284c7);
+    color:#fff;
+    border:3px solid #fff;
+    box-shadow:0 4px 16px rgba(0,132,214,.45);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    transition:transform .15s ease,box-shadow .15s ease;
+    touch-action:manipulation;
+  }
+  .mobile-fab-btn:active{transform:scale(0.92);box-shadow:0 2px 8px rgba(0,132,214,.35)}
+  .mobile-fab-btn.active{background:linear-gradient(135deg,#0284c7,#0369a1);box-shadow:0 0 0 4px rgba(0,132,214,.25)}
+
+  /* Mobile More Drawer Sheet */
+  .mobile-drawer-backdrop{
+    display:flex!important;
+    align-items:flex-end;
+    position:fixed;
+    inset:0;
+    background:rgba(15,23,42,0.6);
+    backdrop-filter:blur(6px);
+    -webkit-backdrop-filter:blur(6px);
+    z-index:150;
+    animation:fadeIn .2s ease;
+  }
+  .mobile-drawer-sheet{
+    width:100%;
+    background:#ffffff;
+    border-radius:24px 24px 0 0;
+    padding:12px 18px calc(24px + env(safe-area-inset-bottom,16px));
+    box-shadow:0 -10px 35px rgba(0,0,0,.2);
+    animation:slideUpSheet .28s cubic-bezier(0.16,1,0.3,1);
+    max-height:85vh;
+    overflow-y:auto;
+  }
+  .mobile-drawer-handle{
+    width:40px;
+    height:4px;
+    background:#cbd5e1;
+    border-radius:99px;
+    margin:0 auto 14px;
+  }
+  .mobile-drawer-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding-bottom:14px;
+    border-bottom:1px solid #f1f5f9;
+    margin-bottom:16px;
+  }
+  .mobile-drawer-user{display:flex;align-items:center;gap:12px}
+  .mobile-drawer-avatar{
+    width:42px;
+    height:42px;
+    border-radius:50%;
+    background:linear-gradient(135deg,#3b82f6,#1d4ed8);
+    color:#fff;
+    font-weight:750;
+    font-size:1.1rem;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .mobile-drawer-userinfo{display:flex;flex-direction:column;gap:2px}
+  .mobile-drawer-userinfo strong{font-size:.96rem;color:#0f172a}
+  .mobile-drawer-close{
+    width:32px;
+    height:32px;
+    border-radius:50%;
+    background:#f1f5f9;
+    border:0;
+    font-size:1.4rem;
+    line-height:1;
+    color:#64748b;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+  }
+  .mobile-drawer-grid{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:10px;
+    margin-bottom:20px;
+  }
+  .mobile-drawer-card{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:#f8fafc;
+    border:1px solid #e2e8f0;
+    border-radius:14px;
+    padding:12px 14px;
+    text-align:left;
+    cursor:pointer;
+    text-decoration:none;
+    color:#1e293b;
+    font-size:.88rem;
+    font-weight:600;
+    transition:background .15s ease;
+  }
+  .mobile-drawer-card:active{background:#f1f5f9;transform:scale(0.98)}
+  .mobile-drawer-card.active{background:#e0f2fe;border-color:#bae6fd;color:#0284c7}
+  .mobile-drawer-card-icon{
+    width:38px;
+    height:38px;
+    border-radius:10px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-shrink:0;
+  }
+  .mobile-drawer-footer{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+    padding-top:14px;
+    border-top:1px solid #f1f5f9;
+  }
+  .mobile-drawer-lang-toggle{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-size:.86rem;
+    color:#475569;
+    font-weight:500;
+  }
+  .mobile-drawer-logout-btn{
+    width:100%;
+    padding:12px;
+    border-radius:12px;
+    background:#fee2e2;
+    color:#dc2626;
+    border:0;
+    font-size:.92rem;
+    font-weight:700;
+    cursor:pointer;
+    text-align:center;
+  }
+  .mobile-drawer-login-btn{
+    width:100%;
+    padding:12px;
+    border-radius:12px;
+    background:#0084d6;
+    color:#fff;
+    border:0;
+    font-size:.92rem;
+    font-weight:700;
+    text-align:center;
+    text-decoration:none;
+    display:block;
+  }
+
+  /* Bottom-Sheet Style Modals */
+  .modal-backdrop{
+    display:flex!important;
+    align-items:flex-end!important;
+    justify-content:center!important;
+    padding:0!important;
+    background:rgba(15,23,42,0.65)!important;
+    backdrop-filter:blur(6px)!important;
+    -webkit-backdrop-filter:blur(6px)!important;
+  }
+  .modal-panel, .modal-panel.wide{
+    width:100%!important;
+    max-width:100%!important;
+    max-height:88vh!important;
+    border-radius:24px 24px 0 0!important;
+    padding:14px 16px calc(24px + env(safe-area-inset-bottom,16px))!important;
+    box-shadow:0 -10px 35px rgba(0,0,0,.25)!important;
+    animation:slideUpSheet .26s cubic-bezier(0.16,1,0.3,1)!important;
+    border:0!important;
+  }
+  .modal-header{
+    position:relative;
+    padding-top:8px;
+    margin-bottom:14px;
+  }
+  .modal-header::before{
+    content:"";
+    position:absolute;
+    top:-6px;
+    left:50%;
+    transform:translateX(-50%);
+    width:38px;
+    height:4px;
+    background:#cbd5e1;
+    border-radius:99px;
+  }
+
+  /* Form & Input Enhancements on Mobile (16px to prevent iOS auto zoom) */
+  input[type="text"], input[type="number"], input[type="date"], input[type="password"], select, textarea{
+    font-size:16px!important;
+    min-height:46px;
+    touch-action:manipulation;
+  }
+  .amount-input{font-size:1.6rem!important}
+  .composer-actions{flex-direction:column;gap:10px}
+  .composer-submit-btn{width:100%!important;min-height:50px}
+  .composer-cancel-btn{width:100%!important;min-height:46px}
+
+  @keyframes slideUpSheet{
+    from{transform:translateY(100%)}
+    to{transform:translateY(0)}
+  }
+  @keyframes fadeIn{
+    from{opacity:0}
+    to{opacity:1}
+  }
+}

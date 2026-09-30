@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
 from app.core.money import money_to_scaled
+from app.core.security import CurrentUser
 from app.models.account import Account, AccountType
 from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
 from app.models.savings import (
@@ -53,14 +54,14 @@ def _today() -> datetime.date:
     return datetime.datetime.now(datetime.UTC).date()
 
 
-def _require_wallet_account(db: Session, account_id: int, *, field: str) -> Account:
+def _require_wallet_account(
+    db: Session, account_id: int, *, field: str, user_id: int | None = None
+) -> Account:
     account = db.get(Account, account_id)
-    if account is None:
+    if account is None or (user_id is not None and account.user_id != user_id):
         raise HTTPException(400, f"{field}: account not found")
     if account.account_type not in _WALLET_ACCOUNT_TYPES:
-        raise HTTPException(
-            400, f"{field}: must be a cash, bank, or e-wallet account"
-        )
+        raise HTTPException(400, f"{field}: must be a cash, bank, or e-wallet account")
     return account
 
 
@@ -222,12 +223,20 @@ def _account_json(
     return data
 
 
-def _get_account(db: Session, account_id: int) -> SavingsAccount:
-    account = db.get(
-        SavingsAccount,
-        account_id,
-        options=[selectinload(SavingsAccount.product), selectinload(SavingsAccount.terms)],
+def _get_account(
+    db: Session, account_id: int, user_id: int | None = None
+) -> SavingsAccount:
+    stmt = (
+        select(SavingsAccount)
+        .options(
+            selectinload(SavingsAccount.product),
+            selectinload(SavingsAccount.terms),
+        )
+        .where(SavingsAccount.id == account_id)
     )
+    if user_id is not None:
+        stmt = stmt.where(SavingsAccount.user_id == user_id)
+    account = db.scalar(stmt)
     if account is None:
         raise HTTPException(404, "Savings account not found")
     return account
@@ -250,10 +259,15 @@ def _find_or_create_product(
 
 
 @router.get("")
-def list_savings(db: DbSession) -> list[dict[str, object]]:
+def list_savings(
+    db: DbSession, current_user: CurrentUser
+) -> list[dict[str, object]]:
     accounts = db.scalars(
         select(SavingsAccount)
-        .options(selectinload(SavingsAccount.product), selectinload(SavingsAccount.terms))
+        .options(
+            selectinload(SavingsAccount.product), selectinload(SavingsAccount.terms)
+        )
+        .where(SavingsAccount.user_id == current_user.id)
         .order_by(SavingsAccount.id)
     )
     as_of = _today()
@@ -261,9 +275,16 @@ def list_savings(db: DbSession) -> list[dict[str, object]]:
 
 
 @router.post("", status_code=201)
-def create_savings(data: SavingsAccountCreate, db: DbSession) -> dict[str, object]:
+def create_savings(
+    data: SavingsAccountCreate, db: DbSession, current_user: CurrentUser
+) -> dict[str, object]:
     if data.funding_account_id is not None:
-        _require_wallet_account(db, data.funding_account_id, field="funding_account_id")
+        _require_wallet_account(
+            db,
+            data.funding_account_id,
+            field="funding_account_id",
+            user_id=current_user.id,
+        )
     product = _find_or_create_product(
         db, institution=data.institution, name=data.product_name
     )
@@ -278,13 +299,12 @@ def create_savings(data: SavingsAccountCreate, db: DbSession) -> dict[str, objec
             annual_rate=data.annual_rate,
             non_term_rate=data.non_term_rate,
             day_count_convention=DayCountConvention(data.day_count_convention),
-            interest_payment_method=InterestPaymentMethod(
-                data.interest_payment_method
-            ),
+            interest_payment_method=InterestPaymentMethod(data.interest_payment_method),
             maturity_action=MaturityAction(data.maturity_action),
             funding_account_id=data.funding_account_id,
             notes=data.notes,
             excluded_from_reports=data.excluded_from_reports,
+            user_id=current_user.id,
         )
     except SavingsActionError as exc:
         db.rollback()
@@ -293,23 +313,30 @@ def create_savings(data: SavingsAccountCreate, db: DbSession) -> dict[str, objec
 
 
 @router.get("/{account_id}")
-def get_savings(account_id: int, db: DbSession) -> dict[str, object]:
-    account = _get_account(db, account_id)
+def get_savings(
+    account_id: int, db: DbSession, current_user: CurrentUser
+) -> dict[str, object]:
+    account = _get_account(db, account_id, user_id=current_user.id)
     return _account_json(account, as_of=_today(), include_terms=True)
 
 
 @router.get("/{account_id}/terms")
-def list_savings_terms(account_id: int, db: DbSession) -> list[dict[str, object]]:
-    account = _get_account(db, account_id)
+def list_savings_terms(
+    account_id: int, db: DbSession, current_user: CurrentUser
+) -> list[dict[str, object]]:
+    account = _get_account(db, account_id, user_id=current_user.id)
     as_of = _today()
     return [_term_json(t, as_of=as_of) for t in account.terms]
 
 
 @router.patch("/{account_id}")
 def update_savings(
-    account_id: int, data: SavingsAccountPatch, db: DbSession
+    account_id: int,
+    data: SavingsAccountPatch,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> dict[str, object]:
-    account = _get_account(db, account_id)
+    account = _get_account(db, account_id, user_id=current_user.id)
     fields = data.model_dump(exclude_unset=True)
     # excluded_from_reports is pure reporting metadata, not financial
     # history -- editable regardless of lifecycle state, so it's applied
@@ -320,7 +347,8 @@ def update_savings(
         if value is not None:
             account.excluded_from_reports = value
     if fields and (
-        len(account.terms) != 1 or account.terms[0].status is not SavingsTermStatus.ACTIVE
+        len(account.terms) != 1
+        or account.terms[0].status is not SavingsTermStatus.ACTIVE
     ):
         raise HTTPException(
             400,
@@ -376,10 +404,18 @@ def update_savings(
 
 @router.post("/{account_id}/close")
 def close_savings_route(
-    account_id: int, data: SavingsCloseRequest, db: DbSession
+    account_id: int,
+    data: SavingsCloseRequest,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> dict[str, object]:
-    account = _get_account(db, account_id)
-    _require_wallet_account(db, data.receiving_account_id, field="receiving_account_id")
+    account = _get_account(db, account_id, user_id=current_user.id)
+    _require_wallet_account(
+        db,
+        data.receiving_account_id,
+        field="receiving_account_id",
+        user_id=current_user.id,
+    )
     try:
         close_savings(
             db,
@@ -396,10 +432,18 @@ def close_savings_route(
 
 @router.post("/{account_id}/early-close")
 def early_close_savings_route(
-    account_id: int, data: SavingsEarlyCloseRequest, db: DbSession
+    account_id: int,
+    data: SavingsEarlyCloseRequest,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> dict[str, object]:
-    account = _get_account(db, account_id)
-    _require_wallet_account(db, data.receiving_account_id, field="receiving_account_id")
+    account = _get_account(db, account_id, user_id=current_user.id)
+    _require_wallet_account(
+        db,
+        data.receiving_account_id,
+        field="receiving_account_id",
+        user_id=current_user.id,
+    )
     try:
         early_close_savings(
             db,
@@ -417,12 +461,18 @@ def early_close_savings_route(
 
 @router.post("/{account_id}/renew")
 def renew_savings_route(
-    account_id: int, data: SavingsRenewRequest, db: DbSession
+    account_id: int,
+    data: SavingsRenewRequest,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> dict[str, object]:
-    account = _get_account(db, account_id)
+    account = _get_account(db, account_id, user_id=current_user.id)
     if data.receiving_account_id is not None:
         _require_wallet_account(
-            db, data.receiving_account_id, field="receiving_account_id"
+            db,
+            data.receiving_account_id,
+            field="receiving_account_id",
+            user_id=current_user.id,
         )
     try:
         renew_savings(
@@ -440,18 +490,16 @@ def renew_savings_route(
 
 @router.delete("/{account_id}")
 def delete_savings_account_route(
-    account_id: int, db: DbSession
+    account_id: int, db: DbSession, current_user: CurrentUser
 ) -> dict[str, object]:
     """Permanently delete a savings account, its terms, and associated financial events."""
-    account = db.get(SavingsAccount, account_id)
-    if account is None:
-        raise HTTPException(404, "Savings account not found")
+    account = _get_account(db, account_id, user_id=current_user.id)
 
     terms = list(
         db.scalars(
-            select(SavingsTerm).where(
-                SavingsTerm.savings_account_id == account_id
-            ).order_by(SavingsTerm.sequence)
+            select(SavingsTerm)
+            .where(SavingsTerm.savings_account_id == account_id)
+            .order_by(SavingsTerm.sequence)
         )
     )
 
@@ -466,6 +514,7 @@ def delete_savings_account_route(
                 select(FinancialEvent)
                 .join(AccountEntry)
                 .where(
+                    FinancialEvent.user_id == current_user.id,
                     FinancialEvent.event_type == FinancialEventType.SAVINGS_DEPOSIT,
                     FinancialEvent.transaction_date == account.opened_date,
                     AccountEntry.account_id == account.funding_account_id,
@@ -485,10 +534,13 @@ def delete_savings_account_route(
                     select(FinancialEvent)
                     .join(AccountEntry)
                     .where(
-                        FinancialEvent.event_type.in_([
-                            FinancialEventType.SAVINGS_WITHDRAWAL,
-                            FinancialEventType.INTEREST,
-                        ]),
+                        FinancialEvent.user_id == current_user.id,
+                        FinancialEvent.event_type.in_(
+                            [
+                                FinancialEventType.SAVINGS_WITHDRAWAL,
+                                FinancialEventType.INTEREST,
+                            ]
+                        ),
                         FinancialEvent.transaction_date == term.closed_at,
                     )
                 )
@@ -513,4 +565,3 @@ def delete_savings_account_route(
     db.delete(account)
     db.commit()
     return {"status": "ok", "deleted_account_id": account_id}
-

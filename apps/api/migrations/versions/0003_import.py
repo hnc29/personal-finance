@@ -7,6 +7,7 @@ Revises: 0002_ledger
 Create Date: 2026-08-22
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -58,7 +59,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_table("raw_import_rows")
-    op.drop_index(
-        "ix_import_batches_file_sha256", table_name="import_batches"
-    )
+    op.drop_index("ix_import_batches_file_sha256", table_name="import_batches")
     op.drop_table("import_batches")

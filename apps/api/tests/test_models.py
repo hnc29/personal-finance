@@ -101,7 +101,9 @@ def test_expected_tables_present_in_metadata() -> None:
 
 
 def test_misa_mapping_allows_many_sources_to_one_target() -> None:
-    constraints = {constraint.name for constraint in MisaAccountMapping.__table__.constraints}
+    constraints = {
+        constraint.name for constraint in MisaAccountMapping.__table__.constraints
+    }
     assert "uq_misa_mapping_configuration_source" in constraints
     assert not any(
         constraint.name and "target" in constraint.name
@@ -110,5 +112,7 @@ def test_misa_mapping_allows_many_sources_to_one_target() -> None:
 
 
 def test_export_history_uniquely_tracks_event_per_configuration() -> None:
-    constraints = {constraint.name for constraint in MisaExportedEvent.__table__.constraints}
+    constraints = {
+        constraint.name for constraint in MisaExportedEvent.__table__.constraints
+    }
     assert "uq_misa_exported_configuration_event" in constraints

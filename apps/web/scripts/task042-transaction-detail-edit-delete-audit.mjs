@@ -29,7 +29,7 @@ assert.ok(
 const modalMatch = page.match(/function TransactionDetailModal\([\s\S]*?\n\}\n/);
 assert.ok(modalMatch, "TASK-042: could not locate TransactionDetailModal in app/page.tsx");
 const modal = modalMatch[0];
-assert.ok(/const editable = composerEventTypes\.includes\(event\.event_type\)/.test(modal), "TASK-042: the detail modal no longer scopes Edit/Delete to composerEventTypes");
+assert.ok(/const editable = (editableEventTypes|composerEventTypes)\.includes\(event\.event_type\)/.test(modal), "TASK-042: the detail modal no longer scopes Edit/Delete to editableEventTypes");
 assert.ok(/This transaction type is managed on its own page and can't be edited or deleted here\./.test(modal), "TASK-042: the read-only note for non-editable event types is missing");
 assert.ok(/onClick=\{\(\) => setDetailEvent\(x\)\}/.test(page), "TASK-042: clicking a transaction row no longer opens the details modal");
 assert.ok(/row-clickable/.test(page) && /\.row\.row-clickable \{ cursor:pointer \}/.test(readFileSync("app/styles.css", "utf8")), "TASK-042: the clickable-row affordance (CSS) is missing");

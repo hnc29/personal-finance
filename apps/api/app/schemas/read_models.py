@@ -10,6 +10,7 @@ class QuoteMeta(BaseModel):
     observed_at: datetime | None = None
     valuation_price: str | None = None
 
+
 class PortfolioRow(BaseModel):
     id: int
     name: str
@@ -21,6 +22,7 @@ class PortfolioRow(BaseModel):
     # toggle it; defaults False (unset) for rows that don't carry the field
     # (accounts, credit cards).
     excluded_from_reports: bool = False
+
 
 class PortfolioOverview(BaseModel):
     as_of: datetime
@@ -34,6 +36,7 @@ class PortfolioOverview(BaseModel):
     precious_metals: list[PortfolioRow]
     crypto: list[PortfolioRow]
 
+
 class ImportBatchRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -45,6 +48,7 @@ class ImportBatchRead(BaseModel):
     # financial_events row (via auto-apply). Lets the Review page show
     # "already applied" vs. offer an Apply action, without a second call.
     applied_row_count: int = 0
+
 
 class ImportApplyRead(BaseModel):
     """Response for POST /imports/{batch_id}/apply -- see ApplyResult."""
@@ -60,6 +64,7 @@ class ImportApplyRead(BaseModel):
     invalid_rows: list[int]
     unmatched_wallets: dict[str, int]
     unmatched_row_count: int
+
 
 class ReconciliationRead(BaseModel):
     id: int

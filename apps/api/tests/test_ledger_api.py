@@ -26,15 +26,39 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         excluded_from_reports=False,
         entries=[AccountEntry(id=1, account_id=7, amount_scaled=-123456)],
     )
-    monkeypatch.setattr(ledger_service, "list_financial_events", lambda db: [event])
-    monkeypatch.setattr(ledger_service, "get_financial_event", lambda db, event_id: event if event_id == 1 else None)
-    monkeypatch.setattr(ledger_service, "account_balance", lambda db, account_id: Decimal("8.0000") if account_id == 7 else None)
-    monkeypatch.setattr(ledger_service, "create_financial_event", lambda db, payload: event)
+    monkeypatch.setattr(
+        ledger_service, "list_financial_events", lambda db, *a, **kw: [event]
+    )
+    monkeypatch.setattr(
+        ledger_service,
+        "get_financial_event",
+        lambda db, event_id, *a, **kw: event if event_id == 1 else None,
+    )
+    monkeypatch.setattr(
+        ledger_service,
+        "account_balance",
+        lambda db, account_id, *a, **kw: Decimal("8.0000") if account_id == 7 else None,
+    )
+    from app.models.account import Account, AccountType
+    from app.services import account as account_service
+
+    monkeypatch.setattr(
+        account_service,
+        "get_account",
+        lambda db, account_id, *a, **kw: (
+            Account(id=7, name="Synthetic Bank", account_type=AccountType.BANK, user_id=1)
+            if account_id == 7
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        ledger_service, "create_financial_event", lambda db, payload, *a, **kw: event
+    )
     app.dependency_overrides[get_db] = lambda: None
     try:
         yield TestClient(app)
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
 
 
 _UPDATE_PAYLOAD = {
@@ -44,7 +68,9 @@ _UPDATE_PAYLOAD = {
 }
 
 
-def test_update_event_success(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_event_success(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     event = FinancialEvent(
         id=1,
         event_type=FinancialEventType.EXPENSE,
@@ -52,35 +78,66 @@ def test_update_event_success(client: TestClient, monkeypatch: pytest.MonkeyPatc
         excluded_from_reports=False,
         entries=[AccountEntry(id=2, account_id=7, amount_scaled=-123456)],
     )
-    monkeypatch.setattr(ledger_service, "update_financial_event", lambda db, event_id, payload: event if event_id == 1 else None)
+    monkeypatch.setattr(
+        ledger_service,
+        "update_financial_event",
+        lambda db, event_id, payload, *a, **kw: event if event_id == 1 else None,
+    )
     response = client.patch("/api/v1/financial-events/1", json=_UPDATE_PAYLOAD)
     assert response.status_code == 200
     assert response.json()["id"] == 1
 
 
-def test_update_event_not_found(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ledger_service, "update_financial_event", lambda db, event_id, payload: None)
-    assert client.patch("/api/v1/financial-events/999", json=_UPDATE_PAYLOAD).status_code == 404
+def test_update_event_not_found(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        ledger_service,
+        "update_financial_event",
+        lambda db, event_id, payload, *a, **kw: None,
+    )
+    assert (
+        client.patch("/api/v1/financial-events/999", json=_UPDATE_PAYLOAD).status_code
+        == 404
+    )
 
 
-def test_update_event_unknown_account_is_404(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    def raise_unknown_account(db: object, event_id: int, payload: object) -> None:
+def test_update_event_unknown_account_is_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def raise_unknown_account(
+        db: object, event_id: int, payload: object, *a: object, **kw: object
+    ) -> None:
         raise UnknownAccountError(999)
 
     monkeypatch.setattr(ledger_service, "update_financial_event", raise_unknown_account)
-    assert client.patch("/api/v1/financial-events/1", json=_UPDATE_PAYLOAD).status_code == 404
+    assert (
+        client.patch("/api/v1/financial-events/1", json=_UPDATE_PAYLOAD).status_code
+        == 404
+    )
 
 
-def test_update_event_invalid_entries_is_400(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    def raise_invalid(db: object, event_id: int, payload: object) -> None:
+def test_update_event_invalid_entries_is_400(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def raise_invalid(
+        db: object, event_id: int, payload: object, *a: object, **kw: object
+    ) -> None:
         raise InvalidEventEntriesError("bad entries")
 
     monkeypatch.setattr(ledger_service, "update_financial_event", raise_invalid)
-    assert client.patch("/api/v1/financial-events/1", json=_UPDATE_PAYLOAD).status_code == 400
+    assert (
+        client.patch("/api/v1/financial-events/1", json=_UPDATE_PAYLOAD).status_code
+        == 400
+    )
 
 
-def test_update_event_protected_type_is_409(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    def raise_protected(db: object, event_id: int, payload: object) -> None:
+def test_update_event_protected_type_is_409(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def raise_protected(
+        db: object, event_id: int, payload: object, *a: object, **kw: object
+    ) -> None:
         raise ProtectedEventTypeError(FinancialEventType.SAVINGS_DEPOSIT)
 
     monkeypatch.setattr(ledger_service, "update_financial_event", raise_protected)
@@ -89,20 +146,34 @@ def test_update_event_protected_type_is_409(client: TestClient, monkeypatch: pyt
     assert "SAVINGS_DEPOSIT" in response.json()["detail"]
 
 
-def test_delete_event_success(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ledger_service, "delete_financial_event", lambda db, event_id: event_id == 1)
+def test_delete_event_success(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        ledger_service,
+        "delete_financial_event",
+        lambda db, event_id, *a, **kw: event_id == 1,
+    )
     response = client.delete("/api/v1/financial-events/1")
     assert response.status_code == 200
     assert response.json() == {"id": 1, "deleted": True}
 
 
-def test_delete_event_not_found(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ledger_service, "delete_financial_event", lambda db, event_id: False)
+def test_delete_event_not_found(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        ledger_service, "delete_financial_event", lambda db, event_id, *a, **kw: False
+    )
     assert client.delete("/api/v1/financial-events/999").status_code == 404
 
 
-def test_delete_event_protected_type_is_409(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    def raise_protected(db: object, event_id: int) -> None:
+def test_delete_event_protected_type_is_409(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def raise_protected(
+        db: object, event_id: int, *a: object, **kw: object
+    ) -> None:
         raise ProtectedEventTypeError(FinancialEventType.ADJUSTMENT)
 
     monkeypatch.setattr(ledger_service, "delete_financial_event", raise_protected)

@@ -1,4 +1,5 @@
 """Deterministic normalization of stored Money Lover raw rows."""
+
 from __future__ import annotations
 
 import json
@@ -40,7 +41,9 @@ def parse_moneylover_date(value: object) -> date:
         return datetime.fromisoformat(text).date()
 
 
-def normalize_moneylover_row(row: RawImportRow, account: Account, category_id: int | None = None) -> FinancialEvent:
+def normalize_moneylover_row(
+    row: RawImportRow, account: Account, category_id: int | None = None
+) -> FinancialEvent:
     payload = json.loads(row.raw_payload)
     try:
         tx_date = parse_moneylover_date(payload["Ngày"])
@@ -51,15 +54,38 @@ def normalize_moneylover_row(row: RawImportRow, account: Account, category_id: i
     if scaled == 0:
         raise NormalizationError("zero amount is not a financial event")
     event_type = FinancialEventType.INCOME if scaled > 0 else FinancialEventType.EXPENSE
-    event = FinancialEvent(event_type=event_type, transaction_date=tx_date,
-        category_id=category_id, payee_text=_text(payload.get("Với")),
-        trip_event_text=_text(payload.get("Sự kiện")), note=_text(payload.get("Ghi chú")),
+    event = FinancialEvent(
+        user_id=account.user_id,
+        event_type=event_type,
+        transaction_date=tx_date,
+        category_id=category_id,
+        payee_text=_text(payload.get("Với")),
+        trip_event_text=_text(payload.get("Sự kiện")),
+        note=_text(payload.get("Ghi chú")),
         raw_import_row_id=row.id,
-        entries=[AccountEntry(account_id=account.id, amount_scaled=-abs(scaled) if event_type is FinancialEventType.EXPENSE else abs(scaled))])
+        entries=[
+            AccountEntry(
+                account_id=account.id,
+                amount_scaled=-abs(scaled)
+                if event_type is FinancialEventType.EXPENSE
+                else abs(scaled),
+            )
+        ],
+    )
     return event
 
-def normalize_moneylover_batch(session: Session, batch_id: int, account_map: dict[str, int], category_map: dict[str, int] | None = None) -> list[FinancialEvent]:
-    rows = session.scalars(select(RawImportRow).where(RawImportRow.import_batch_id == batch_id).order_by(RawImportRow.source_row_number)).all()
+
+def normalize_moneylover_batch(
+    session: Session,
+    batch_id: int,
+    account_map: dict[str, int],
+    category_map: dict[str, int] | None = None,
+) -> list[FinancialEvent]:
+    rows = session.scalars(
+        select(RawImportRow)
+        .where(RawImportRow.import_batch_id == batch_id)
+        .order_by(RawImportRow.source_row_number)
+    ).all()
     result: list[FinancialEvent] = []
     category_map = category_map or {}
     for row in rows:
@@ -70,12 +96,17 @@ def normalize_moneylover_batch(session: Session, batch_id: int, account_map: dic
         account = session.get(Account, account_map[wallet])
         if account is None:
             raise NormalizationError(f"unknown account id for wallet {wallet!r}")
-        event = normalize_moneylover_row(row, account, category_map.get(_text(payload.get("Nhóm")) or ""))
-        session.add(event); result.append(event)
+        event = normalize_moneylover_row(
+            row, account, category_map.get(_text(payload.get("Nhóm")) or "")
+        )
+        session.add(event)
+        result.append(event)
     session.flush()
     return result
 
+
 def _text(value: object) -> str | None:
-    if value is None: return None
+    if value is None:
+        return None
     text = str(value).strip()
     return text or None

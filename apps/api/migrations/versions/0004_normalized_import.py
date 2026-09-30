@@ -2,6 +2,7 @@
 
 Add provenance linkage from canonical events to immutable raw rows.
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -64,10 +65,15 @@ def upgrade() -> None:
             "uq_financial_events_raw_import_row_id", ["raw_import_row_id"]
         )
 
+
 def downgrade() -> None:
     with op.batch_alter_table(
         "financial_events", copy_from=_FINANCIAL_EVENTS
     ) as batch_op:
-        batch_op.drop_constraint("uq_financial_events_raw_import_row_id", type_="unique")
-        batch_op.drop_constraint("fk_financial_events_raw_import_row", type_="foreignkey")
+        batch_op.drop_constraint(
+            "uq_financial_events_raw_import_row_id", type_="unique"
+        )
+        batch_op.drop_constraint(
+            "fk_financial_events_raw_import_row", type_="foreignkey"
+        )
         batch_op.drop_column("raw_import_row_id")

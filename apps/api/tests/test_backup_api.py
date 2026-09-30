@@ -95,16 +95,24 @@ def test_restore_from_project_backup(client: TestClient) -> None:
         conn.commit()
 
     with sqlite3.connect(settings.database_path) as conn:
-        assert conn.execute("SELECT count(*) FROM accounts WHERE id = 999").fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT count(*) FROM accounts WHERE id = 999").fetchone()[0]
+            == 0
+        )
 
     # 3. Restore from project backup
-    restore_res = client.post("/api/v1/backup/restore/project", json={"filename": filename})
+    restore_res = client.post(
+        "/api/v1/backup/restore/project", json={"filename": filename}
+    )
     assert restore_res.status_code == 200
     assert restore_res.json()["status"] == "ok"
 
     # 4. Check that record 999 is back
     with sqlite3.connect(settings.database_path) as conn:
-        assert conn.execute("SELECT count(*) FROM accounts WHERE id = 999").fetchone()[0] == 1
+        assert (
+            conn.execute("SELECT count(*) FROM accounts WHERE id = 999").fetchone()[0]
+            == 1
+        )
 
 
 def test_restore_from_upload(client: TestClient) -> None:
@@ -128,4 +136,7 @@ def test_restore_from_upload(client: TestClient) -> None:
 
     # 4. Check that record 999 is restored
     with sqlite3.connect(settings.database_path) as conn:
-        assert conn.execute("SELECT count(*) FROM accounts WHERE id = 999").fetchone()[0] == 1
+        assert (
+            conn.execute("SELECT count(*) FROM accounts WHERE id = 999").fetchone()[0]
+            == 1
+        )

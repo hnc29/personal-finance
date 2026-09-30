@@ -26,6 +26,7 @@ class SelfParentError(Exception):
 class InvalidHierarchyError(Exception):
     """Raised when a move would create a cycle or exceed three levels."""
 
+
 def _depths(db: Session, category_id: int, parent_id: int | None) -> bool:
     if parent_id is None:
         return True
@@ -46,8 +47,10 @@ def _depths(db: Session, category_id: int, parent_id: int | None) -> bool:
 
 def create_category(db: Session, data: CategoryCreate, user_id: int = 1) -> Category:
     """Create and persist a category, validating any ``parent_id``."""
-    if data.parent_id is not None and db.get(Category, data.parent_id) is None:
-        raise UnknownParentError(data.parent_id)
+    if data.parent_id is not None:
+        parent = get_category(db, data.parent_id, user_id=user_id)
+        if parent is None:
+            raise UnknownParentError(data.parent_id)
     if not _depths(db, -1, data.parent_id):
         raise InvalidHierarchyError(data.parent_id)
 
@@ -66,22 +69,28 @@ def list_categories(db: Session, user_id: int | None = None) -> list[Category]:
     return list(db.scalars(stmt))
 
 
-def get_category(db: Session, category_id: int, user_id: int | None = None) -> Category | None:
+def get_category(
+    db: Session, category_id: int, user_id: int | None = None
+) -> Category | None:
     """Return the category with ``category_id`` or ``None`` if absent."""
     if user_id is not None:
-        return db.scalar(select(Category).where(Category.id == category_id, Category.user_id == user_id))
+        return db.scalar(
+            select(Category).where(
+                Category.id == category_id, Category.user_id == user_id
+            )
+        )
     return db.get(Category, category_id)
 
 
 def update_category(
-    db: Session, category_id: int, data: CategoryUpdate
+    db: Session, category_id: int, data: CategoryUpdate, user_id: int | None = None
 ) -> Category | None:
     """Apply a partial update; return the category or ``None`` if absent.
 
     A supplied ``parent_id`` is validated: it may not reference the category
-    itself and must point to an existing category.
+    itself and must point to an existing category belonging to the user.
     """
-    category = db.get(Category, category_id)
+    category = get_category(db, category_id, user_id=user_id)
     if category is None:
         return None
 
@@ -90,7 +99,7 @@ def update_category(
     if "parent_id" in fields and parent_id is not None:
         if parent_id == category_id:
             raise SelfParentError(category_id)
-        if db.get(Category, parent_id) is None:
+        if get_category(db, parent_id, user_id=user_id) is None:
             raise UnknownParentError(parent_id)
         if not _depths(db, category_id, parent_id):
             raise InvalidHierarchyError(parent_id)

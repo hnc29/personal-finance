@@ -80,11 +80,21 @@ def test_net_worth_covers_all_components_and_subtracts_card_liabilities() -> Non
     components = [
         PortfolioComponentValue(PortfolioComponentType.CASH, "cash", Decimal("1.0001")),
         PortfolioComponentValue(PortfolioComponentType.BANK, "bank", Decimal("2.0002")),
-        PortfolioComponentValue(PortfolioComponentType.EWALLET, "wallet", Decimal("3.0003")),
-        PortfolioComponentValue(PortfolioComponentType.SAVINGS, "savings", Decimal("4.0004")),
-        PortfolioComponentValue(PortfolioComponentType.PRECIOUS_METAL, "gold", Decimal("5.0005")),
-        PortfolioComponentValue(PortfolioComponentType.CRYPTO, "btc", Decimal("6.0006")),
-        PortfolioComponentValue(PortfolioComponentType.CREDIT_CARD, "card", Decimal("7.0007")),
+        PortfolioComponentValue(
+            PortfolioComponentType.EWALLET, "wallet", Decimal("3.0003")
+        ),
+        PortfolioComponentValue(
+            PortfolioComponentType.SAVINGS, "savings", Decimal("4.0004")
+        ),
+        PortfolioComponentValue(
+            PortfolioComponentType.PRECIOUS_METAL, "gold", Decimal("5.0005")
+        ),
+        PortfolioComponentValue(
+            PortfolioComponentType.CRYPTO, "btc", Decimal("6.0006")
+        ),
+        PortfolioComponentValue(
+            PortfolioComponentType.CREDIT_CARD, "card", Decimal("7.0007")
+        ),
     ]
     assert calculate_net_worth(components) == Decimal("14.0014")
     components[-1] = PortfolioComponentValue(
@@ -142,8 +152,12 @@ def test_daily_snapshot_rejects_duplicate_date_and_partial_quote_metadata() -> N
 
 def test_credit_card_negative_ledger_value_is_normalized_before_net_worth() -> None:
     components = [
-        PortfolioComponentValue(PortfolioComponentType.BANK, "account:1", Decimal("100.0000")),
-        PortfolioComponentValue(PortfolioComponentType.CREDIT_CARD, "account:2", Decimal("-25.0000")),
+        PortfolioComponentValue(
+            PortfolioComponentType.BANK, "account:1", Decimal("100.0000")
+        ),
+        PortfolioComponentValue(
+            PortfolioComponentType.CREDIT_CARD, "account:2", Decimal("-25.0000")
+        ),
     ]
     assert calculate_net_worth(components) == Decimal("75.0000")
 

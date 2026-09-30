@@ -15,6 +15,7 @@ Revision ID: 0018_transfer_pair_import
 Revises: 0017_category_icon
 Create Date: 2026-08-25
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -60,7 +61,9 @@ def upgrade() -> None:
         "ALTER TABLE financial_events ADD COLUMN raw_import_row_id_secondary "
         "INTEGER REFERENCES raw_import_rows(id)"
     )
-    op.create_index(_INDEX_NAME, "financial_events", ["raw_import_row_id_secondary"], unique=True)
+    op.create_index(
+        _INDEX_NAME, "financial_events", ["raw_import_row_id_secondary"], unique=True
+    )
 
 
 def downgrade() -> None:

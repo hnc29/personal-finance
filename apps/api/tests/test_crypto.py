@@ -184,24 +184,26 @@ def test_coingecko_adapter_uses_exact_mapping_and_decimal_json() -> None:
 
 def test_coinmarketcap_adapter_converts_usd_to_vnd_via_exchange_rate() -> None:
     cmc_response = Mock()
-    cmc_response.text = json.dumps({
-        "data": {
-            "cryptoCurrencyList": [
-                {
-                    "name": "Bitcoin",
-                    "symbol": "BTC",
-                    "slug": "bitcoin",
-                    "quotes": [
-                        {
-                            "name": "USD",
-                            "price": 80000.5,
-                            "lastUpdated": "2026-08-27T10:00:00.000Z",
-                        }
-                    ],
-                }
-            ]
+    cmc_response.text = json.dumps(
+        {
+            "data": {
+                "cryptoCurrencyList": [
+                    {
+                        "name": "Bitcoin",
+                        "symbol": "BTC",
+                        "slug": "bitcoin",
+                        "quotes": [
+                            {
+                                "name": "USD",
+                                "price": 80000.5,
+                                "lastUpdated": "2026-08-27T10:00:00.000Z",
+                            }
+                        ],
+                    }
+                ]
+            }
         }
-    })
+    )
     fx_response = Mock()
     fx_response.text = json.dumps({"rates": {"VND": 26000.0}})
 
@@ -223,4 +225,3 @@ def test_coinmarketcap_adapter_converts_usd_to_vnd_via_exchange_rate() -> None:
     assert meta["symbol"] == "BTC"
     assert meta["price_usd"] == "80000.5"
     assert meta["usd_vnd_rate"] == "26000.0"
-

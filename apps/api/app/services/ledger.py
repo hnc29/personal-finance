@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.money import money_to_scaled, scaled_to_money
 from app.models.account import Account, AccountType
+from app.models.category import Category
 from app.models.ledger import AccountEntry, FinancialEvent, FinancialEventType
 from app.schemas.ledger import (
     AccountEntryCreate,
@@ -40,6 +41,10 @@ from app.schemas.ledger import (
 
 class UnknownAccountError(Exception):
     """Raised when a referenced ``account_id`` does not exist."""
+
+
+class UnknownCategoryError(Exception):
+    """Raised when a referenced ``category_id`` does not exist."""
 
 
 # TASK-042: the four event types a person can create AND now edit/delete
@@ -64,23 +69,25 @@ def _build_and_validate_entries(
     session: Session,
     event_type: FinancialEventType,
     entry_payloads: Sequence[AccountEntryCreate],
+    user_id: int | None = None,
 ) -> list[AccountEntry]:
     """Build and validate the :class:`AccountEntry` rows for one event.
 
     Shared by :func:`create_financial_event` and :func:`update_financial_event`.
     An event requires at least one entry; an empty list raises
     :class:`InvalidEventEntriesError`. Every referenced account must already
-    exist, or the first that does not raises :class:`UnknownAccountError`
-    before any entry is built. TRANSFER and CREDIT_CARD_PAYMENT are further
-    validated for the balanced two-account pair invariant (and, for
-    CREDIT_CARD_PAYMENT, payment direction) before being returned -- callers
-    persist the result, never partially.
+    exist and belong to the user, or the first that does not raises
+    :class:`UnknownAccountError` before any entry is built. TRANSFER and
+    CREDIT_CARD_PAYMENT are further validated for the balanced two-account
+    pair invariant (and, for CREDIT_CARD_PAYMENT, payment direction) before
+    being returned -- callers persist the result, never partially.
     """
     if not entry_payloads:
         raise InvalidEventEntriesError("an event requires at least one entry")
 
     for entry in entry_payloads:
-        if session.get(Account, entry.account_id) is None:
+        acc = session.get(Account, entry.account_id)
+        if acc is None or (user_id is not None and acc.user_id != user_id):
             raise UnknownAccountError(entry.account_id)
 
     entries = [
@@ -114,7 +121,14 @@ def create_financial_event(
     rolled back, leaving neither the event nor any entry persisted, and the
     error propagates.
     """
-    entries = _build_and_validate_entries(session, payload.event_type, payload.entries)
+    if payload.category_id is not None:
+        cat = session.get(Category, payload.category_id)
+        if cat is None or cat.user_id != user_id:
+            raise UnknownCategoryError(payload.category_id)
+
+    entries = _build_and_validate_entries(
+        session, payload.event_type, payload.entries, user_id=user_id
+    )
 
     event = FinancialEvent(
         user_id=user_id,
@@ -139,7 +153,10 @@ def create_financial_event(
 
 
 def update_financial_event(
-    session: Session, event_id: int, payload: FinancialEventUpdate
+    session: Session,
+    event_id: int,
+    payload: FinancialEventUpdate,
+    user_id: int | None = None,
 ) -> FinancialEvent | None:
     """Replace one event's fields and entries wholesale, or ``None`` if absent.
 
@@ -153,13 +170,24 @@ def update_financial_event(
     be used to move an event into or out of a domain-owned type either);
     anything else raises :class:`ProtectedEventTypeError`.
     """
-    event = session.get(FinancialEvent, event_id)
+    event = get_financial_event(session, event_id, user_id=user_id)
     if event is None:
         return None
-    if event.event_type not in EDITABLE_EVENT_TYPES or payload.event_type not in EDITABLE_EVENT_TYPES:
+    if (
+        event.event_type not in EDITABLE_EVENT_TYPES
+        or payload.event_type not in EDITABLE_EVENT_TYPES
+    ):
         raise ProtectedEventTypeError(event.event_type)
 
-    entries = _build_and_validate_entries(session, payload.event_type, payload.entries)
+    effective_user_id = user_id if user_id is not None else event.user_id
+    if payload.category_id is not None:
+        cat = session.get(Category, payload.category_id)
+        if cat is None or (effective_user_id is not None and cat.user_id != effective_user_id):
+            raise UnknownCategoryError(payload.category_id)
+
+    entries = _build_and_validate_entries(
+        session, payload.event_type, payload.entries, user_id=effective_user_id
+    )
 
     event.event_type = payload.event_type
     event.transaction_date = payload.transaction_date
@@ -180,7 +208,7 @@ def update_financial_event(
 
 
 def delete_financial_event(
-    session: Session, event_id: int, *, force: bool = False
+    session: Session, event_id: int, user_id: int | None = None, *, force: bool = False
 ) -> bool:
     """Delete an event and its entries (TASK-042).
 
@@ -195,7 +223,7 @@ def delete_financial_event(
     :data:`EDITABLE_EVENT_TYPES` may be deleted unless force=True; anything else
     raises :class:`ProtectedEventTypeError`.
     """
-    event = session.get(FinancialEvent, event_id)
+    event = get_financial_event(session, event_id, user_id=user_id)
     if event is None:
         return False
     if not force and event.event_type not in EDITABLE_EVENT_TYPES:
@@ -265,7 +293,9 @@ def account_balance_scaled(session: Session, account_id: int) -> int:
     return int(total or 0)
 
 
-def account_balance(session: Session, account_id: int) -> Decimal | None:
+def account_balance(
+    session: Session, account_id: int, user_id: int | None = None
+) -> Decimal | None:
     """Return the account's balance as application money, or ``None`` if absent.
 
     Returns ``None`` when no account has ``account_id`` — following the
@@ -276,7 +306,8 @@ def account_balance(session: Session, account_id: int) -> Decimal | None:
     single result to Decimal through ``scaled_to_money``, so the returned money
     is exact and never silently rounded.
     """
-    if session.get(Account, account_id) is None:
+    acc = session.get(Account, account_id)
+    if acc is None or (user_id is not None and acc.user_id != user_id):
         return None
     return scaled_to_money(account_balance_scaled(session, account_id))
 
@@ -296,9 +327,7 @@ _BALANCED_PAIR_EVENT_TYPES = frozenset(
 # boundary here either (matches the reasoning already applied to
 # EDITABLE_EVENT_TYPES above). The bad row itself is left untouched --
 # real user data is never corrected automatically -- see docs/qa/BUG_FIX_REPORT.md.
-_SIGNED_EVENT_TYPES = frozenset(
-    {FinancialEventType.EXPENSE, FinancialEventType.INCOME}
-)
+_SIGNED_EVENT_TYPES = frozenset({FinancialEventType.EXPENSE, FinancialEventType.INCOME})
 
 
 class InvalidEventEntriesError(Exception):

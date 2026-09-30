@@ -29,7 +29,9 @@ class FakeAccountStore:
         account = Account(**data.model_dump())
         account.id = self._next_id
         self._next_id += 1
-        account.sort_order = max((row.sort_order for row in self._rows.values()), default=0) + 1
+        account.sort_order = (
+            max((row.sort_order for row in self._rows.values()), default=0) + 1
+        )
         self._rows[account.id] = account
         return account
 
@@ -39,9 +41,7 @@ class FakeAccountStore:
     def get(self, account_id: int) -> Account | None:
         return self._rows.get(account_id)
 
-    def update(
-        self, account_id: int, data: AccountUpdate
-    ) -> Account | None:
+    def update(self, account_id: int, data: AccountUpdate) -> Account | None:
         account = self._rows.get(account_id)
         if account is None:
             return None
@@ -57,29 +57,29 @@ def store(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeAccountStore]:
     monkeypatch.setattr(
         account_service,
         "create_account",
-        lambda db, data: fake.create(data),
+        lambda db, data, *a, **kw: fake.create(data),
     )
     monkeypatch.setattr(
         account_service,
         "list_accounts",
-        lambda db: fake.list(),
+        lambda db, *a, **kw: fake.list(),
     )
     monkeypatch.setattr(
         account_service,
         "get_account",
-        lambda db, account_id: fake.get(account_id),
+        lambda db, account_id, *a, **kw: fake.get(account_id),
     )
     monkeypatch.setattr(
         account_service,
         "update_account",
-        lambda db, account_id, data: fake.update(account_id, data),
+        lambda db, account_id, data, *a, **kw: fake.update(account_id, data),
     )
 
     app.dependency_overrides[get_db] = lambda: None
     try:
         yield fake
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture

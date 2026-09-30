@@ -5,12 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../context/AuthContext";
-import { api, User, UserAdminInput } from "../../lib/api";
+import { api, User, UserAdminInput, validatePasswordPolicy } from "../../lib/api";
 
 export default function UserManagementPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { user: currentUser, isLoading: authLoading } = useAuth();
+  const { user: currentUser, isLoading: authLoading, viewAsUser } = useAuth();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [username, setUsername] = useState("");
@@ -19,6 +19,13 @@ export default function UserManagementPage() {
   const [email, setEmail] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Admin Change Password Modal State
+  const [changePasswordUser, setChangePasswordUser] = useState<User | null>(null);
+  const [adminNewPassword, setAdminNewPassword] = useState("");
+  const [adminConfirmPassword, setAdminConfirmPassword] = useState("");
+  const [adminPwError, setAdminPwError] = useState<string | null>(null);
+  const [adminPwSuccess, setAdminPwSuccess] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !currentUser) {
@@ -59,14 +66,33 @@ export default function UserManagementPage() {
     },
   });
 
+  const changePasswordMutation = useMutation({
+    mutationFn: ({ userId, newPassword }: { userId: number; newPassword: string }) =>
+      api.users.changePassword(userId, newPassword),
+    onSuccess: () => {
+      setAdminPwSuccess(true);
+      setTimeout(() => {
+        setAdminPwSuccess(false);
+        setChangePasswordUser(null);
+        setAdminNewPassword("");
+        setAdminConfirmPassword("");
+        setAdminPwError(null);
+      }, 1500);
+    },
+    onError: (err: Error) => {
+      setAdminPwError(err.message || "Không thể đổi mật khẩu");
+    },
+  });
+
   const handleCreateUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || username.trim().length < 3) {
       setFormError("Tên đăng nhập tối thiểu 3 ký tự");
       return;
     }
-    if (!password || password.length < 3) {
-      setFormError("Mật khẩu tối thiểu 3 ký tự");
+    const policyErr = validatePasswordPolicy(password);
+    if (policyErr) {
+      setFormError(policyErr);
       return;
     }
 
@@ -89,6 +115,53 @@ export default function UserManagementPage() {
     }
   };
 
+  const handleViewAs = async (u: User) => {
+    if (u.id === currentUser?.id) return;
+    if (
+      confirm(
+        `Chuyển sang chế độ xem dữ liệu của người dùng "${u.username}"? Bạn có thể quay lại tài khoản Admin bất cứ lúc nào qua thanh thông báo trên cùng.`
+      )
+    ) {
+      try {
+        await viewAsUser(u.id);
+        router.push("/");
+      } catch (err: unknown) {
+        alert(err instanceof Error ? err.message : "Không thể xem dưới danh nghĩa người dùng này");
+      }
+    }
+  };
+
+  const handleAdminChangePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminPwError(null);
+    if (!changePasswordUser) return;
+
+    const policyErr = validatePasswordPolicy(adminNewPassword);
+    if (policyErr) {
+      setAdminPwError(policyErr);
+      return;
+    }
+
+    if (adminNewPassword !== adminConfirmPassword) {
+      setAdminPwError("Mật khẩu xác nhận không khớp");
+      return;
+    }
+
+    changePasswordMutation.mutate({
+      userId: changePasswordUser.id,
+      newPassword: adminNewPassword,
+    });
+  };
+
+  const addPwHasMinLen = password.length >= 8;
+  const addPwHasUpper = /[A-Z]/.test(password);
+  const addPwHasDigit = /[0-9]/.test(password);
+
+  const adminPwHasMinLen = adminNewPassword.length >= 8;
+  const adminPwHasUpper = /[A-Z]/.test(adminNewPassword);
+  const adminPwHasDigit = /[0-9]/.test(adminNewPassword);
+  const adminPwMatch = adminNewPassword.length > 0 && adminNewPassword === adminConfirmPassword;
+
   if (authLoading || (!currentUser?.is_admin && !authLoading)) {
     return (
       <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>
@@ -106,7 +179,7 @@ export default function UserManagementPage() {
 
   return (
     <div style={{
-      maxWidth: "1000px",
+      maxWidth: "1050px",
       margin: "0 auto",
       padding: "32px 20px",
       fontFamily: "system-ui, -apple-system, sans-serif",
@@ -164,103 +237,332 @@ export default function UserManagementPage() {
         {isLoading ? (
           <div style={{ padding: "40px", textAlign: "center", color: "#94a3b8" }}>Đang tải danh sách...</div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
-            <thead>
-              <tr style={{ background: "rgba(15, 23, 42, 0.6)", borderBottom: "1px solid rgba(255, 255, 255, 0.1)" }}>
-                <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Tên người dùng</th>
-                <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Tên hiển thị</th>
-                <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Email</th>
-                <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Vai trò</th>
-                <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Trạng thái</th>
-                <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8", textAlign: "right" }}>Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => {
-                const isSelf = u.id === currentUser?.id;
-                return (
-                  <tr key={u.id} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.06)" }}>
-                    <td style={{ padding: "14px 18px", fontSize: "14px", fontWeight: "600" }}>
-                      @{u.username}
-                      {isSelf && (
-                        <span style={{
-                          marginLeft: "8px",
-                          background: "rgba(37, 99, 235, 0.2)",
-                          color: "#60a5fa",
-                          fontSize: "11px",
-                          padding: "2px 6px",
-                          borderRadius: "4px",
-                        }}>
-                          Bạn
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: "14px 18px", fontSize: "14px", color: "#cbd5e1" }}>{u.display_name || "-"}</td>
-                    <td style={{ padding: "14px 18px", fontSize: "14px", color: "#94a3b8" }}>{u.email || "-"}</td>
-                    <td style={{ padding: "14px 18px", fontSize: "13px" }}>
-                      {u.is_admin ? (
-                        <span style={{
-                          background: "rgba(245, 158, 11, 0.15)",
-                          color: "#fbbf24",
-                          padding: "3px 8px",
-                          borderRadius: "6px",
-                          fontWeight: "600",
-                        }}>
-                          Quản trị viên (Admin)
-                        </span>
-                      ) : (
-                        <span style={{
-                          background: "rgba(100, 116, 139, 0.2)",
-                          color: "#94a3b8",
-                          padding: "3px 8px",
-                          borderRadius: "6px",
-                        }}>
-                          Thành viên
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ padding: "14px 18px", fontSize: "13px" }}>
-                      <span style={{
-                        color: u.is_active ? "#34d399" : "#f87171",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                      }}>
-                        <span style={{
-                          width: "8px",
-                          height: "8px",
-                          borderRadius: "50%",
-                          background: u.is_active ? "#34d399" : "#f87171",
-                        }} />
-                        {u.is_active ? "Đang hoạt động" : "Tạm khoá"}
-                      </span>
-                    </td>
-                    <td style={{ padding: "14px 18px", textAlign: "right" }}>
-                      {!isSelf && (
-                        <button
-                          onClick={() => handleDeleteUser(u)}
-                          style={{
-                            background: "rgba(239, 68, 68, 0.12)",
-                            color: "#f87171",
-                            border: "1px solid rgba(239, 68, 68, 0.25)",
-                            borderRadius: "8px",
-                            padding: "6px 12px",
-                            fontSize: "12px",
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", minWidth: "800px" }}>
+              <thead>
+                <tr style={{ background: "rgba(15, 23, 42, 0.6)", borderBottom: "1px solid rgba(255, 255, 255, 0.1)" }}>
+                  <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Tên người dùng</th>
+                  <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Tên hiển thị</th>
+                  <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Email</th>
+                  <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Vai trò</th>
+                  <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8" }}>Trạng thái</th>
+                  <th style={{ padding: "14px 18px", fontSize: "13px", fontWeight: "600", color: "#94a3b8", textAlign: "right" }}>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => {
+                  const isSelf = u.id === currentUser?.id;
+                  return (
+                    <tr key={u.id} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.06)" }}>
+                      <td style={{ padding: "14px 18px", fontSize: "14px", fontWeight: "600" }}>
+                        @{u.username}
+                        {isSelf && (
+                          <span style={{
+                            marginLeft: "8px",
+                            background: "rgba(37, 99, 235, 0.2)",
+                            color: "#60a5fa",
+                            fontSize: "11px",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                          }}>
+                            Bạn
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: "14px 18px", fontSize: "14px", color: "#cbd5e1" }}>{u.display_name || "-"}</td>
+                      <td style={{ padding: "14px 18px", fontSize: "14px", color: "#94a3b8" }}>{u.email || "-"}</td>
+                      <td style={{ padding: "14px 18px", fontSize: "13px" }}>
+                        {u.is_admin ? (
+                          <span style={{
+                            background: "rgba(245, 158, 11, 0.15)",
+                            color: "#fbbf24",
+                            padding: "3px 8px",
+                            borderRadius: "6px",
                             fontWeight: "600",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Xoá
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                          }}>
+                            Quản trị viên (Admin)
+                          </span>
+                        ) : (
+                          <span style={{
+                            background: "rgba(100, 116, 139, 0.2)",
+                            color: "#94a3b8",
+                            padding: "3px 8px",
+                            borderRadius: "6px",
+                          }}>
+                            Thành viên
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: "14px 18px", fontSize: "13px" }}>
+                        <span style={{
+                          color: u.is_active ? "#34d399" : "#f87171",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}>
+                          <span style={{
+                            width: "8px",
+                            height: "8px",
+                            borderRadius: "50%",
+                            background: u.is_active ? "#34d399" : "#f87171",
+                          }} />
+                          {u.is_active ? "Đang hoạt động" : "Tạm khoá"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "14px 18px", textAlign: "right" }}>
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                          {/* View As User button */}
+                          {!isSelf && (
+                            <button
+                              onClick={() => handleViewAs(u)}
+                              title="Xem dữ liệu tài chính với tư cách người dùng này"
+                              style={{
+                                background: "rgba(245, 158, 11, 0.15)",
+                                color: "#fbbf24",
+                                border: "1px solid rgba(245, 158, 11, 0.3)",
+                                borderRadius: "8px",
+                                padding: "6px 10px",
+                                fontSize: "12px",
+                                fontWeight: "600",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              <span>👁</span> View As
+                            </button>
+                          )}
+
+                          {/* Admin Change Password button */}
+                          <button
+                            onClick={() => {
+                              setChangePasswordUser(u);
+                              setAdminNewPassword("");
+                              setAdminConfirmPassword("");
+                              setAdminPwError(null);
+                              setAdminPwSuccess(false);
+                            }}
+                            title="Đổi mật khẩu người dùng"
+                            style={{
+                              background: "rgba(59, 130, 246, 0.15)",
+                              color: "#60a5fa",
+                              border: "1px solid rgba(59, 130, 246, 0.3)",
+                              borderRadius: "8px",
+                              padding: "6px 10px",
+                              fontSize: "12px",
+                              fontWeight: "600",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            <span>🔑</span> Đổi MK
+                          </button>
+
+                          {/* Delete button */}
+                          {!isSelf && (
+                            <button
+                              onClick={() => handleDeleteUser(u)}
+                              style={{
+                                background: "rgba(239, 68, 68, 0.12)",
+                                color: "#f87171",
+                                border: "1px solid rgba(239, 68, 68, 0.25)",
+                                borderRadius: "8px",
+                                padding: "6px 10px",
+                                fontSize: "12px",
+                                fontWeight: "600",
+                                cursor: "pointer",
+                              }}
+                            >
+                              Xoá
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
+
+      {/* Admin Change Password Modal */}
+      {changePasswordUser && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0, 0, 0, 0.75)",
+          backdropFilter: "blur(4px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "20px",
+          zIndex: 9999,
+        }}>
+          <div style={{
+            width: "100%",
+            maxWidth: "440px",
+            background: "#1e293b",
+            border: "1px solid rgba(255, 255, 255, 0.15)",
+            borderRadius: "20px",
+            padding: "28px",
+            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.6)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <h2 style={{ fontSize: "18px", fontWeight: "700", margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>🔑</span> Đổi Mật Khẩu Cho @{changePasswordUser.username}
+              </h2>
+              <button
+                onClick={() => setChangePasswordUser(null)}
+                style={{ background: "none", border: "none", color: "#94a3b8", fontSize: "20px", cursor: "pointer" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {adminPwError && (
+              <div style={{
+                background: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid rgba(239, 68, 68, 0.3)",
+                color: "#fca5a5",
+                padding: "10px 14px",
+                borderRadius: "8px",
+                marginBottom: "16px",
+                fontSize: "13px",
+              }}>
+                {adminPwError}
+              </div>
+            )}
+
+            {adminPwSuccess && (
+              <div style={{
+                background: "rgba(16, 185, 129, 0.15)",
+                border: "1px solid rgba(16, 185, 129, 0.3)",
+                color: "#6ee7b7",
+                padding: "10px 14px",
+                borderRadius: "8px",
+                marginBottom: "16px",
+                fontSize: "13px",
+                textAlign: "center",
+              }}>
+                ✓ Đổi mật khẩu thành công!
+              </div>
+            )}
+
+            <form onSubmit={handleAdminChangePasswordSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "13px", fontWeight: "500", color: "#cbd5e1", marginBottom: "6px" }}>
+                  Mật khẩu mới cho @{changePasswordUser.username} *
+                </label>
+                <input
+                  type="password"
+                  value={adminNewPassword}
+                  onChange={(e) => setAdminNewPassword(e.target.value)}
+                  placeholder="Tối thiểu 8 ký tự, gồm chữ hoa và số"
+                  required
+                  style={{
+                    width: "100%",
+                    height: "40px",
+                    background: "rgba(15, 23, 42, 0.6)",
+                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    borderRadius: "8px",
+                    padding: "0 12px",
+                    color: "#f8fafc",
+                    fontSize: "14px",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <div style={{ marginTop: "6px", fontSize: "12px", display: "flex", flexDirection: "column", gap: "2px" }}>
+                  <span style={{ color: adminPwHasMinLen ? "#34d399" : "#94a3b8" }}>
+                    {adminPwHasMinLen ? "✓" : "○"} Tối thiểu 8 ký tự
+                  </span>
+                  <span style={{ color: adminPwHasUpper ? "#34d399" : "#94a3b8" }}>
+                    {adminPwHasUpper ? "✓" : "○"} Chứa ít nhất 1 chữ cái in hoa (A-Z)
+                  </span>
+                  <span style={{ color: adminPwHasDigit ? "#34d399" : "#94a3b8" }}>
+                    {adminPwHasDigit ? "✓" : "○"} Chứa ít nhất 1 chữ số (0-9)
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "13px", fontWeight: "500", color: "#cbd5e1", marginBottom: "6px" }}>
+                  Xác nhận mật khẩu mới *
+                </label>
+                <input
+                  type="password"
+                  value={adminConfirmPassword}
+                  onChange={(e) => setAdminConfirmPassword(e.target.value)}
+                  placeholder="Nhập lại mật khẩu mới"
+                  required
+                  style={{
+                    width: "100%",
+                    height: "40px",
+                    background: "rgba(15, 23, 42, 0.6)",
+                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    borderRadius: "8px",
+                    padding: "0 12px",
+                    color: "#f8fafc",
+                    fontSize: "14px",
+                    boxSizing: "border-box",
+                  }}
+                />
+                {adminConfirmPassword && (
+                  <span style={{ fontSize: "12px", color: adminPwMatch ? "#34d399" : "#f87171", marginTop: "4px", display: "block" }}>
+                    {adminPwMatch ? "✓ Mật khẩu khớp nhau" : "✕ Mật khẩu không khớp"}
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => setChangePasswordUser(null)}
+                  disabled={changePasswordMutation.isPending}
+                  style={{
+                    flex: 1,
+                    height: "40px",
+                    background: "transparent",
+                    border: "1px solid rgba(255, 255, 255, 0.2)",
+                    borderRadius: "8px",
+                    color: "#94a3b8",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                  }}
+                >
+                  Huỷ
+                </button>
+                <button
+                  type="submit"
+                  disabled={changePasswordMutation.isPending || !adminPwHasMinLen || !adminPwHasUpper || !adminPwHasDigit || !adminPwMatch}
+                  style={{
+                    flex: 1,
+                    height: "40px",
+                    background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+                    border: "none",
+                    borderRadius: "8px",
+                    color: "#fff",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                    cursor: changePasswordMutation.isPending || !adminPwHasMinLen || !adminPwHasUpper || !adminPwHasDigit || !adminPwMatch ? "not-allowed" : "pointer",
+                    opacity: changePasswordMutation.isPending || !adminPwHasMinLen || !adminPwHasUpper || !adminPwHasDigit || !adminPwMatch ? 0.6 : 1,
+                  }}
+                >
+                  {changePasswordMutation.isPending ? "Đang lưu..." : "Đổi mật khẩu"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Add User Modal */}
       {showAddModal && (
@@ -340,7 +642,7 @@ export default function UserManagementPage() {
                 </label>
                 <input
                   type="password"
-                  placeholder="Tối thiểu 3 ký tự"
+                  placeholder="Tối thiểu 8 ký tự, gồm chữ hoa và số"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   style={{
@@ -355,6 +657,17 @@ export default function UserManagementPage() {
                     boxSizing: "border-box",
                   }}
                 />
+                <div style={{ marginTop: "4px", fontSize: "12px", display: "flex", flexDirection: "column", gap: "2px" }}>
+                  <span style={{ color: addPwHasMinLen ? "#34d399" : "#94a3b8" }}>
+                    {addPwHasMinLen ? "✓" : "○"} Tối thiểu 8 ký tự
+                  </span>
+                  <span style={{ color: addPwHasUpper ? "#34d399" : "#94a3b8" }}>
+                    {addPwHasUpper ? "✓" : "○"} Chứa ít nhất 1 chữ cái in hoa (A-Z)
+                  </span>
+                  <span style={{ color: addPwHasDigit ? "#34d399" : "#94a3b8" }}>
+                    {addPwHasDigit ? "✓" : "○"} Chứa ít nhất 1 chữ số (0-9)
+                  </span>
+                </div>
               </div>
 
               <div>
@@ -432,7 +745,7 @@ export default function UserManagementPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={createUserMutation.isPending}
+                  disabled={createUserMutation.isPending || !addPwHasMinLen || !addPwHasUpper || !addPwHasDigit}
                   style={{
                     flex: 1,
                     height: "42px",
@@ -442,7 +755,8 @@ export default function UserManagementPage() {
                     color: "#fff",
                     fontSize: "14px",
                     fontWeight: "600",
-                    cursor: createUserMutation.isPending ? "not-allowed" : "pointer",
+                    cursor: createUserMutation.isPending || !addPwHasMinLen || !addPwHasUpper || !addPwHasDigit ? "not-allowed" : "pointer",
+                    opacity: createUserMutation.isPending || !addPwHasMinLen || !addPwHasUpper || !addPwHasDigit ? 0.6 : 1,
                   }}
                 >
                   {createUserMutation.isPending ? "Đang tạo..." : "Tạo tài khoản"}

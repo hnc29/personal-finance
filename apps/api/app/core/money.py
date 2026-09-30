@@ -41,9 +41,7 @@ def money_to_scaled(value: Decimal | str | int) -> int:
         except InvalidOperation as exc:
             raise InvalidMoneyValue(f"invalid numeric string: {value!r}") from exc
     else:
-        raise InvalidMoneyValue(
-            f"unsupported type for money: {type(value).__name__}"
-        )
+        raise InvalidMoneyValue(f"unsupported type for money: {type(value).__name__}")
 
     sign, digits, exponent = dec.as_tuple()
     # A non-int exponent ('n'/'N'/'F') marks a non-finite Decimal (NaN/Infinity).
@@ -52,8 +50,7 @@ def money_to_scaled(value: Decimal | str | int) -> int:
 
     if exponent < -MONEY_DECIMAL_PLACES:
         raise InvalidMoneyValue(
-            f"money supports at most {MONEY_DECIMAL_PLACES} decimal places: "
-            f"{value!r}"
+            f"money supports at most {MONEY_DECIMAL_PLACES} decimal places: {value!r}"
         )
 
     # Exact integer scaling (exponent >= -4, so the power of ten is >= 0).
@@ -65,9 +62,7 @@ def money_to_scaled(value: Decimal | str | int) -> int:
 def scaled_to_money(value: int) -> Decimal:
     """Convert a scaled integer back to its exact Decimal money value."""
     if isinstance(value, bool) or not isinstance(value, int):
-        raise InvalidMoneyValue(
-            f"scaled money must be an int: {type(value).__name__}"
-        )
+        raise InvalidMoneyValue(f"scaled money must be an int: {type(value).__name__}")
 
     sign = 0 if value >= 0 else 1
     digits = tuple(int(c) for c in str(abs(value)))

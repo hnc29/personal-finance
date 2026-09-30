@@ -1,4 +1,13 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+export function getApiBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== "undefined" && window.location.hostname) {
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+  return "http://127.0.0.1:8000";
+}
+
 export type AccountType = "CASH" | "BANK" | "CREDIT_CARD" | "EWALLET";
 export type EventType = "EXPENSE" | "INCOME" | "TRANSFER" | "CREDIT_CARD_PAYMENT" | "INTEREST" | "SAVINGS_DEPOSIT" | "SAVINGS_WITHDRAWAL" | "ASSET_PURCHASE" | "ASSET_SALE" | "ADJUSTMENT";
 export interface Account { id: number; name: string; account_type: AccountType; currency: string; is_active: boolean; sort_order: number; credit_limit?: string | null }
@@ -37,7 +46,7 @@ function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   if (currentWebAuthToken && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${currentWebAuthToken}`);
   }
-  return fetch(`${API_URL}/api/v1${path}`, { ...init, headers, cache: "no-store" });
+  return fetch(`${getApiBaseUrl()}/api/v1${path}`, { ...init, headers, cache: "no-store" });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -189,28 +198,28 @@ export const api = {
       if (params.account_id) q.set("account_id", String(params.account_id));
       if (params.start_date) q.set("start_date", params.start_date);
       if (params.end_date) q.set("end_date", params.end_date);
-      return `${API_URL}/api/v1/exports/statement.xlsx${q.toString() ? `?${q.toString()}` : ""}`;
+      return `${getApiBaseUrl()}/api/v1/exports/statement.xlsx${q.toString() ? `?${q.toString()}` : ""}`;
     },
     statementCsvUrl: (params: { account_id?: number | string; start_date?: string; end_date?: string }) => {
       const q = new URLSearchParams();
       if (params.account_id) q.set("account_id", String(params.account_id));
       if (params.start_date) q.set("start_date", params.start_date);
       if (params.end_date) q.set("end_date", params.end_date);
-      return `${API_URL}/api/v1/exports/statement.csv${q.toString() ? `?${q.toString()}` : ""}`;
+      return `${getApiBaseUrl()}/api/v1/exports/statement.csv${q.toString() ? `?${q.toString()}` : ""}`;
     },
     eventsCsvUrl: (params: { account_id?: number | string; start_date?: string; end_date?: string }) => {
       const q = new URLSearchParams();
       if (params.account_id) q.set("account_id", String(params.account_id));
       if (params.start_date) q.set("start_date", params.start_date);
       if (params.end_date) q.set("end_date", params.end_date);
-      return `${API_URL}/api/v1/exports/events.csv${q.toString() ? `?${q.toString()}` : ""}`;
+      return `${getApiBaseUrl()}/api/v1/exports/events.csv${q.toString() ? `?${q.toString()}` : ""}`;
     },
     eventsXlsxUrl: (params: { account_id?: number | string; start_date?: string; end_date?: string }) => {
       const q = new URLSearchParams();
       if (params.account_id) q.set("account_id", String(params.account_id));
       if (params.start_date) q.set("start_date", params.start_date);
       if (params.end_date) q.set("end_date", params.end_date);
-      return `${API_URL}/api/v1/exports/events.xlsx${q.toString() ? `?${q.toString()}` : ""}`;
+      return `${getApiBaseUrl()}/api/v1/exports/events.xlsx${q.toString() ? `?${q.toString()}` : ""}`;
     },
   },
   backup: {
@@ -239,7 +248,7 @@ export const api = {
       if (!response.ok) throw new Error(data.detail || `Restore failed (HTTP ${response.status})`);
       return data;
     },
-    downloadUrl: (filename: string) => `${API_URL}/api/v1/backup/download/${encodeURIComponent(filename)}`,
+    downloadUrl: (filename: string) => `${getApiBaseUrl()}/api/v1/backup/download/${encodeURIComponent(filename)}`,
     remove: (filename: string) => request<{ status: string; message: string }>(`/backup/${encodeURIComponent(filename)}`, { method: "DELETE" }),
   },
   auth: {
@@ -256,11 +265,28 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
       }),
+    forgotPassword: (email: string) =>
+      request<{ message: string }>("/auth/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      }),
+    resetPassword: (token: string, newPassword: string) =>
+      request<{ message: string }>("/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({ token, new_password: newPassword }),
+      }),
   },
   users: {
     list: () => request<User[]>("/users"),
     create: (data: UserAdminInput) => request<User>("/users", { method: "POST", body: JSON.stringify(data) }),
     update: (id: number, data: UserUpdateInput) => request<User>(`/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    changePassword: (id: number, newPassword: string) =>
+      request<{ message: string }>(`/users/${id}/change-password`, {
+        method: "POST",
+        body: JSON.stringify({ new_password: newPassword }),
+      }),
+    viewAs: (id: number) =>
+      request<ViewAsResponse>(`/users/${id}/view-as`, { method: "POST" }),
     delete: (id: number) => request<void>(`/users/${id}`, { method: "DELETE" }),
   },
 };
@@ -273,12 +299,34 @@ export interface User {
   is_active: boolean;
   is_admin: boolean;
   created_at: string;
+  impersonated_by_id?: number | null;
+  impersonated_by_username?: string | null;
 }
 
 export interface AuthResponse {
   access_token: string;
   token_type: string;
   user: User;
+}
+
+export interface ViewAsResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+  original_admin: User;
+}
+
+export function validatePasswordPolicy(password: string): string | null {
+  if (password.length < 8) {
+    return "Mật khẩu phải có tối thiểu 8 ký tự";
+  }
+  if (!/[A-Z]/.test(password)) {
+    return "Mật khẩu phải chứa ít nhất 1 chữ cái in hoa (A-Z)";
+  }
+  if (!/[0-9]/.test(password)) {
+    return "Mật khẩu phải chứa ít nhất 1 chữ số (0-9)";
+  }
+  return null;
 }
 
 export interface UserAdminInput {

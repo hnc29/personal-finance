@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../context/AuthContext";
+import { validatePasswordPolicy } from "../../lib/api";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -23,6 +24,11 @@ export default function RegisterPage() {
     }
   }, [user, router]);
 
+  const hasMinLen = password.length >= 8;
+  const hasUpper = /[A-Z]/.test(password);
+  const hasDigit = /[0-9]/.test(password);
+  const isMatch = password.length > 0 && password === confirmPassword;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim()) {
@@ -33,12 +39,9 @@ export default function RegisterPage() {
       setErrorMessage("Tên đăng nhập tối thiểu 3 ký tự");
       return;
     }
-    if (!password) {
-      setErrorMessage("Vui lòng nhập mật khẩu");
-      return;
-    }
-    if (password.length < 3) {
-      setErrorMessage("Mật khẩu tối thiểu 3 ký tự");
+    const policyErr = validatePasswordPolicy(password);
+    if (policyErr) {
+      setErrorMessage(policyErr);
       return;
     }
     if (password !== confirmPassword) {
@@ -213,7 +216,7 @@ export default function RegisterPage() {
             <div style={{ position: "relative" }}>
               <input
                 type={showPassword ? "text" : "password"}
-                placeholder="Tối thiểu 3 ký tự"
+                placeholder="Tối thiểu 8 ký tự, gồm chữ hoa và số"
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
@@ -251,6 +254,18 @@ export default function RegisterPage() {
                 {showPassword ? "Ẩn" : "Hiện"}
               </button>
             </div>
+            {/* Live hints */}
+            <div style={{ marginTop: "6px", fontSize: "12px", display: "flex", flexDirection: "column", gap: "2px" }}>
+              <span style={{ color: hasMinLen ? "#34d399" : "#94a3b8" }}>
+                {hasMinLen ? "✓" : "○"} Tối thiểu 8 ký tự
+              </span>
+              <span style={{ color: hasUpper ? "#34d399" : "#94a3b8" }}>
+                {hasUpper ? "✓" : "○"} Chứa ít nhất 1 chữ cái in hoa (A-Z)
+              </span>
+              <span style={{ color: hasDigit ? "#34d399" : "#94a3b8" }}>
+                {hasDigit ? "✓" : "○"} Chứa ít nhất 1 chữ số (0-9)
+              </span>
+            </div>
           </div>
 
           <div>
@@ -278,6 +293,11 @@ export default function RegisterPage() {
                 boxSizing: "border-box",
               }}
             />
+            {confirmPassword && (
+              <span style={{ fontSize: "12px", color: isMatch ? "#34d399" : "#f87171", marginTop: "4px", display: "block" }}>
+                {isMatch ? "✓ Mật khẩu khớp nhau" : "✕ Mật khẩu không khớp"}
+              </span>
+            )}
           </div>
 
           <button

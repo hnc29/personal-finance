@@ -31,15 +31,18 @@ def record(
 
 
 def test_text_normalization_and_similarity_are_integer_deterministic() -> None:
-    assert normalize_reconciliation_text("  Chuyển-khoản: ĐIỆN  ") == "chuyen khoan dien"
+    assert (
+        normalize_reconciliation_text("  Chuyển-khoản: ĐIỆN  ") == "chuyen khoan dien"
+    )
     assert text_similarity_basis_points("alpha beta", "beta gamma") == 3333
 
 
 def test_different_amount_or_distant_date_is_not_a_candidate() -> None:
     statement = record(1)
-    assert score_reconciliation_candidate(
-        statement, record(2, amount_scaled=-1_250_001)
-    ) is None
+    assert (
+        score_reconciliation_candidate(statement, record(2, amount_scaled=-1_250_001))
+        is None
+    )
     assert score_reconciliation_candidate(statement, record(2, day=18)) is None
 
 
@@ -77,7 +80,9 @@ def test_equal_best_candidates_require_review() -> None:
     assert [item.event.identifier for item in decision.alternatives] == [2, 3]
 
 
-def test_repeated_exact_reference_requires_review_and_no_candidate_is_unmatched() -> None:
+def test_repeated_exact_reference_requires_review_and_no_candidate_is_unmatched() -> (
+    None
+):
     statement = record(1, reference="DUPLICATE-REF")
     ambiguous = decide_reconciliation(
         statement,

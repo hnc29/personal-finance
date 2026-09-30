@@ -76,11 +76,14 @@ def persist_daily_snapshot(
         raise ValueError("captured_at must be timezone-aware")
     if captured_at.date() < snapshot_date:
         raise ValueError("captured_at cannot precede snapshot_date")
-    if session.scalar(
-        select(PortfolioSnapshot.id).where(
-            PortfolioSnapshot.snapshot_date == snapshot_date
+    if (
+        session.scalar(
+            select(PortfolioSnapshot.id).where(
+                PortfolioSnapshot.snapshot_date == snapshot_date
+            )
         )
-    ) is not None:
+        is not None
+    ):
         raise ValueError(f"snapshot already exists for {snapshot_date.isoformat()}")
 
     seen: set[tuple[PortfolioComponentType, str]] = set()
@@ -98,9 +101,14 @@ def persist_daily_snapshot(
         if any(value is None for value in metadata) != all(
             value is None for value in metadata
         ):
-            raise ValueError("quote state, provider and timestamp must be supplied together")
+            raise ValueError(
+                "quote state, provider and timestamp must be supplied together"
+            )
         if component.quoted_at is not None:
-            if component.quoted_at.tzinfo is None or component.quoted_at.utcoffset() is None:
+            if (
+                component.quoted_at.tzinfo is None
+                or component.quoted_at.utcoffset() is None
+            ):
                 raise ValueError("quoted_at must be timezone-aware")
             if component.quoted_at > captured_at:
                 raise ValueError("quoted_at cannot be after captured_at")

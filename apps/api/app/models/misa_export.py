@@ -40,13 +40,19 @@ class MisaExportConfiguration(Base):
     export_format: Mapped[MisaExportFormat] = mapped_column(
         Enum(MisaExportFormat, native_enum=False), nullable=False
     )
-    currency: Mapped[str] = mapped_column(String, nullable=False, default="VND", server_default="VND")
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("1"))
+    currency: Mapped[str] = mapped_column(
+        String, nullable=False, default="VND", server_default="VND"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("1")
+    )
 
     account_mappings: Mapped[list["MisaAccountMapping"]] = relationship(
         back_populates="configuration", cascade="all, delete-orphan"
     )
-    export_runs: Mapped[list["MisaExportRun"]] = relationship(back_populates="configuration")
+    export_runs: Mapped[list["MisaExportRun"]] = relationship(
+        back_populates="configuration"
+    )
 
 
 class MisaAccountMapping(Base):
@@ -62,16 +68,22 @@ class MisaAccountMapping(Base):
     configuration_id: Mapped[int] = mapped_column(
         ForeignKey("misa_export_configurations.id"), nullable=False
     )
-    source_account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    source_account_id: Mapped[int] = mapped_column(
+        ForeignKey("accounts.id"), nullable=False
+    )
     target_account_code: Mapped[str] = mapped_column(String, nullable=False)
     target_account_name: Mapped[str] = mapped_column(String, nullable=False)
 
-    configuration: Mapped["MisaExportConfiguration"] = relationship(back_populates="account_mappings")
+    configuration: Mapped["MisaExportConfiguration"] = relationship(
+        back_populates="account_mappings"
+    )
     source_account: Mapped["Account"] = relationship()
 
     __table_args__ = (
         UniqueConstraint(
-            "configuration_id", "source_account_id", name="uq_misa_mapping_configuration_source"
+            "configuration_id",
+            "source_account_id",
+            name="uq_misa_mapping_configuration_source",
         ),
         Index("ix_misa_account_mappings_source_account_id", "source_account_id"),
     )
@@ -96,13 +108,17 @@ class MisaExportRun(Base):
     exported_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
     output_filename: Mapped[str] = mapped_column(String, nullable=False)
 
-    configuration: Mapped["MisaExportConfiguration"] = relationship(back_populates="export_runs")
+    configuration: Mapped["MisaExportConfiguration"] = relationship(
+        back_populates="export_runs"
+    )
     exported_events: Mapped[list["MisaExportedEvent"]] = relationship(
         back_populates="export_run", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
-        UniqueConstraint("id", "configuration_id", name="uq_misa_export_run_configuration"),
+        UniqueConstraint(
+            "id", "configuration_id", name="uq_misa_export_run_configuration"
+        ),
         Index("ix_misa_export_runs_configuration_id", "configuration_id"),
     )
 
@@ -115,7 +131,9 @@ class MisaExportedEvent(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     export_run_id: Mapped[int] = mapped_column(nullable=False)
     configuration_id: Mapped[int] = mapped_column(nullable=False)
-    financial_event_id: Mapped[int] = mapped_column(ForeignKey("financial_events.id"), nullable=False)
+    financial_event_id: Mapped[int] = mapped_column(
+        ForeignKey("financial_events.id"), nullable=False
+    )
 
     export_run: Mapped["MisaExportRun"] = relationship(back_populates="exported_events")
     financial_event: Mapped["FinancialEvent"] = relationship()
@@ -127,7 +145,9 @@ class MisaExportedEvent(Base):
             name="fk_misa_exported_event_run_configuration",
         ),
         UniqueConstraint(
-            "configuration_id", "financial_event_id", name="uq_misa_exported_configuration_event"
+            "configuration_id",
+            "financial_event_id",
+            name="uq_misa_exported_configuration_event",
         ),
         Index("ix_misa_exported_events_export_run_id", "export_run_id"),
         Index("ix_misa_exported_events_financial_event_id", "financial_event_id"),

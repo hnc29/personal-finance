@@ -58,13 +58,16 @@ def _asset_movement(
     amount_scaled: int,
     event_type: FinancialEventType,
     transaction_date: datetime.date,
+    user_id: int | None = None,
 ) -> None:
     if amount_scaled == 0:
         return
-    if db.get(Account, account_id) is None:
+    wallet = db.get(Account, account_id)
+    if wallet is None or (user_id is not None and wallet.user_id != user_id):
         raise SavingsActionError("wallet account not found")
     db.add(
         FinancialEvent(
+            user_id=wallet.user_id,
             event_type=event_type,
             transaction_date=transaction_date,
             entries=[AccountEntry(account_id=account_id, amount_scaled=amount_scaled)],
@@ -122,6 +125,7 @@ def open_savings(
     funding_account_id: int | None = None,
     notes: str | None = None,
     excluded_from_reports: bool = False,
+    user_id: int = 1,
 ) -> SavingsAccount:
     """Open a new savings book, optionally funded from a wallet account.
 
@@ -138,6 +142,7 @@ def open_savings(
     if annual_rate_scaled < 0 or non_term_rate_scaled < 0:
         raise SavingsActionError("rates must not be negative")
     account = SavingsAccount(
+        user_id=user_id,
         product=product,
         name=name,
         principal_scaled=principal_scaled,
@@ -171,6 +176,7 @@ def open_savings(
             amount_scaled=-principal_scaled,
             event_type=FinancialEventType.SAVINGS_DEPOSIT,
             transaction_date=opened_date,
+            user_id=user_id,
         )
     db.add(account)
     db.commit()

@@ -115,7 +115,7 @@ export default function LoginPage() {
             </label>
             <input
               type="text"
-              placeholder="Nhập tên đăng nhập (vd: admin)"
+              placeholder="Nhập tên đăng nhập"
               value={username}
               onChange={(e) => {
                 setUsername(e.target.value);
@@ -138,9 +138,14 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#cbd5e1", marginBottom: "6px" }}>
-              Mật khẩu
-            </label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+              <label style={{ fontSize: "13px", fontWeight: "600", color: "#cbd5e1" }}>
+                Mật khẩu
+              </label>
+              <Link href="/forgot-password" style={{ fontSize: "12px", color: "#38bdf8", textDecoration: "none" }}>
+                Quên mật khẩu?
+              </Link>
+            </div>
             <div style={{ position: "relative" }}>
               <input
                 type={showPassword ? "text" : "password"}
@@ -212,11 +217,6 @@ export default function LoginPage() {
           <Link href="/register" style={{ color: "#38bdf8", fontWeight: "600", textDecoration: "none" }}>
             Đăng ký tài khoản
           </Link>
-        </div>
-
-        {/* Hint */}
-        <div style={{ marginTop: "20px", textAlign: "center", fontSize: "12px", color: "#64748b" }}>
-          Tài khoản mặc định: <b>admin</b> / mật khẩu: <b>admin</b>
         </div>
       </div>
     </div>

@@ -10,99 +10,126 @@ from app.models.category import Category
 CategoryNode = tuple[str, Sequence["CategoryNode"]]
 
 DEFAULT_CATEGORIES: Sequence[CategoryNode] = (
-    ("Expenses", (
-        ("Ăn uống", (
-            ("Ăn sáng", ()),
-            ("Ăn trưa", ()),
-            ("Ăn nhậu", ()),
-            ("Cafe Trà", ()),
-        )),
-        ("Gia đình", (
-            ("Ck vợ", ()),
-            ("Ck mẹ", ()),
-            ("Mua đồ dùng gđ", ()),
-            ("Chợ Siêu thị", ()),
-        )),
-        ("Giáo dục", (
-            ("TIT HP", ()),
-            ("NHÍM HP", ()),
-            ("BON HP", ()),
-        )),
-        ("CON CÁI", (
-            ("Tiêu vặt Tít", ()),
-            ("Đồng phục", ()),
-            ("Tit ngoại khoá", ()),
-            ("Sách vở", ()),
-            ("Tiêu vặt Nhím", ()),
-            ("Tiêu vặt Bon", ()),
-        )),
-        ("Di chuyển", (
-            ("Xăng cr", ()),
-            ("Bảo dưỡng xe", ()),
-            ("Taxi Thuê xe", ()),
-            ("Xăng lead", ()),
-            ("Phí Cầu đường", ()),
-            ("Xăng dr", ()),
-            ("Gửi xe", ()),
-            ("Rửa xe", ()),
-            ("BUS", ()),
-        )),
-        ("Hoá đơn & Tiện ích", (
-            ("Hoá đơn điện", ()),
-            ("Hoá đơn nước", ()),
-            ("Thuế đất", ()),
-            ("Hoá đơn điện thoại", ()),
-        )),
-        ("Mua sắm", (
-            ("Quần áo", ()),
-            ("Mua đồ điện tử, đt", ()),
-            ("Làm đẹp", ()),
-            ("Đồ gia dụng", ()),
-            ("Phần mềm, AI", ()),
-            ("Đồ dùng cá nhân", ()),
-        )),
-        ("Sức khỏe", (
-            ("Khám sức khoẻ", ()),
-            ("Thuốc men", ()),
-            ("Cắt tóc", ()),
-        )),
-        ("Đầu tư", (
-            ("Ack", ()),
-            ("NN", ()),
-            ("Đầu tư coin", ()),
-        )),
-        ("Thăm hỏi", (
-            ("Hiếu hỉ", ()),
-        )),
-        ("Chi hộ", (
-            ("Chi hộ thẻ TD", ()),
-        )),
-        ("ĐIỀU CHỈNH SỐ DƯ", ()),
-        ("Trả nợ", ()),
-        ("Cho vay", ()),
-        ("Cho tặng từ thiện", ()),
-        ("Phí Ck", ()),
-        ("Trả lãi", ()),
-        ("Giải trí", (
-            ("Vui - chơi", ()),
-        )),
-        ("RT", ()),
-        ("Tilo Pp", ()),
-        ("Các chi phí khác", ()),
-        ("Chưa phân loại", ()),
-    )),
-    ("Income", (
-        ("Lương", ()),
-        ("Thu hộ", ()),
-        ("Thu coin", ()),
-        ("Thu nợ", ()),
-        ("Cho tặng", ()),
-        ("RT thẻ", ()),
-        ("Thanh lý", ()),
-        ("Tiền hoàn Bank", ()),
-        ("Thu lãi", ()),
-        ("Chưa phân loại", ()),
-    )),
+    (
+        "Expenses",
+        (
+            (
+                "Ăn uống",
+                (
+                    ("Ăn sáng", ()),
+                    ("Ăn trưa", ()),
+                    ("Ăn nhậu", ()),
+                    ("Cafe Trà", ()),
+                ),
+            ),
+            (
+                "Gia đình",
+                (
+                    ("Ck vợ", ()),
+                    ("Ck mẹ", ()),
+                    ("Mua đồ dùng gđ", ()),
+                    ("Chợ Siêu thị", ()),
+                ),
+            ),
+            (
+                "Giáo dục",
+                (
+                    ("TIT HP", ()),
+                    ("NHÍM HP", ()),
+                    ("BON HP", ()),
+                ),
+            ),
+            (
+                "CON CÁI",
+                (
+                    ("Tiêu vặt Tít", ()),
+                    ("Đồng phục", ()),
+                    ("Tit ngoại khoá", ()),
+                    ("Sách vở", ()),
+                    ("Tiêu vặt Nhím", ()),
+                    ("Tiêu vặt Bon", ()),
+                ),
+            ),
+            (
+                "Di chuyển",
+                (
+                    ("Xăng cr", ()),
+                    ("Bảo dưỡng xe", ()),
+                    ("Taxi Thuê xe", ()),
+                    ("Xăng lead", ()),
+                    ("Phí Cầu đường", ()),
+                    ("Xăng dr", ()),
+                    ("Gửi xe", ()),
+                    ("Rửa xe", ()),
+                    ("BUS", ()),
+                ),
+            ),
+            (
+                "Hoá đơn & Tiện ích",
+                (
+                    ("Hoá đơn điện", ()),
+                    ("Hoá đơn nước", ()),
+                    ("Thuế đất", ()),
+                    ("Hoá đơn điện thoại", ()),
+                ),
+            ),
+            (
+                "Mua sắm",
+                (
+                    ("Quần áo", ()),
+                    ("Mua đồ điện tử, đt", ()),
+                    ("Làm đẹp", ()),
+                    ("Đồ gia dụng", ()),
+                    ("Phần mềm, AI", ()),
+                    ("Đồ dùng cá nhân", ()),
+                ),
+            ),
+            (
+                "Sức khỏe",
+                (
+                    ("Khám sức khoẻ", ()),
+                    ("Thuốc men", ()),
+                    ("Cắt tóc", ()),
+                ),
+            ),
+            (
+                "Đầu tư",
+                (
+                    ("Ack", ()),
+                    ("NN", ()),
+                    ("Đầu tư coin", ()),
+                ),
+            ),
+            ("Thăm hỏi", (("Hiếu hỉ", ()),)),
+            ("Chi hộ", (("Chi hộ thẻ TD", ()),)),
+            ("ĐIỀU CHỈNH SỐ DƯ", ()),
+            ("Trả nợ", ()),
+            ("Cho vay", ()),
+            ("Cho tặng từ thiện", ()),
+            ("Phí Ck", ()),
+            ("Trả lãi", ()),
+            ("Giải trí", (("Vui - chơi", ()),)),
+            ("RT", ()),
+            ("Tilo Pp", ()),
+            ("Các chi phí khác", ()),
+            ("Chưa phân loại", ()),
+        ),
+    ),
+    (
+        "Income",
+        (
+            ("Lương", ()),
+            ("Thu hộ", ()),
+            ("Thu coin", ()),
+            ("Thu nợ", ()),
+            ("Cho tặng", ()),
+            ("RT thẻ", ()),
+            ("Thanh lý", ()),
+            ("Tiền hoàn Bank", ()),
+            ("Thu lãi", ()),
+            ("Chưa phân loại", ()),
+        ),
+    ),
 )
 
 
@@ -114,7 +141,11 @@ def merge_default_categories(db: Session) -> dict[str, int]:
         nonlocal created, existing, conflicts
         for name, children in nodes:
             parent_id = parent.id if parent else None
-            category = db.scalar(select(Category).where(Category.name == name, Category.parent_id == parent_id))
+            category = db.scalar(
+                select(Category).where(
+                    Category.name == name, Category.parent_id == parent_id
+                )
+            )
             if category is None:
                 conflict = db.scalar(select(Category).where(Category.name == name))
                 if conflict is not None and name != "Chưa phân loại":
@@ -154,7 +185,11 @@ def missing_default_categories(db: Session) -> int:
         nonlocal missing
         for name, children in nodes:
             parent_id = parent.id if parent else None
-            category = db.scalar(select(Category).where(Category.name == name, Category.parent_id == parent_id))
+            category = db.scalar(
+                select(Category).where(
+                    Category.name == name, Category.parent_id == parent_id
+                )
+            )
             if category is None:
                 category = db.scalar(select(Category).where(Category.name == name))
             if category is None:

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.money import money_to_scaled
+from app.core.security import CurrentUser
 from app.models.account import Account
 from app.models.crypto import (
     CryptoHolding,
@@ -215,10 +216,11 @@ def list_metal_brands() -> list[str]:
 
 
 @router.get("/metals")
-def list_metals(db: DbSession):
+def list_metals(db: DbSession, current_user: CurrentUser):
     rows = db.scalars(
         select(PreciousMetalHolding)
         .options(selectinload(PreciousMetalHolding.lots))
+        .where(PreciousMetalHolding.user_id == current_user.id)
         .order_by(PreciousMetalHolding.id)
     )
     return [
@@ -234,7 +236,9 @@ def list_metals(db: DbSession):
             ),
             "purchase_price": str(row.lots[0].purchase_price) if row.lots else "0",
             "total_cost": str(row.lots[0].total_cost) if row.lots else "0",
-            "purchase_date": row.lots[0].purchase_date.isoformat() if row.lots else None,
+            "purchase_date": row.lots[0].purchase_date.isoformat()
+            if row.lots
+            else None,
             "excluded_from_reports": row.excluded_from_reports,
         }
         for row in rows
@@ -242,12 +246,13 @@ def list_metals(db: DbSession):
 
 
 @router.post("/metals", status_code=201)
-def create_metal(data: MetalCreate, db: DbSession):
+def create_metal(data: MetalCreate, db: DbSession, current_user: CurrentUser):
     try:
         pricing_inst = data.pricing_instrument or resolve_metal_instrument(
             data.brand.value, data.product_type, data.purity
         )
         holding = PreciousMetalHolding(
+            user_id=current_user.id,
             metal_type=PreciousMetalType(data.metal_type),
             brand=data.brand,
             product_type=data.product_type,
@@ -263,12 +268,18 @@ def create_metal(data: MetalCreate, db: DbSession):
         db.add(holding)
 
         if data.funding_account_id is not None:
-            wallet = db.get(Account, data.funding_account_id)
+            wallet = db.scalar(
+                select(Account).where(
+                    Account.id == data.funding_account_id,
+                    Account.user_id == current_user.id,
+                )
+            )
             if wallet is None:
                 raise HTTPException(400, "Funding wallet account not found")
             cost_scaled = money_to_scaled(data.total_cost)
             if cost_scaled > 0:
                 event = FinancialEvent(
+                    user_id=current_user.id,
                     event_type=FinancialEventType.ASSET_PURCHASE,
                     transaction_date=data.purchase_date,
                     note=f"Mua vàng {data.product_type} ({data.brand.value})",
@@ -306,11 +317,19 @@ def create_metal(data: MetalCreate, db: DbSession):
 
 
 @router.patch("/metals/{holding_id}")
-def update_metal(holding_id: int, data: MetalUpdate, db: DbSession):
+def update_metal(
+    holding_id: int,
+    data: MetalUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+):
     holding = db.scalar(
         select(PreciousMetalHolding)
         .options(selectinload(PreciousMetalHolding.lots))
-        .where(PreciousMetalHolding.id == holding_id)
+        .where(
+            PreciousMetalHolding.id == holding_id,
+            PreciousMetalHolding.user_id == current_user.id,
+        )
     )
     if holding is None:
         raise HTTPException(404, "Metal holding not found")
@@ -322,7 +341,11 @@ def update_metal(holding_id: int, data: MetalUpdate, db: DbSession):
         holding.purity = data.purity
     if data.pricing_instrument is not None:
         holding.pricing_instrument = data.pricing_instrument
-    elif data.brand is not None or data.product_type is not None or data.purity is not None:
+    elif (
+        data.brand is not None
+        or data.product_type is not None
+        or data.purity is not None
+    ):
         holding.pricing_instrument = resolve_metal_instrument(
             holding.brand.value, holding.product_type, holding.purity
         )
@@ -352,14 +375,25 @@ def update_metal(holding_id: int, data: MetalUpdate, db: DbSession):
         ),
         "purchase_price": str(holding.lots[0].purchase_price) if holding.lots else "0",
         "total_cost": str(holding.lots[0].total_cost) if holding.lots else "0",
-        "purchase_date": holding.lots[0].purchase_date.isoformat() if holding.lots else None,
+        "purchase_date": holding.lots[0].purchase_date.isoformat()
+        if holding.lots
+        else None,
         "excluded_from_reports": holding.excluded_from_reports,
     }
 
 
 @router.delete("/metals/{holding_id}")
-def delete_metal(holding_id: int, db: DbSession):
-    holding = db.get(PreciousMetalHolding, holding_id)
+def delete_metal(
+    holding_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    holding = db.scalar(
+        select(PreciousMetalHolding).where(
+            PreciousMetalHolding.id == holding_id,
+            PreciousMetalHolding.user_id == current_user.id,
+        )
+    )
     if holding is None:
         raise HTTPException(404, "Metal holding not found")
     db.delete(holding)
@@ -383,10 +417,11 @@ def search_coins(
 
 
 @router.get("/crypto")
-def list_crypto(db: DbSession):
+def list_crypto(db: DbSession, current_user: CurrentUser):
     rows = db.scalars(
         select(CryptoHolding)
         .options(selectinload(CryptoHolding.lots))
+        .where(CryptoHolding.user_id == current_user.id)
         .order_by(CryptoHolding.id)
     )
     return [
@@ -398,7 +433,9 @@ def list_crypto(db: DbSession):
             "quantity": str(sum((lot.quantity for lot in row.lots), Decimal(0))),
             "purchase_price": str(row.lots[0].purchase_price) if row.lots else "0",
             "total_cost": str(row.lots[0].total_cost) if row.lots else "0",
-            "purchase_date": row.lots[0].purchase_date.isoformat() if row.lots else None,
+            "purchase_date": row.lots[0].purchase_date.isoformat()
+            if row.lots
+            else None,
             "excluded_from_reports": row.excluded_from_reports,
         }
         for row in rows
@@ -406,7 +443,7 @@ def list_crypto(db: DbSession):
 
 
 @router.post("/crypto", status_code=201)
-def create_crypto(data: CryptoCreate, db: DbSession):
+def create_crypto(data: CryptoCreate, db: DbSession, current_user: CurrentUser):
     try:
         lot = CryptoLot(
             quantity_scaled=crypto_quantity_to_scaled(data.quantity),
@@ -416,6 +453,7 @@ def create_crypto(data: CryptoCreate, db: DbSession):
         )
         pricing_inst = data.pricing_instrument or f"CRYPTO/{data.symbol.upper()}/USD"
         holding = CryptoHolding(
+            user_id=current_user.id,
             coingecko_id=data.coingecko_id.lower(),
             symbol=data.symbol.lower(),
             display_name=data.display_name,
@@ -426,12 +464,18 @@ def create_crypto(data: CryptoCreate, db: DbSession):
         db.add(holding)
 
         if data.funding_account_id is not None:
-            wallet = db.get(Account, data.funding_account_id)
+            wallet = db.scalar(
+                select(Account).where(
+                    Account.id == data.funding_account_id,
+                    Account.user_id == current_user.id,
+                )
+            )
             if wallet is None:
                 raise HTTPException(400, "Funding wallet account not found")
             cost_scaled = money_to_scaled(data.total_cost)
             if cost_scaled > 0:
                 event = FinancialEvent(
+                    user_id=current_user.id,
                     event_type=FinancialEventType.ASSET_PURCHASE,
                     transaction_date=data.purchase_date,
                     note=f"Mua {data.symbol.upper()} - SL: {data.quantity}",
@@ -467,11 +511,19 @@ def create_crypto(data: CryptoCreate, db: DbSession):
 
 
 @router.patch("/crypto/{holding_id}")
-def update_crypto(holding_id: int, data: CryptoUpdate, db: DbSession):
+def update_crypto(
+    holding_id: int,
+    data: CryptoUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
+):
     holding = db.scalar(
         select(CryptoHolding)
         .options(selectinload(CryptoHolding.lots))
-        .where(CryptoHolding.id == holding_id)
+        .where(
+            CryptoHolding.id == holding_id,
+            CryptoHolding.user_id == current_user.id,
+        )
     )
     if holding is None:
         raise HTTPException(404, "Crypto holding not found")
@@ -505,14 +557,25 @@ def update_crypto(holding_id: int, data: CryptoUpdate, db: DbSession):
         "quantity": str(sum((lot.quantity for lot in holding.lots), Decimal(0))),
         "purchase_price": str(holding.lots[0].purchase_price) if holding.lots else "0",
         "total_cost": str(holding.lots[0].total_cost) if holding.lots else "0",
-        "purchase_date": holding.lots[0].purchase_date.isoformat() if holding.lots else None,
+        "purchase_date": holding.lots[0].purchase_date.isoformat()
+        if holding.lots
+        else None,
         "excluded_from_reports": holding.excluded_from_reports,
     }
 
 
 @router.delete("/crypto/{holding_id}")
-def delete_crypto(holding_id: int, db: DbSession):
-    holding = db.get(CryptoHolding, holding_id)
+def delete_crypto(
+    holding_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    holding = db.scalar(
+        select(CryptoHolding).where(
+            CryptoHolding.id == holding_id,
+            CryptoHolding.user_id == current_user.id,
+        )
+    )
     if holding is None:
         raise HTTPException(404, "Crypto holding not found")
     db.delete(holding)
@@ -521,21 +584,23 @@ def delete_crypto(holding_id: int, db: DbSession):
 
 
 @router.post("/crypto/sync-prices")
-def sync_crypto_prices(db: DbSession):
+def sync_crypto_prices(db: DbSession, current_user: CurrentUser):
     try:
-        result = sync_crypto_holdings_prices(db)
+        result = sync_crypto_holdings_prices(db, user_id=current_user.id)
         return result
     except Exception as exc:
         raise HTTPException(500, f"Error syncing CoinMarketCap prices: {exc}") from exc
 
 
 @router.post("/metals/sync-prices")
-def sync_metal_prices(db: DbSession):
+def sync_metal_prices(db: DbSession, current_user: CurrentUser):
     try:
         metals = list(
             db.scalars(
-                select(PreciousMetalHolding)
-                .where(PreciousMetalHolding.is_net_worth.is_(True))
+                select(PreciousMetalHolding).where(
+                    PreciousMetalHolding.is_net_worth.is_(True),
+                    PreciousMetalHolding.user_id == current_user.id,
+                )
             )
         )
         as_of = datetime.datetime.now(datetime.UTC)
@@ -549,15 +614,19 @@ def sync_metal_prices(db: DbSession):
                 db, inst, as_of, refresh_interval=datetime.timedelta(seconds=0)
             )
             if quote and quote.valuation_price is not None:
-                updated_items.append({
-                    "id": m.id,
-                    "brand": m.brand.value,
-                    "product_type": m.product_type,
-                    "instrument": inst,
-                    "valuation_price": str(quote.valuation_price),
-                    "provider": quote.provider.code if quote.provider else "BTMC",
-                    "state": quote.state.value if hasattr(quote.state, "value") else str(quote.state),
-                })
+                updated_items.append(
+                    {
+                        "id": m.id,
+                        "brand": m.brand.value,
+                        "product_type": m.product_type,
+                        "instrument": inst,
+                        "valuation_price": str(quote.valuation_price),
+                        "provider": quote.provider.code if quote.provider else "BTMC",
+                        "state": quote.state.value
+                        if hasattr(quote.state, "value")
+                        else str(quote.state),
+                    }
+                )
         db.commit()
         return {
             "updated_count": len(updated_items),

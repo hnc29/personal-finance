@@ -20,7 +20,7 @@ const i18nSrc = readFileSync("lib/i18n.ts", "utf8");
 const composerMatch = page.match(/const composerEventTypes: EventType\[\] = \[([^\]]*)\];/);
 assert.ok(composerMatch, "TASK-036: composerEventTypes allowlist not found in page.tsx");
 const composerTypes = [...composerMatch[1].matchAll(/"([A-Z_]+)"/g)].map(m => m[1]);
-assert.deepEqual(composerTypes, ["EXPENSE", "INCOME", "TRANSFER", "CREDIT_CARD_PAYMENT"], "TASK-036: composerEventTypes no longer exactly [EXPENSE, INCOME, TRANSFER, CREDIT_CARD_PAYMENT]");
+assert.deepEqual(composerTypes, ["EXPENSE", "INCOME", "TRANSFER"], "TASK-036: composerEventTypes no longer exactly [EXPENSE, INCOME, TRANSFER]");
 
 // --- Row-based composer: a tappable AccountRow (icon + name + chevron)
 // replaces the old <select> for every account field, a big amount input
@@ -30,8 +30,7 @@ assert.ok(/<AccountRow label="Select account" accounts=\{activeAccounts\} value=
 assert.ok(/<AccountRow label="From account" accounts=\{activeAccounts\} value=\{transferFrom\}/.test(page) && /<AccountRow label="To account" accounts=\{activeAccounts\} value=\{transferTo\}/.test(page), "TASK-036: TRANSFER's from/to fields are not wired to AccountRow");
 assert.ok(page.includes('className="amount-row"') && page.includes('className="currency-badge"') && page.includes('className="amount-input"'), "TASK-036: the big amount-row/currency-badge/amount-input markup is missing");
 assert.ok(page.includes('className="date-row"') && page.includes("shiftIsoDate") && page.includes("formatIsoDateLabel"), "TASK-036: the date-row prev/next stepper is missing");
-assert.ok(page.includes('className="note-row"'), "TASK-036: the always-visible note row is missing");
-assert.ok(!/<Field label="Note"><input name="note" \/><\/Field>/.test(page), "TASK-036: Note reverted to a hidden '+ Add details' field instead of the always-visible note row");
+assert.ok(page.includes('<Field label="Note">') && page.includes('name="note"'), "TASK-036: Note input field is missing");
 
 // --- Category icon customization: Category.icon exists end-to-end
 // (backend column + schema, frontend type, resolver that prefers the
@@ -41,7 +40,7 @@ assert.ok(/icon: str \| None = None/.test(categorySchema), "TASK-036: CategoryBa
 assert.ok(api.includes("icon: string | null"), "TASK-036: lib/api.ts Category/CategoryInput types don't carry `icon`");
 assert.ok(iconsSrc.includes("export function resolveIconKey(") && /if \(category\.icon && ICON_REGISTRY\[category\.icon\]\) return category\.icon;/.test(iconsSrc), "TASK-036: resolveIconKey no longer prefers a category's own icon override over the name-based default");
 assert.ok(page.includes("function IconPicker("), "TASK-036: IconPicker component (category icon picker UI) not found");
-assert.ok(/<Field label="Icon"><IconPicker value=\{iconKey\}/.test(page), "TASK-036: the category edit form no longer wires up the Icon field");
+assert.ok(/<Field label="Icon">\s*<IconPicker value=\{iconKey\}/.test(page), "TASK-036: the category edit form no longer wires up the Icon field");
 assert.ok(/save\.mutate\(\{ id: editing\?\.id, name: [^,]+, parent_id: parentId, icon: iconKey \}\)/.test(page), "TASK-036: category submit() no longer includes the chosen icon in the save payload");
 
 // --- Icon library breadth: every icon a category can be assigned must

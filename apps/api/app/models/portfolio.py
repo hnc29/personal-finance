@@ -36,7 +36,9 @@ class PortfolioComponentType(str, enum.Enum):
 class PortfolioSnapshot(Base):
     __tablename__ = "portfolio_snapshots"
     __table_args__ = (
-        UniqueConstraint("user_id", "snapshot_date", name="uq_portfolio_snapshot_user_date"),
+        UniqueConstraint(
+            "user_id", "snapshot_date", name="uq_portfolio_snapshot_user_date"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -95,9 +97,7 @@ class PortfolioSnapshotComponent(Base):
         Enum(QuoteState, native_enum=False)
     )
     quote_provider: Mapped[str | None] = mapped_column(String)
-    quoted_at: Mapped[datetime.datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    quoted_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     snapshot: Mapped[PortfolioSnapshot] = relationship(back_populates="components")
 
     @property

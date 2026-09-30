@@ -1,4 +1,5 @@
 """Service for generating bank-statement formatted export datasets, XLSX, and CSV."""
+
 from __future__ import annotations
 
 import csv
@@ -7,6 +8,7 @@ import io
 import re
 from typing import Any
 
+from fastapi import HTTPException
 from openpyxl import Workbook  # type: ignore[import-untyped]
 from openpyxl.styles import (  # type: ignore[import-untyped]
     Alignment,
@@ -69,15 +71,36 @@ def get_statement_data(
     account_id: int | None,
     start_date: datetime.date | None,
     end_date: datetime.date | None,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     """Calculate opening balance, running balances, and statement rows for a date range."""
     # 1. Target Account Info
-    account_obj = db.get(Account, account_id) if account_id is not None else None
+    if account_id is not None:
+        if user_id is not None:
+            account_obj = db.scalar(
+                select(Account).where(
+                    Account.id == account_id, Account.user_id == user_id
+                )
+            )
+            if account_obj is None:
+                raise HTTPException(404, "Account not found")
+        else:
+            account_obj = db.get(Account, account_id)
+            if account_obj is None:
+                raise HTTPException(404, "Account not found")
+    else:
+        account_obj = None
+
     account_name = account_obj.name if account_obj else "Tất cả tài khoản"
     account_type_label = (
         "Tài khoản thanh toán"
-        if account_obj and account_obj.account_type in (AccountType.BANK, AccountType.EWALLET)
-        else ("Thẻ tín dụng" if account_obj and account_obj.account_type == AccountType.CREDIT_CARD else "Sổ tổng hợp")
+        if account_obj
+        and account_obj.account_type in (AccountType.BANK, AccountType.EWALLET)
+        else (
+            "Thẻ tín dụng"
+            if account_obj and account_obj.account_type == AccountType.CREDIT_CARD
+            else "Sổ tổng hợp"
+        )
     )
     currency = account_obj.currency if account_obj else "VND"
 
@@ -91,15 +114,24 @@ def get_statement_data(
         )
         if account_id is not None:
             open_stmt = open_stmt.where(AccountEntry.account_id == account_id)
+        if user_id is not None:
+            open_stmt = open_stmt.where(FinancialEvent.user_id == user_id)
         opening_scaled = int(db.scalar(open_stmt) or 0)
 
     # 3. Query transactions in range and category map
-    category_map = {c.id: c.name for c in db.scalars(select(Category)).all()}
+    cat_stmt = select(Category)
+    if user_id is not None:
+        cat_stmt = cat_stmt.where(Category.user_id == user_id)
+    category_map = {c.id: c.name for c in db.scalars(cat_stmt).all()}
 
     tx_stmt = (
         select(AccountEntry, FinancialEvent)
         .join(FinancialEvent, AccountEntry.financial_event_id == FinancialEvent.id)
-        .order_by(FinancialEvent.transaction_date.asc(), FinancialEvent.id.asc(), AccountEntry.id.asc())
+        .order_by(
+            FinancialEvent.transaction_date.asc(),
+            FinancialEvent.id.asc(),
+            AccountEntry.id.asc(),
+        )
     )
     if account_id is not None:
         tx_stmt = tx_stmt.where(AccountEntry.account_id == account_id)
@@ -107,6 +139,8 @@ def get_statement_data(
         tx_stmt = tx_stmt.where(FinancialEvent.transaction_date >= start_date)
     if end_date is not None:
         tx_stmt = tx_stmt.where(FinancialEvent.transaction_date <= end_date)
+    if user_id is not None:
+        tx_stmt = tx_stmt.where(FinancialEvent.user_id == user_id)
 
     raw_pairs = db.execute(tx_stmt).all()
 
@@ -127,7 +161,9 @@ def get_statement_data(
         amt_decimal = scaled_to_money(amt_scaled)
         running_decimal = scaled_to_money(current_running_scaled)
         ref_no = _extract_ref_number(event)
-        event_label = _EVENT_TYPE_VI_LABELS.get(event.event_type, event.event_type.value)
+        event_label = _EVENT_TYPE_VI_LABELS.get(
+            event.event_type, event.event_type.value
+        )
 
         # Build clean description
         description_parts = []
@@ -139,21 +175,23 @@ def get_statement_data(
             description_parts.append(f"({event.payee_text})")
         description = " ".join(description_parts) or event_label
 
-        rows.append({
-            "id": event.id,
-            "entry_id": entry.id,
-            "account_id": entry.account_id,
-            "transaction_date": event.transaction_date.isoformat(),
-            "effective_date": event.transaction_date.isoformat(),
-            "event_type": event.event_type.value,
-            "event_type_label": event_label,
-            "description": description,
-            "ref_no": ref_no,
-            "amount": str(amt_decimal),
-            "amount_scaled": amt_scaled,
-            "running_balance": str(running_decimal),
-            "running_balance_scaled": current_running_scaled,
-        })
+        rows.append(
+            {
+                "id": event.id,
+                "entry_id": entry.id,
+                "account_id": entry.account_id,
+                "transaction_date": event.transaction_date.isoformat(),
+                "effective_date": event.transaction_date.isoformat(),
+                "event_type": event.event_type.value,
+                "event_type_label": event_label,
+                "description": description,
+                "ref_no": ref_no,
+                "amount": str(amt_decimal),
+                "amount_scaled": amt_scaled,
+                "running_balance": str(running_decimal),
+                "running_balance_scaled": current_running_scaled,
+            }
+        )
 
     opening_balance_decimal = scaled_to_money(opening_scaled)
     closing_balance_decimal = scaled_to_money(current_running_scaled)
@@ -186,9 +224,10 @@ def generate_statement_xlsx(
     account_id: int | None,
     start_date: datetime.date | None,
     end_date: datetime.date | None,
+    user_id: int | None = None,
 ) -> io.BytesIO:
     """Generate a styled Excel workbook formatted as a formal bank statement."""
-    data = get_statement_data(db, account_id, start_date, end_date)
+    data = get_statement_data(db, account_id, start_date, end_date, user_id=user_id)
     wb = Workbook()
     ws = wb.active
     ws.title = "Sao Kê Tài Khoản"
@@ -198,7 +237,9 @@ def generate_statement_xlsx(
     meta_bold_font = Font(name="Arial", size=10, bold=True)
     meta_font = Font(name="Arial", size=10)
     header_font = Font(name="Arial", size=10, bold=True, color="FFFFFF")
-    header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    header_fill = PatternFill(
+        start_color="1E3A8A", end_color="1E3A8A", fill_type="solid"
+    )
     row_font = Font(name="Arial", size=9)
     green_font = Font(name="Arial", size=9, color="16A34A", bold=True)
     red_font = Font(name="Arial", size=9, color="DC2626", bold=True)
@@ -234,26 +275,42 @@ def generate_statement_xlsx(
 
     ws["A5"] = "Số dư đầu kỳ:"
     ws["A5"].font = meta_bold_font
-    ws["B5"] = f"{_format_scaled_money(money_to_scaled(data['opening_balance']))} {data['account']['currency']}"
+    ws["B5"] = (
+        f"{_format_scaled_money(money_to_scaled(data['opening_balance']))} {data['account']['currency']}"
+    )
     ws["B5"].font = meta_font
 
     ws["D5"] = "Số dư cuối kỳ:"
     ws["D5"].font = meta_bold_font
-    ws["E5"] = f"{_format_scaled_money(money_to_scaled(data['closing_balance']))} {data['account']['currency']}"
+    ws["E5"] = (
+        f"{_format_scaled_money(money_to_scaled(data['closing_balance']))} {data['account']['currency']}"
+    )
     ws["E5"].font = meta_font
 
     ws["A6"] = "Tổng tiền vào (+):"
     ws["A6"].font = meta_bold_font
-    ws["B6"] = f"+{_format_scaled_money(money_to_scaled(data['total_in']))} {data['account']['currency']}"
+    ws["B6"] = (
+        f"+{_format_scaled_money(money_to_scaled(data['total_in']))} {data['account']['currency']}"
+    )
     ws["B6"].font = Font(name="Arial", size=10, color="16A34A", bold=True)
 
     ws["D6"] = "Tổng tiền ra (-):"
     ws["D6"].font = meta_bold_font
-    ws["E6"] = f"-{_format_scaled_money(money_to_scaled(data['total_out']))} {data['account']['currency']}"
+    ws["E6"] = (
+        f"-{_format_scaled_money(money_to_scaled(data['total_out']))} {data['account']['currency']}"
+    )
     ws["E6"].font = Font(name="Arial", size=10, color="DC2626", bold=True)
 
     # 3. Table Headers
-    headers = ["Ngày", "Ngày hiệu lực", "Loại giao dịch", "Nội dung", "Ref#", "Số tiền giao dịch", "Số dư"]
+    headers = [
+        "Ngày",
+        "Ngày hiệu lực",
+        "Loại giao dịch",
+        "Nội dung",
+        "Ref#",
+        "Số tiền giao dịch",
+        "Số dư",
+    ]
     ws.append([])  # Row 7 empty
     ws.append(headers)  # Row 8
     header_row_idx = 8
@@ -262,7 +319,12 @@ def generate_statement_xlsx(
         cell = ws.cell(row=header_row_idx, column=col_idx)
         cell.font = header_font
         cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center" if col_idx in (1, 2, 3, 5) else ("right" if col_idx in (6, 7) else "left"), vertical="center")
+        cell.alignment = Alignment(
+            horizontal="center"
+            if col_idx in (1, 2, 3, 5)
+            else ("right" if col_idx in (6, 7) else "left"),
+            vertical="center",
+        )
 
     # 4. Table Rows
     curr_row = header_row_idx + 1
@@ -287,14 +349,20 @@ def generate_statement_xlsx(
         ws.cell(row=curr_row, column=1).alignment = Alignment(horizontal="center")
         ws.cell(row=curr_row, column=2).alignment = Alignment(horizontal="center")
         ws.cell(row=curr_row, column=3).alignment = Alignment(horizontal="center")
-        ws.cell(row=curr_row, column=4).alignment = Alignment(horizontal="left", wrap_text=True)
+        ws.cell(row=curr_row, column=4).alignment = Alignment(
+            horizontal="left", wrap_text=True
+        )
         ws.cell(row=curr_row, column=5).alignment = Alignment(horizontal="center")
         ws.cell(row=curr_row, column=6).alignment = Alignment(horizontal="right")
         ws.cell(row=curr_row, column=7).alignment = Alignment(horizontal="right")
 
         for c in range(1, 8):
             cell = ws.cell(row=curr_row, column=c)
-            cell.font = green_font if c == 6 and amount_scaled > 0 else (red_font if c == 6 and amount_scaled < 0 else row_font)
+            cell.font = (
+                green_font
+                if c == 6 and amount_scaled > 0
+                else (red_font if c == 6 and amount_scaled < 0 else row_font)
+            )
             cell.border = thin_border
 
         curr_row += 1
@@ -315,9 +383,10 @@ def generate_statement_csv(
     account_id: int | None,
     start_date: datetime.date | None,
     end_date: datetime.date | None,
+    user_id: int | None = None,
 ) -> io.StringIO:
     """Generate a CSV string formatted with statement headers and running balances in UTF-8 BOM."""
-    data = get_statement_data(db, account_id, start_date, end_date)
+    data = get_statement_data(db, account_id, start_date, end_date, user_id=user_id)
     out = io.StringIO()
     writer = csv.writer(out)
 
@@ -325,27 +394,44 @@ def generate_statement_csv(
     writer.writerow(
         ["SAO KÊ TÀI KHOẢN", _sanitize_statement_text(data["account"]["name"])]
     )
-    writer.writerow(["Thời gian truy vấn", f"{data['period']['start_date'] or 'Từ đầu'} - {data['period']['end_date'] or 'Đến nay'}"])
+    writer.writerow(
+        [
+            "Thời gian truy vấn",
+            f"{data['period']['start_date'] or 'Từ đầu'} - {data['period']['end_date'] or 'Đến nay'}",
+        ]
+    )
     currency = _sanitize_statement_text(data["account"]["currency"])
     writer.writerow(["Số dư đầu kỳ", data["opening_balance"], currency])
     writer.writerow(["Số dư cuối kỳ", data["closing_balance"], currency])
     writer.writerow([])
 
     # Table headers
-    writer.writerow(["Ngày", "Ngày hiệu lực", "Loại giao dịch", "Nội dung", "Ref#", "Số tiền giao dịch", "Số dư"])
+    writer.writerow(
+        [
+            "Ngày",
+            "Ngày hiệu lực",
+            "Loại giao dịch",
+            "Nội dung",
+            "Ref#",
+            "Số tiền giao dịch",
+            "Số dư",
+        ]
+    )
     for tx in data["transactions"]:
         amount_scaled = tx["amount_scaled"]
         amt_str = _format_scaled_money(amount_scaled)
         if amount_scaled > 0:
             amt_str = f"+{amt_str}"
         run_bal_str = _format_scaled_money(tx["running_balance_scaled"])
-        writer.writerow([
-            tx["transaction_date"],
-            tx["effective_date"],
-            tx["event_type_label"],
-            _sanitize_statement_text(tx["description"]),
-            _sanitize_statement_text(tx["ref_no"]),
-            amt_str,
-            run_bal_str,
-        ])
+        writer.writerow(
+            [
+                tx["transaction_date"],
+                tx["effective_date"],
+                tx["event_type_label"],
+                _sanitize_statement_text(tx["description"]),
+                _sanitize_statement_text(tx["ref_no"]),
+                amt_str,
+                run_bal_str,
+            ]
+        )
     return out

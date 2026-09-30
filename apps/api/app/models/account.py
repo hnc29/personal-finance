@@ -79,5 +79,3 @@ class Account(Base):
     @credit_limit.setter
     def credit_limit(self, value: object) -> None:
         """Allow declarative constructor without failing."""
-
-

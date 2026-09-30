@@ -69,4 +69,5 @@ class ReconciliationCandidate(Base):
         Index("ix_reconciliation_candidates_state", "state"),
     )
 
+
 __all__ = ["ReconciliationCandidate", "ReconciliationCandidateState"]

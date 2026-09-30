@@ -51,7 +51,9 @@ class UrllibHttpClient:
                 body = response.read().decode("utf-8")
                 status = getattr(response, "status", 200)
         except urllib.error.HTTPError as exc:
-            return UrllibResponse(exc.read().decode("utf-8", errors="replace"), exc.code)
+            return UrllibResponse(
+                exc.read().decode("utf-8", errors="replace"), exc.code
+            )
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise HttpRequestError(str(exc)) from exc
         return UrllibResponse(body, status)

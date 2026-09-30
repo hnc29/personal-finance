@@ -1,5 +1,3 @@
-"""HTTP routes for full database backup and restore operations."""
-
 from __future__ import annotations
 
 import datetime
@@ -15,6 +13,7 @@ from pydantic import BaseModel
 
 from app.core.config import PROJECT_ROOT, settings
 from app.core.database import engine
+from app.core.security import CurrentAdmin
 from app.services.backup import InvalidBackupError, create_backup, validate_backup
 
 router = APIRouter(prefix="/api/v1/backup", tags=["backup"])
@@ -31,7 +30,7 @@ class BackupRestoreRequest(BaseModel):
 
 
 @router.get("/list")
-def list_backups() -> list[dict[str, object]]:
+def list_backups(_current_admin: CurrentAdmin) -> list[dict[str, object]]:
     """List all available backup files in the project backup directory."""
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     backups: list[dict[str, object]] = []
@@ -42,9 +41,7 @@ def list_backups() -> list[dict[str, object]]:
             or path.name.startswith("backup_")
         ):
             stat = path.stat()
-            created_dt = datetime.datetime.fromtimestamp(
-                stat.st_mtime, tz=datetime.UTC
-            )
+            created_dt = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.UTC)
             backups.append(
                 {
                     "filename": path.name,
@@ -60,7 +57,7 @@ def list_backups() -> list[dict[str, object]]:
 
 
 @router.post("/create")
-def create_backup_endpoint(data: BackupCreateRequest):
+def create_backup_endpoint(data: BackupCreateRequest, _current_admin: CurrentAdmin):
     """Create a full backup of the database either in project folder or for browser download."""
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     now_str = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d_%H-%M-%S")
@@ -96,7 +93,7 @@ def create_backup_endpoint(data: BackupCreateRequest):
 
 
 @router.get("/download/{filename}")
-def download_backup_file(filename: str):
+def download_backup_file(filename: str, _current_admin: CurrentAdmin):
     """Download an existing backup file from project backup directory."""
     safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "", filename)
     target_path = BACKUP_DIR / safe_name
@@ -111,7 +108,7 @@ def download_backup_file(filename: str):
 
 
 @router.delete("/{filename}")
-def delete_backup_file(filename: str):
+def delete_backup_file(filename: str, _current_admin: CurrentAdmin):
     """Delete an existing backup file from project backup directory."""
     safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "", filename)
     target_path = BACKUP_DIR / safe_name
@@ -155,7 +152,7 @@ def _perform_restore(candidate_path: Path) -> dict[str, object]:
 
 
 @router.post("/restore/project")
-def restore_from_project(data: BackupRestoreRequest):
+def restore_from_project(data: BackupRestoreRequest, _current_admin: CurrentAdmin):
     """Restore database from an existing file in project backup folder."""
     safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "", data.filename)
     candidate_path = BACKUP_DIR / safe_name
@@ -163,13 +160,18 @@ def restore_from_project(data: BackupRestoreRequest):
         raise HTTPException(404, f"Không tìm thấy file sao lưu {safe_name}")
 
     if candidate_path.suffix not in [".db", ".sqlite", ".sqlite3"]:
-        raise HTTPException(400, "Chỉ có thể khôi phục trực tiếp từ file SQLite (.db / .sqlite)")
+        raise HTTPException(
+            400, "Chỉ có thể khôi phục trực tiếp từ file SQLite (.db / .sqlite)"
+        )
 
     return _perform_restore(candidate_path)
 
 
 @router.post("/restore/upload")
-def restore_from_upload(payload: bytes = Body(...)):
+def restore_from_upload(
+    _current_admin: CurrentAdmin,
+    payload: bytes = Body(...),
+):
     """Restore database from uploaded backup binary bytes."""
     temp_dir = Path(tempfile.gettempdir())
     now_str = datetime.datetime.now(tz=datetime.UTC).strftime("%Y%m%d_%H%M%S")

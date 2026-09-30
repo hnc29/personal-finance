@@ -40,7 +40,10 @@ def create_backup(source: Path, destination: Path) -> None:
         raise FileExistsError(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with _connect(source, read_only=True) as source_db, _connect(destination) as target_db:
+        with (
+            _connect(source, read_only=True) as source_db,
+            _connect(destination) as target_db,
+        ):
             source_db.backup(target_db)
         validate_backup(destination)
     except Exception:

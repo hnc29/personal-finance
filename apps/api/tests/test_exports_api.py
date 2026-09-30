@@ -246,9 +246,7 @@ def test_statement_exports_sanitize_only_untrusted_text_cells(
     assert worksheet["F9"].value == "-12.34"
     assert worksheet["G9"].value == "-12.34"
 
-    csv_response = client.get(
-        f"/api/v1/exports/statement.csv?account_id={account_id}"
-    )
+    csv_response = client.get(f"/api/v1/exports/statement.csv?account_id={account_id}")
     assert csv_response.status_code == 200
     rows = list(csv.reader(io.StringIO(csv_response.content.decode("utf-8-sig"))))
     assert rows[0][1] == "'=SYNTHETIC_ACCOUNT()"
@@ -278,9 +276,7 @@ def test_statement_csv_preserves_exact_scaled_money_values(
         )
         assert response.status_code == 201
 
-    response = client.get(
-        f"/api/v1/exports/statement.csv?account_id={account_id}"
-    )
+    response = client.get(f"/api/v1/exports/statement.csv?account_id={account_id}")
     assert response.status_code == 200
     rows = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
 
@@ -324,9 +320,7 @@ def test_statement_xlsx_preserves_exact_scaled_money_values(
         )
         assert response.status_code == 201
 
-    response = client.get(
-        f"/api/v1/exports/statement.xlsx?account_id={account_id}"
-    )
+    response = client.get(f"/api/v1/exports/statement.xlsx?account_id={account_id}")
     assert response.status_code == 200
     worksheet = load_workbook(io.BytesIO(response.content)).active
 

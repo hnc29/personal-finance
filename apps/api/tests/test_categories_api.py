@@ -44,9 +44,7 @@ class FakeCategoryStore:
     def get(self, category_id: int) -> Category | None:
         return self._rows.get(category_id)
 
-    def update(
-        self, category_id: int, data: CategoryUpdate
-    ) -> Category | None:
+    def update(self, category_id: int, data: CategoryUpdate) -> Category | None:
         category = self._rows.get(category_id)
         if category is None:
             return None
@@ -69,29 +67,29 @@ def store(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeCategoryStore]:
     monkeypatch.setattr(
         category_service,
         "create_category",
-        lambda db, data: fake.create(data),
+        lambda db, data, *a, **kw: fake.create(data),
     )
     monkeypatch.setattr(
         category_service,
         "list_categories",
-        lambda db: fake.list(),
+        lambda db, *a, **kw: fake.list(),
     )
     monkeypatch.setattr(
         category_service,
         "get_category",
-        lambda db, category_id: fake.get(category_id),
+        lambda db, category_id, *a, **kw: fake.get(category_id),
     )
     monkeypatch.setattr(
         category_service,
         "update_category",
-        lambda db, category_id, data: fake.update(category_id, data),
+        lambda db, category_id, data, *a, **kw: fake.update(category_id, data),
     )
 
     app.dependency_overrides[get_db] = lambda: None
     try:
         yield fake
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture

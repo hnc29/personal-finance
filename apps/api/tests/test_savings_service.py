@@ -58,16 +58,18 @@ class FakeSession:
         return [item for item in self.added if hasattr(item, "event_type")]
 
 
-def wallet(account_id: int) -> Account:
+def wallet(account_id: int, user_id: int = 1) -> Account:
     return Account(
         id=account_id,
+        user_id=user_id,
         name=f"Synthetic wallet {account_id}",
         account_type=AccountType.BANK,
     )
 
 
-def savings_account(*, principal: str = "1000") -> SavingsAccount:
+def savings_account(*, principal: str = "1000", user_id: int = 1) -> SavingsAccount:
     return SavingsAccount(
+        user_id=user_id,
         product=SavingsProduct(name="Synthetic product", institution="Example"),
         name="Synthetic savings",
         principal=Decimal(principal),

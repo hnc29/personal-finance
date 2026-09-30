@@ -7,6 +7,7 @@ Revises: 0001_core
 Create Date: 2026-08-22
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -70,9 +71,7 @@ def upgrade() -> None:
         sa.Column("account_id", sa.Integer(), nullable=False),
         sa.Column("amount_scaled", sa.BigInteger(), nullable=False),
         sa.ForeignKeyConstraint(["account_id"], ["accounts.id"]),
-        sa.ForeignKeyConstraint(
-            ["financial_event_id"], ["financial_events.id"]
-        ),
+        sa.ForeignKeyConstraint(["financial_event_id"], ["financial_events.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -92,14 +91,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_index("ix_account_entries_account_id", table_name="account_entries")
-    op.drop_index(
-        "ix_account_entries_financial_event_id", table_name="account_entries"
-    )
+    op.drop_index("ix_account_entries_financial_event_id", table_name="account_entries")
     op.drop_table("account_entries")
-    op.drop_index(
-        "ix_financial_events_category_id", table_name="financial_events"
-    )
-    op.drop_index(
-        "ix_financial_events_transaction_date", table_name="financial_events"
-    )
+    op.drop_index("ix_financial_events_category_id", table_name="financial_events")
+    op.drop_index("ix_financial_events_transaction_date", table_name="financial_events")
     op.drop_table("financial_events")

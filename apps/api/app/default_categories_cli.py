@@ -11,7 +11,9 @@ from app.services.default_categories import (
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed starter finance categories")
-    parser.add_argument("command", nargs="?", choices=("merge", "check"), default="merge")
+    parser.add_argument(
+        "command", nargs="?", choices=("merge", "check"), default="merge"
+    )
     args = parser.parse_args()
     with SessionLocal() as db:
         if args.command == "check":

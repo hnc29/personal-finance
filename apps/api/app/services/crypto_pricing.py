@@ -99,12 +99,20 @@ class CoinGeckoPriceAdapter:
             if timestamp_value != timestamp_value.to_integral_value():
                 raise ValueError("timestamp must be an integer")
             timestamp = int(timestamp_value)
-        except (KeyError, TypeError, ValueError, InvalidOperation, json.JSONDecodeError) as exc:
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            InvalidOperation,
+            json.JSONDecodeError,
+        ) as exc:
             raise CryptoPriceSourceError(
                 f"exact CoinGecko product {coin_id!r}/{currency!r} is unavailable"
             ) from exc
         if not price.is_finite() or price < 0:
-            raise CryptoPriceSourceError("CoinGecko price must be finite and nonnegative")
+            raise CryptoPriceSourceError(
+                "CoinGecko price must be finite and nonnegative"
+            )
         if timestamp < 0:
             raise CryptoPriceSourceError("CoinGecko timestamp must be nonnegative")
         quoted_at = datetime.datetime.fromtimestamp(timestamp, tz=datetime.UTC)
@@ -164,7 +172,13 @@ class CoinMarketCapPriceAdapter:
                 rate = Decimal(str(rate_val))
                 if rate > 0 and rate.is_finite():
                     return rate
-        except (KeyError, TypeError, ValueError, InvalidOperation, json.JSONDecodeError):
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            InvalidOperation,
+            json.JSONDecodeError,
+        ):
             pass
         return Decimal("26000.0000")
 
@@ -216,7 +230,9 @@ class CoinMarketCapPriceAdapter:
             }
 
             quote = PriceQuote(
-                provider=PricingProvider(code=self.provider_code, name=self.provider_name),
+                provider=PricingProvider(
+                    code=self.provider_code, name=self.provider_name
+                ),
                 product_code=f"{symbol}/USD",
                 match_level=QuoteMatchLevel.EXACT,
                 state=QuoteState.LIVE,
@@ -239,10 +255,12 @@ class CoinMarketCapPriceAdapter:
 def sync_crypto_holdings_prices(
     db: Session,
     client: HttpClient | None = None,
+    user_id: int | None = None,
 ) -> dict[str, object]:
     """Sync live prices from CoinMarketCap for all active crypto holdings."""
     if client is None:
         from app.services.http_client import UrllibHttpClient
+
         client = UrllibHttpClient()
 
     adapter = CoinMarketCapPriceAdapter(client)
@@ -254,11 +272,16 @@ def sync_crypto_holdings_prices(
         select(PricingProvider).where(PricingProvider.code == adapter.provider_code)
     )
     if provider_rec is None:
-        provider_rec = PricingProvider(code=adapter.provider_code, name=adapter.provider_name)
+        provider_rec = PricingProvider(
+            code=adapter.provider_code, name=adapter.provider_name
+        )
         db.add(provider_rec)
         db.flush()
 
-    holdings = list(db.scalars(select(CryptoHolding)))
+    stmt = select(CryptoHolding)
+    if user_id is not None:
+        stmt = stmt.where(CryptoHolding.user_id == user_id)
+    holdings = list(db.scalars(stmt))
     updated_items = []
 
     for h in holdings:
@@ -280,7 +303,9 @@ def sync_crypto_holdings_prices(
         h.pricing_instrument = canonical_inst
 
         inst_rec = db.scalar(
-            select(PricingInstrument).where(PricingInstrument.canonical_code == canonical_inst)
+            select(PricingInstrument).where(
+                PricingInstrument.canonical_code == canonical_inst
+            )
         )
         if inst_rec is None:
             inst_rec = PricingInstrument(
@@ -314,14 +339,16 @@ def sync_crypto_holdings_prices(
             )
             db.add(new_quote)
 
-        updated_items.append({
-            "id": h.id,
-            "symbol": sym,
-            "display_name": h.display_name,
-            "price_usd": str(price_usd),
-            "price_vnd": str(price_vnd),
-            "usd_vnd_rate": str(usd_vnd_rate),
-        })
+        updated_items.append(
+            {
+                "id": h.id,
+                "symbol": sym,
+                "display_name": h.display_name,
+                "price_usd": str(price_usd),
+                "price_vnd": str(price_vnd),
+                "usd_vnd_rate": str(usd_vnd_rate),
+            }
+        )
 
     db.commit()
     return {
@@ -329,4 +356,3 @@ def sync_crypto_holdings_prices(
         "usd_vnd_rate": str(usd_vnd_rate),
         "items": updated_items,
     }
-

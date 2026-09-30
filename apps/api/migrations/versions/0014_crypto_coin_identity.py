@@ -137,9 +137,13 @@ def _create_crypto_lots() -> None:
 def _detach_lots() -> list[dict[str, object]]:
     """Capture every ``crypto_lots`` row and drop the table (see module docstring)."""
     connection = op.get_bind()
-    rows = connection.execute(
-        sa.text(f"SELECT {', '.join(_LOT_COLUMNS)} FROM crypto_lots")
-    ).mappings().all()
+    rows = (
+        connection.execute(
+            sa.text(f"SELECT {', '.join(_LOT_COLUMNS)} FROM crypto_lots")
+        )
+        .mappings()
+        .all()
+    )
     captured = [dict(row) for row in rows]
     op.drop_table("crypto_lots")
     return captured
@@ -150,9 +154,7 @@ def _reattach_lots(rows: list[dict[str, object]]) -> None:
     if not rows:
         return
     connection = op.get_bind()
-    lots_table = sa.table(
-        "crypto_lots", *(sa.column(name) for name in _LOT_COLUMNS)
-    )
+    lots_table = sa.table("crypto_lots", *(sa.column(name) for name in _LOT_COLUMNS))
     connection.execute(sa.insert(lots_table), rows)
 
 

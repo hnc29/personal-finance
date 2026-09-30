@@ -189,7 +189,9 @@ def test_btmc_parses_real_site_layout_with_text_timestamp_and_unit_scale() -> No
     )
 
 
-def test_btmc_tolerates_missing_sell_price_and_uses_sjc_and_raw_reference_rows() -> None:
+def test_btmc_tolerates_missing_sell_price_and_uses_sjc_and_raw_reference_rows() -> (
+    None
+):
     client, _ = _client_for("btmc_prices_real.html")
     adapter = BtmcPriceAdapter(
         client,

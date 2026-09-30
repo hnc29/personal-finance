@@ -48,7 +48,10 @@ def test_cors_origins_accept_documented_json_array() -> None:
     from app.core.config import Settings
 
     configured = Settings.model_validate(
-        {"cors_origins": '["http://localhost:3000", "http://192.168.1.10:3000"]'}
+        {
+            "cors_origins": '["http://localhost:3000", "http://192.168.1.10:3000"]',
+            "secret_key": "synthetic-strong-test-secret-key-32-chars-long!",
+        }
     )
     assert configured.cors_origins == [
         "http://localhost:3000",

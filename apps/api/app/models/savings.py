@@ -188,9 +188,7 @@ class SavingsTerm(Base):
         default=SavingsTermStatus.ACTIVE,
         server_default="ACTIVE",
     )
-    actual_interest_scaled: Mapped[int | None] = mapped_column(
-        Integer, nullable=True
-    )
+    actual_interest_scaled: Mapped[int | None] = mapped_column(Integer, nullable=True)
     closed_at: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     account: Mapped[SavingsAccount] = relationship(
         back_populates="terms", foreign_keys=[savings_account_id]
@@ -217,9 +215,7 @@ class SavingsTerm(Base):
 
     @actual_interest.setter
     def actual_interest(self, value: Decimal | str | int | None) -> None:
-        self.actual_interest_scaled = (
-            None if value is None else money_to_scaled(value)
-        )
+        self.actual_interest_scaled = None if value is None else money_to_scaled(value)
 
     @property
     def annual_rate(self) -> Decimal:

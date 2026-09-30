@@ -39,17 +39,17 @@ def create_category(
 ) -> Category:
     """Create a new category, validating any ``parent_id``."""
     try:
-        try:
-            return category_service.create_category(db, data, user_id=current_user.id)
-        except TypeError:
-            return category_service.create_category(db, data)
+        return category_service.create_category(db, data, user_id=current_user.id)
     except UnknownParentError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Parent category not found",
         ) from exc
     except InvalidHierarchyError as exc:
-        raise HTTPException(status_code=400, detail="Category hierarchy exceeds three levels or contains a cycle") from exc
+        raise HTTPException(
+            status_code=400,
+            detail="Category hierarchy exceeds three levels or contains a cycle",
+        ) from exc
 
 
 @router.get("", response_model=list[CategoryRead])
@@ -58,10 +58,7 @@ def list_categories(
     current_user: CurrentUser,
 ) -> list[Category]:
     """Return every category ordered by id."""
-    try:
-        return category_service.list_categories(db, user_id=current_user.id)
-    except TypeError:
-        return category_service.list_categories(db)
+    return category_service.list_categories(db, user_id=current_user.id)
 
 
 @router.get("/{category_id}", response_model=CategoryRead)
@@ -71,10 +68,9 @@ def get_category(
     current_user: CurrentUser,
 ) -> Category:
     """Return a single category or 404 if it does not exist."""
-    try:
-        category = category_service.get_category(db, category_id, user_id=current_user.id)
-    except TypeError:
-        category = category_service.get_category(db, category_id)
+    category = category_service.get_category(
+        db, category_id, user_id=current_user.id
+    )
     if category is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -85,11 +81,16 @@ def get_category(
 
 @router.patch("/{category_id}", response_model=CategoryRead)
 def update_category(
-    category_id: int, data: CategoryUpdate, db: DbSession
+    category_id: int,
+    data: CategoryUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> Category:
     """Apply a partial update or 404 if the category does not exist."""
     try:
-        category = category_service.update_category(db, category_id, data)
+        category = category_service.update_category(
+            db, category_id, data, user_id=current_user.id
+        )
     except SelfParentError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -101,7 +102,10 @@ def update_category(
             detail="Parent category not found",
         ) from exc
     except InvalidHierarchyError as exc:
-        raise HTTPException(status_code=400, detail="Category hierarchy exceeds three levels or contains a cycle") from exc
+        raise HTTPException(
+            status_code=400,
+            detail="Category hierarchy exceeds three levels or contains a cycle",
+        ) from exc
     if category is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

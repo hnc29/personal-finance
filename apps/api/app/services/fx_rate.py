@@ -79,12 +79,20 @@ class UsdVndRateProvider:
             payload = json.loads(response.text, parse_float=Decimal, parse_int=Decimal)
             raw_rate = payload["rates"]["VND"]
             rate = raw_rate if isinstance(raw_rate, Decimal) else Decimal(str(raw_rate))
-        except (KeyError, TypeError, ValueError, InvalidOperation, json.JSONDecodeError) as exc:
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            InvalidOperation,
+            json.JSONDecodeError,
+        ) as exc:
             raise FxRateUnavailableError(
                 "USD/VND rate is missing or malformed in the FX source response"
             ) from exc
         if not rate.is_finite() or rate <= 0:
-            raise FxRateUnavailableError("USD/VND rate must be a finite, positive number")
+            raise FxRateUnavailableError(
+                "USD/VND rate must be a finite, positive number"
+            )
         self._rate = FxRate(rate=rate, as_of=now, source=self.source_name)
 
     def get_rate(self) -> FxRate:

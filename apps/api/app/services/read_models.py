@@ -29,35 +29,91 @@ from app.services.pricing import current_quote, resolve_metal_instrument
 def money(value: Decimal) -> str:
     return format(scaled_to_money(money_to_scaled(value)), ".4f")
 
+
 def quote_meta(quote: PriceQuote | None) -> QuoteMeta:
     return QuoteMeta(
         state=quote.state.value if quote else "UNAVAILABLE",
         provider=quote.provider.code if quote and quote.provider else None,
         quoted_at=quote.quoted_at if quote else None,
         observed_at=quote.observed_at if quote else None,
-        valuation_price=money(quote.valuation_price) if quote and quote.valuation_price is not None else None,
+        valuation_price=money(quote.valuation_price)
+        if quote and quote.valuation_price is not None
+        else None,
     )
 
-def portfolio_overview(db: Session) -> PortfolioOverview:
+
+def portfolio_overview(
+    db: Session, user_id: int | None = None
+) -> PortfolioOverview:
     as_of = datetime.datetime.now(datetime.UTC)
-    accounts = list(db.scalars(select(Account).order_by(Account.id)))
+    stmt_acc = select(Account).order_by(Account.id)
+    if user_id is not None:
+        stmt_acc = stmt_acc.where(Account.user_id == user_id)
+    accounts = list(db.scalars(stmt_acc))
     components: list[PortfolioComponentValue] = []
     account_rows: list[PortfolioRow] = []
     valuation_complete = True
     for account in accounts:
-        balance = int(db.scalar(select(func.coalesce(func.sum(AccountEntry.amount_scaled), 0)).where(AccountEntry.account_id == account.id)) or 0)
+        balance = int(
+            db.scalar(
+                select(func.coalesce(func.sum(AccountEntry.amount_scaled), 0)).where(
+                    AccountEntry.account_id == account.id
+                )
+            )
+            or 0
+        )
         component_type = getattr(PortfolioComponentType, account.account_type.value)
         component_value = scaled_to_money(balance)
-        components.append(PortfolioComponentValue(component_type=component_type, source_key=f"account:{account.id}", value=component_value))
-        account_rows.append(PortfolioRow(id=account.id, name=account.name, value=money(component_value)))
-    savings = list(db.scalars(select(SavingsAccount).where(SavingsAccount.status == "OPEN").order_by(SavingsAccount.id)))
+        components.append(
+            PortfolioComponentValue(
+                component_type=component_type,
+                source_key=f"account:{account.id}",
+                value=component_value,
+            )
+        )
+        account_rows.append(
+            PortfolioRow(id=account.id, name=account.name, value=money(component_value))
+        )
+    stmt_savings = (
+        select(SavingsAccount)
+        .where(SavingsAccount.status == "OPEN")
+        .order_by(SavingsAccount.id)
+    )
+    if user_id is not None:
+        stmt_savings = stmt_savings.where(SavingsAccount.user_id == user_id)
+    savings = list(db.scalars(stmt_savings))
     for item in savings:
         savings_value = item.principal
-        components.append(PortfolioComponentValue(component_type=PortfolioComponentType.SAVINGS, source_key=f"savings:{item.id}", value=savings_value))
-    savings_rows = [PortfolioRow(id=x.id, name=x.name, value=money(x.principal), excluded_from_reports=x.excluded_from_reports) for x in savings]
+        components.append(
+            PortfolioComponentValue(
+                component_type=PortfolioComponentType.SAVINGS,
+                source_key=f"savings:{item.id}",
+                value=savings_value,
+            )
+        )
+    savings_rows = [
+        PortfolioRow(
+            id=x.id,
+            name=x.name,
+            value=money(x.principal),
+            excluded_from_reports=x.excluded_from_reports,
+        )
+        for x in savings
+    ]
     cards = [x for x in accounts if x.account_type is AccountType.CREDIT_CARD]
-    card_rows = [PortfolioRow(id=x.id, name=x.name, value=account_rows[accounts.index(x)].value) for x in cards]
-    metals = list(db.scalars(select(PreciousMetalHolding).where(PreciousMetalHolding.is_net_worth.is_(True)).options(selectinload(PreciousMetalHolding.lots)).order_by(PreciousMetalHolding.id)))
+    card_rows = [
+        PortfolioRow(id=x.id, name=x.name, value=account_rows[accounts.index(x)].value)
+        for x in cards
+    ]
+    stmt_metals = (
+        select(PreciousMetalHolding)
+        .where(PreciousMetalHolding.is_net_worth.is_(True))
+        .options(selectinload(PreciousMetalHolding.lots))
+        .order_by(PreciousMetalHolding.id)
+    )
+    if user_id is not None:
+        stmt_metals = stmt_metals.where(PreciousMetalHolding.user_id == user_id)
+    metals = list(db.scalars(stmt_metals))
     metal_rows = []
     for metal_h in metals:
         instrument = metal_h.pricing_instrument or resolve_metal_instrument(
@@ -73,12 +129,17 @@ def portfolio_overview(db: Session) -> PortfolioOverview:
         # whichever PriceQuote comes back.
         quote = get_or_refresh_metal_quote(db, instrument, as_of)
         metal_value: Decimal | None = None
-        if quote and quote.valuation_price is not None and quote.state is not QuoteState.UNAVAILABLE:
+        if (
+            quote
+            and quote.valuation_price is not None
+            and quote.state is not QuoteState.UNAVAILABLE
+        ):
             total_grams = scaled_to_money(sum(l.grams_scaled for l in metal_h.lots))
             source_unit = "CHI"
             if quote.source_metadata:
                 try:
                     import json
+
                     meta = json.loads(quote.source_metadata)
                     source_unit = str(meta.get("source_unit", "CHI"))
                 except (json.JSONDecodeError, KeyError, TypeError):
@@ -122,14 +183,31 @@ def portfolio_overview(db: Session) -> PortfolioOverview:
                 excluded_from_reports=metal_h.excluded_from_reports,
             )
         )
-    cryptos = list(db.scalars(select(CryptoHolding).where(CryptoHolding.is_net_worth.is_(True)).options(selectinload(CryptoHolding.lots)).order_by(CryptoHolding.id)))
+    stmt_crypto = (
+        select(CryptoHolding)
+        .where(CryptoHolding.is_net_worth.is_(True))
+        .options(selectinload(CryptoHolding.lots))
+        .order_by(CryptoHolding.id)
+    )
+    if user_id is not None:
+        stmt_crypto = stmt_crypto.where(CryptoHolding.user_id == user_id)
+    cryptos = list(db.scalars(stmt_crypto))
     crypto_rows: list[PortfolioRow] = []
     for crypto_h in cryptos:
-        instrument = crypto_h.pricing_instrument or f"CRYPTO/{crypto_h.symbol.upper()}/USD"
+        instrument = (
+            crypto_h.pricing_instrument or f"CRYPTO/{crypto_h.symbol.upper()}/USD"
+        )
         quote = current_quote(db, instrument, as_of)
         crypto_value: Decimal | None = None
-        if quote and quote.valuation_price is not None and quote.state is not QuoteState.UNAVAILABLE:
-            raw_val = sum((lot.quantity for lot in crypto_h.lots), Decimal(0)) * quote.valuation_price
+        if (
+            quote
+            and quote.valuation_price is not None
+            and quote.state is not QuoteState.UNAVAILABLE
+        ):
+            raw_val = (
+                sum((lot.quantity for lot in crypto_h.lots), Decimal(0))
+                * quote.valuation_price
+            )
             crypto_value = raw_val.quantize(Decimal("0.0001"))
             try:
                 money_to_scaled(crypto_value)
@@ -161,27 +239,59 @@ def portfolio_overview(db: Session) -> PortfolioOverview:
                 excluded_from_reports=crypto_h.excluded_from_reports,
             )
         )
-    invested = sum((c.value for c in components if c.component_type in {PortfolioComponentType.SAVINGS, PortfolioComponentType.PRECIOUS_METAL, PortfolioComponentType.CRYPTO}), Decimal(0))
-    return PortfolioOverview(as_of=as_of, valuation_complete=valuation_complete, net_worth=money(calculate_net_worth(components)) if valuation_complete else None, invested_assets=money(invested) if valuation_complete else None, account_count=len(accounts), accounts=account_rows, savings=savings_rows, credit_cards=card_rows, precious_metals=metal_rows, crypto=crypto_rows)
+    invested = sum(
+        (
+            c.value
+            for c in components
+            if c.component_type
+            in {
+                PortfolioComponentType.SAVINGS,
+                PortfolioComponentType.PRECIOUS_METAL,
+                PortfolioComponentType.CRYPTO,
+            }
+        ),
+        Decimal(0),
+    )
+    return PortfolioOverview(
+        as_of=as_of,
+        valuation_complete=valuation_complete,
+        net_worth=money(calculate_net_worth(components))
+        if valuation_complete
+        else None,
+        invested_assets=money(invested) if valuation_complete else None,
+        account_count=len(accounts),
+        accounts=account_rows,
+        savings=savings_rows,
+        credit_cards=card_rows,
+        precious_metals=metal_rows,
+        crypto=crypto_rows,
+    )
 
-def list_import_batches(db: Session):
-    rows = db.scalars(select(ImportBatch).order_by(ImportBatch.id))
+
+def list_import_batches(db: Session, user_id: int | None = None):
+    stmt = select(ImportBatch).order_by(ImportBatch.id)
+    if user_id is not None:
+        stmt = stmt.where(ImportBatch.user_id == user_id)
+    rows = db.scalars(stmt)
     # TASK-040: a raw row counts as "applied" once some financial_events row
     # points back to it, via either provenance FK (a transfer pair links two
     # raw rows to one event: one via raw_import_row_id, the other via
     # raw_import_row_id_secondary -- both must count here).
+    applied_stmt = (
+        select(RawImportRow.import_batch_id, func.count(RawImportRow.id))
+        .join(
+            FinancialEvent,
+            or_(
+                FinancialEvent.raw_import_row_id == RawImportRow.id,
+                FinancialEvent.raw_import_row_id_secondary == RawImportRow.id,
+            ),
+        )
+    )
+    if user_id is not None:
+        applied_stmt = applied_stmt.where(FinancialEvent.user_id == user_id)
+    applied_stmt = applied_stmt.group_by(RawImportRow.import_batch_id)
     applied_counts: dict[int, int] = dict(
-        db.execute(
-            select(RawImportRow.import_batch_id, func.count(RawImportRow.id))
-            .join(
-                FinancialEvent,
-                or_(
-                    FinancialEvent.raw_import_row_id == RawImportRow.id,
-                    FinancialEvent.raw_import_row_id_secondary == RawImportRow.id,
-                ),
-            )
-            .group_by(RawImportRow.import_batch_id)
-        ).all()  # type: ignore[arg-type]
+        db.execute(applied_stmt).all()  # type: ignore[arg-type]
     )
     return [
         {
@@ -194,6 +304,33 @@ def list_import_batches(db: Session):
         }
         for row in rows
     ]
-def list_reconciliation(db: Session):
-    rows = db.scalars(select(ReconciliationCandidate).options(selectinload(ReconciliationCandidate.raw_import_row), selectinload(ReconciliationCandidate.financial_event)).order_by(ReconciliationCandidate.id))
-    return [ReconciliationRead(id=x.id, state=x.state.value, raw_row_id=x.raw_import_row_id, source_row_number=x.raw_import_row.source_row_number, source_row_id=x.raw_import_row.source_row_id, financial_event_id=x.financial_event_id, transaction_date=x.financial_event.transaction_date, event_type=x.financial_event.event_type.value) for x in rows]
+
+
+def list_reconciliation(db: Session, user_id: int | None = None):
+    stmt = (
+        select(ReconciliationCandidate)
+        .options(
+            selectinload(ReconciliationCandidate.raw_import_row),
+            selectinload(ReconciliationCandidate.financial_event),
+        )
+        .order_by(ReconciliationCandidate.id)
+    )
+    if user_id is not None:
+        stmt = stmt.join(
+            FinancialEvent,
+            ReconciliationCandidate.financial_event_id == FinancialEvent.id,
+        ).where(FinancialEvent.user_id == user_id)
+    rows = db.scalars(stmt)
+    return [
+        ReconciliationRead(
+            id=x.id,
+            state=x.state.value,
+            raw_row_id=x.raw_import_row_id,
+            source_row_number=x.raw_import_row.source_row_number,
+            source_row_id=x.raw_import_row.source_row_id,
+            financial_event_id=x.financial_event_id,
+            transaction_date=x.financial_event.transaction_date,
+            event_type=x.financial_event.event_type.value,
+        )
+        for x in rows
+    ]

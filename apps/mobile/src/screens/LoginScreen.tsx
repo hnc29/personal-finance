@@ -78,7 +78,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onNavigateToRegister }
               <Ionicons name="person-outline" size={20} color={colors.textMuted} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Nhập tên đăng nhập (vd: admin)"
+                placeholder="Nhập tên đăng nhập"
                 placeholderTextColor={colors.textMuted}
                 value={username}
                 onChangeText={(t) => {
@@ -138,11 +138,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onNavigateToRegister }
               <Text style={styles.linkText}>Đăng ký ngay</Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        {/* Demo Hint */}
-        <View style={styles.hintContainer}>
-          <Text style={styles.hintText}>Tài khoản mặc định: admin / admin</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

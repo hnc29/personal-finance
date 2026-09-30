@@ -31,12 +31,14 @@ def test_portfolio_overview_endpoint_empty_portfolio_is_complete(monkeypatch) ->
         precious_metals=[],
         crypto=[],
     )
-    monkeypatch.setattr(read_models_api.read_models, "portfolio_overview", lambda db: overview)
+    monkeypatch.setattr(
+        read_models_api.read_models, "portfolio_overview", lambda db, *a, **kw: overview
+    )
     client = _client()
     try:
         body = client.get("/api/v1/portfolio/overview").json()
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
     assert body["valuation_complete"] is True
     assert body["net_worth"] == "0.0000"
     assert body["invested_assets"] == "0.0000"
@@ -71,19 +73,25 @@ def test_portfolio_overview_endpoint_exposes_exact_contract_and_quote_metadata(
             )
         ],
     )
-    monkeypatch.setattr(read_models_api.read_models, "portfolio_overview", lambda db: overview)
+    monkeypatch.setattr(
+        read_models_api.read_models, "portfolio_overview", lambda db, *a, **kw: overview
+    )
     client = _client()
     try:
         body = client.get("/api/v1/portfolio/overview").json()
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
     assert body["net_worth"] == "75.0000"
     assert body["credit_cards"][0]["value"] == "-25.0000"
-    assert body["crypto"][0]["quote"]["observed_at"] == observed.isoformat().replace("+00:00", "Z")
+    assert body["crypto"][0]["quote"]["observed_at"] == observed.isoformat().replace(
+        "+00:00", "Z"
+    )
     assert body["crypto"][0]["quote"]["valuation_price"] == "123.4567"
 
 
-def test_portfolio_overview_endpoint_does_not_expose_partial_totals(monkeypatch) -> None:
+def test_portfolio_overview_endpoint_does_not_expose_partial_totals(
+    monkeypatch,
+) -> None:
     overview = PortfolioOverview(
         as_of=datetime.datetime(2026, 8, 23, tzinfo=datetime.UTC),
         valuation_complete=False,
@@ -103,35 +111,58 @@ def test_portfolio_overview_endpoint_does_not_expose_partial_totals(monkeypatch)
         ],
         crypto=[],
     )
-    monkeypatch.setattr(read_models_api.read_models, "portfolio_overview", lambda db: overview)
+    monkeypatch.setattr(
+        read_models_api.read_models, "portfolio_overview", lambda db, *a, **kw: overview
+    )
     client = _client()
     try:
         body = client.get("/api/v1/portfolio/overview").json()
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
     assert body["valuation_complete"] is False
     assert body["net_worth"] is None
     assert body["invested_assets"] is None
     assert body["precious_metals"][0]["value"] is None
 
 
-def test_import_and_reconciliation_endpoints_read_sanitized_persisted_models(monkeypatch) -> None:
+def test_import_and_reconciliation_endpoints_read_sanitized_persisted_models(
+    monkeypatch,
+) -> None:
     imported_at = datetime.datetime(2026, 8, 23, tzinfo=datetime.UTC)
     monkeypatch.setattr(
         read_models_api.read_models,
         "list_import_batches",
-        lambda db: [{"id": 1, "source": "SYNTHETIC", "original_filename": "statement.csv", "imported_at": imported_at, "row_count": 1}],
+        lambda db, *a, **kw: [
+            {
+                "id": 1,
+                "source": "SYNTHETIC",
+                "original_filename": "statement.csv",
+                "imported_at": imported_at,
+                "row_count": 1,
+            }
+        ],
     )
     monkeypatch.setattr(
         read_models_api.read_models,
         "list_reconciliation",
-        lambda db: [ReconciliationRead(id=1, state="PROPOSED", raw_row_id=2, source_row_number=4, source_row_id="ROW-4", financial_event_id=3, transaction_date=datetime.date(2026, 8, 23), event_type="EXPENSE")],
+        lambda db, *a, **kw: [
+            ReconciliationRead(
+                id=1,
+                state="PROPOSED",
+                raw_row_id=2,
+                source_row_number=4,
+                source_row_id="ROW-4",
+                financial_event_id=3,
+                transaction_date=datetime.date(2026, 8, 23),
+                event_type="EXPENSE",
+            )
+        ],
     )
     client = _client()
     try:
         imports = client.get("/api/v1/import-batches").json()
         reconciliation = client.get("/api/v1/reconciliation-candidates").json()
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
     assert imports[0]["original_filename"] == "statement.csv"
     assert reconciliation[0]["raw_row_id"] == 2

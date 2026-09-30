@@ -11,6 +11,7 @@ import { buildCategoryTree, categoriesForEventType, categoryDepth, categoryIsVal
 import { CategoryIcon, CategoryIconBadge, IconGlyph, ICON_GROUPS, iconLabel } from "../lib/category-icons";
 import { bankCatalog, bankCategoryLabel, bankCategoryOrder, ewalletCatalog } from "../lib/bank-catalog";
 import { AccountLogo, getAccountBrand } from "../lib/account-logos";
+import { ChangePasswordModal } from "../components/ChangePasswordModal";
 
 type View = "transactions" | "ledger" | "reports" | "accounts" | "categories" | "assets" | "data";
 // User request, 2026-08-26 (UI redesign to a Money-Lover-style layout):
@@ -29,9 +30,22 @@ const navItems: { view: View; icon: string }[] = [
   { view: "assets", icon: "PiggyBank" },
   { view: "data", icon: "Folder" },
 ];
+type ReportFilterParams = {
+  timeScope?: "ALL" | "YEAR" | "QUARTER" | "MONTH" | "WEEK" | "DAY" | "CUSTOM";
+  selectedYear?: string;
+  selectedQuarter?: number;
+  selectedMonthKey?: string | null;
+  selectedDate?: string;
+  customStart?: string;
+  customEnd?: string;
+  selectedWeekStart?: string | null;
+  selectedWeekEnd?: string | null;
+  accountId?: number | "ALL" | null;
+};
 type EntryDraft = { accountId: string; amount: string };
 const accountTypes: AccountType[] = ["CASH", "BANK", "CREDIT_CARD", "EWALLET"];
-const composerEventTypes: EventType[] = ["EXPENSE", "INCOME", "TRANSFER", "CREDIT_CARD_PAYMENT"];
+const composerEventTypes: EventType[] = ["EXPENSE", "INCOME", "TRANSFER"];
+const editableEventTypes: EventType[] = ["EXPENSE", "INCOME", "TRANSFER", "CREDIT_CARD_PAYMENT"];
 function pad2(n: number): string { return String(n).padStart(2, "0"); }
 function todayIso(): string { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
 function shiftIsoDate(iso: string, deltaDays: number): string {
@@ -52,8 +66,24 @@ function formatIsoDateLabel(language: Language, iso: string): string {
   if (!y || !m || !d) return iso;
   const local = new Date(y, m - 1, d);
   const locale = language === "vi" ? "vi-VN" : "en-US";
-  const formatted = new Intl.DateTimeFormat(locale, { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }).format(local);
-  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+  const weekday = new Intl.DateTimeFormat(locale, { weekday: "long" }).format(local);
+  const weekdayCap = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+  return `${weekdayCap}, ${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
+}
+function parseIsoDateParts(language: Language, iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return { day: iso, weekday: "", monthYear: "", full: iso };
+  const local = new Date(y, m - 1, d);
+  const locale = language === "vi" ? "vi-VN" : "en-US";
+  const weekday = new Intl.DateTimeFormat(locale, { weekday: "long" }).format(local);
+  const weekdayCap = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+  const monthYear = language === "vi" ? `tháng ${m} ${y}` : new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(local);
+  return {
+    day: String(d).padStart(2, "0"),
+    weekday: weekdayCap,
+    monthYear,
+    full: `${weekdayCap}, ${String(d).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`,
+  };
 }
 // BUGFIX: this used to append a second, redundant "Other / Custom bank"
 // literal on top of the catalog's own "other" entry (see bank-catalog.ts) --
@@ -94,6 +124,10 @@ export default function Home() {
     }
   }, [user, authLoading, router]);
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [reportParams, setReportParams] = useState<ReportFilterParams | null>(null);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+
   return <LanguageContext.Provider value={language}><div className="app-shell">
     <aside className="sidebar">
       <button
@@ -127,6 +161,9 @@ export default function Home() {
                     Quản lý user
                   </Link>
                 )}
+                <button type="button" className="btn-user-action" onClick={() => setShowChangePasswordModal(true)}>
+                  Đổi mật khẩu
+                </button>
                 <button type="button" className="btn-user-action" onClick={logout}>
                   Đăng xuất
                 </button>
@@ -140,39 +177,273 @@ export default function Home() {
           <div className="language" role="group" aria-label={t.language}><button type="button" aria-pressed={language === "vi"} className={language === "vi" ? "active" : ""} onClick={() => setLanguage("vi")}>🇻🇳 <span>Tiếng Việt</span></button><button type="button" aria-pressed={language === "en"} className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>🇺🇸 <span>English</span></button></div>
         </div>
       </header>
-      <main>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "reports" ? <Reports /> : view === "assets" ? <Assets /> : view === "data" ? <DataPage /> : view === "ledger" ? <Ledger /> : <Transactions />}</main>
+
+      <main>{view === "accounts" ? <Accounts /> : view === "categories" ? <Categories /> : view === "reports" ? <Reports initialParams={reportParams} /> : view === "assets" ? <Assets /> : view === "data" ? <DataPage /> : view === "ledger" ? <Ledger onNavigateReports={(params) => { setReportParams(params ?? null); setView("reports"); }} /> : <Transactions />}</main>
     </div>
+
+    {mobileMenuOpen && (
+      <div className="mobile-drawer-backdrop" onClick={() => setMobileMenuOpen(false)}>
+        <div className="mobile-drawer-sheet" onClick={e => e.stopPropagation()}>
+          <div className="mobile-drawer-handle" />
+          <div className="mobile-drawer-header">
+            <div className="mobile-drawer-user">
+              <div className="mobile-drawer-avatar">
+                {user ? (user.display_name || user.username).charAt(0).toUpperCase() : "U"}
+              </div>
+              <div className="mobile-drawer-userinfo">
+                <strong>{user ? (user.display_name || user.username) : (language === "vi" ? "Khách" : "Guest")}</strong>
+                {user?.is_admin && <span className="user-role-admin">Admin</span>}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="mobile-drawer-close"
+              onClick={() => setMobileMenuOpen(false)}
+              aria-label={language === "vi" ? "Đóng" : "Close"}
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="mobile-drawer-grid">
+            <button
+              type="button"
+              className={`mobile-drawer-card ${view === "accounts" ? "active" : ""}`}
+              onClick={() => { setView("accounts"); setMobileMenuOpen(false); }}
+            >
+              <div className="mobile-drawer-card-icon" style={{ background: "#e0e7ff", color: "#4338ca" }}>
+                <IconGlyph iconKey="CreditCard" size={22} />
+              </div>
+              <span>{language === "vi" ? "Tài khoản" : "Accounts"}</span>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-drawer-card ${view === "categories" ? "active" : ""}`}
+              onClick={() => { setView("categories"); setMobileMenuOpen(false); }}
+            >
+              <div className="mobile-drawer-card-icon" style={{ background: "#fef3c7", color: "#b45309" }}>
+                <IconGlyph iconKey="Grid" size={22} />
+              </div>
+              <span>{language === "vi" ? "Danh mục" : "Categories"}</span>
+            </button>
+
+            <button
+              type="button"
+              className={`mobile-drawer-card ${view === "data" ? "active" : ""}`}
+              onClick={() => { setView("data"); setMobileMenuOpen(false); }}
+            >
+              <div className="mobile-drawer-card-icon" style={{ background: "#dcfce7", color: "#15803d" }}>
+                <IconGlyph iconKey="Folder" size={22} />
+              </div>
+              <span>{language === "vi" ? "Dữ liệu & Sao lưu" : "Data & Backup"}</span>
+            </button>
+
+            {user?.is_admin && (
+              <Link
+                href="/users"
+                className="mobile-drawer-card"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <div className="mobile-drawer-card-icon" style={{ background: "#f3e8ff", color: "#7e22ce" }}>
+                  <IconGlyph iconKey="Grid" size={22} />
+                </div>
+                <span>{language === "vi" ? "Quản lý user" : "User Management"}</span>
+              </Link>
+            )}
+          </div>
+
+          <div className="mobile-drawer-footer">
+            <div className="mobile-drawer-lang-toggle">
+              <span>{language === "vi" ? "Ngôn ngữ" : "Language"}</span>
+              <div className="language">
+                <button
+                  type="button"
+                  className={language === "vi" ? "active" : ""}
+                  onClick={() => setLanguage("vi")}
+                >
+                  🇻🇳 Tiếng Việt
+                </button>
+                <button
+                  type="button"
+                  className={language === "en" ? "active" : ""}
+                  onClick={() => setLanguage("en")}
+                >
+                  🇺🇸 English
+                </button>
+              </div>
+            </div>
+
+            {user ? (
+              <>
+                <button
+                  type="button"
+                  className="mobile-drawer-logout-btn"
+                  style={{ marginBottom: "8px", background: "rgba(59, 130, 246, 0.15)", color: "#60a5fa", borderColor: "rgba(59, 130, 246, 0.3)" }}
+                  onClick={() => { setShowChangePasswordModal(true); setMobileMenuOpen(false); }}
+                >
+                  {language === "vi" ? "🔑 Đổi mật khẩu" : "🔑 Change password"}
+                </button>
+                <button
+                  type="button"
+                  className="mobile-drawer-logout-btn"
+                  onClick={() => { logout(); setMobileMenuOpen(false); }}
+                >
+                  {language === "vi" ? "Đăng xuất" : "Log out"}
+                </button>
+              </>
+            ) : (
+              <Link
+                href="/login"
+                className="mobile-drawer-login-btn"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                {language === "vi" ? "Đăng nhập" : "Log in"}
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    <nav className="mobile-bottom-nav" aria-label={language === "vi" ? "Điều hướng nhanh di động" : "Mobile quick navigation"}>
+      <button
+        type="button"
+        className={`mobile-nav-item ${view === "assets" ? "active" : ""}`}
+        onClick={() => { setView("assets"); setMobileMenuOpen(false); }}
+      >
+        <span className="mobile-nav-icon"><IconGlyph iconKey="Home" size={20} /></span>
+        <span className="mobile-nav-label">{language === "vi" ? "Tổng quan" : "Overview"}</span>
+      </button>
+
+      <button
+        type="button"
+        className={`mobile-nav-item ${view === "ledger" ? "active" : ""}`}
+        onClick={() => { setView("ledger"); setMobileMenuOpen(false); }}
+      >
+        <span className="mobile-nav-icon"><IconGlyph iconKey="Wallet" size={20} /></span>
+        <span className="mobile-nav-label">{language === "vi" ? "Sổ giao dịch" : "Ledger"}</span>
+      </button>
+
+      <div className="mobile-nav-fab-wrap">
+        <button
+          type="button"
+          className="mobile-fab-btn"
+          onClick={() => { setView("transactions"); setMobileMenuOpen(false); }}
+          title={language === "vi" ? "Thêm ghi chép" : "Add record"}
+        >
+          <IconGlyph iconKey="Plus" size={24} />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        className={`mobile-nav-item ${view === "reports" ? "active" : ""}`}
+        onClick={() => { setView("reports"); setMobileMenuOpen(false); }}
+      >
+        <span className="mobile-nav-icon"><IconGlyph iconKey="BarChart" size={20} /></span>
+        <span className="mobile-nav-label">{language === "vi" ? "Báo cáo" : "Reports"}</span>
+      </button>
+
+      <button
+        type="button"
+        className={`mobile-nav-item ${mobileMenuOpen ? "active" : ""}`}
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        aria-label={language === "vi" ? "Tài khoản" : "Account"}
+      >
+        <span className="mobile-nav-icon"><IconGlyph iconKey="Users" size={20} /></span>
+        <span className="mobile-nav-label">{language === "vi" ? "Tài khoản" : "Account"}</span>
+      </button>
+    </nav>
+    <ChangePasswordModal
+      isOpen={showChangePasswordModal}
+      onClose={() => setShowChangePasswordModal(false)}
+    />
   </div></LanguageContext.Provider>;
 }
 
 function DateRow({ value, onChange, language, label: labelText, name }: { value: string; onChange: (v: string) => void; language: Language; label?: string; name?: string }) {
   const { tr } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
-  return <div className="date-row">
-    <button type="button" className="date-nav" aria-label={tr("Previous day")} onClick={() => onChange(shiftIsoDate(value, -1))}>‹</button>
-    <label
-      className="date-center"
-      onClick={() => {
-        try { inputRef.current?.showPicker?.(); } catch {}
-      }}
-      style={{ cursor: "pointer" }}
-    >
-      <span>{formatIsoDateLabel(language, value)}</span>
-      <input
-        ref={inputRef}
-        type="date"
-        name={name}
+
+  const openPicker = () => {
+    try {
+      inputRef.current?.showPicker?.();
+    } catch {
+      inputRef.current?.focus();
+    }
+  };
+
+  return (
+    <div className="date-row">
+      <button
+        type="button"
+        className="date-cal-btn"
+        onClick={openPicker}
+        title={labelText ? tr(labelText) : tr("Choose date")}
         aria-label={labelText ? tr(labelText) : tr("Choose date")}
-        value={value}
-        onChange={e => onChange(e.target.value || todayIso())}
-        onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }}
-        required
-        className="date-native"
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="17" rx="3.5" fill="#0f172a" />
+          <rect x="7" y="2" width="2" height="3.5" rx="1" fill="#0f172a" />
+          <rect x="15" y="2" width="2" height="3.5" rx="1" fill="#0f172a" />
+          <line x1="3" y1="9" x2="21" y2="9" stroke="#334155" strokeWidth="1.5" />
+          <circle cx="7.5" cy="13" r="1.1" fill="#ffffff" />
+          <circle cx="12" cy="13" r="1.1" fill="#ffffff" />
+          <circle cx="16.5" cy="13" r="1.1" fill="#ffffff" />
+          <circle cx="7.5" cy="17" r="1.1" fill="#ffffff" />
+          <circle cx="12" cy="17" r="1.1" fill="#ffffff" />
+          <circle cx="16.5" cy="17" r="1.1" fill="#ffffff" />
+        </svg>
+      </button>
+
+      <button
+        type="button"
+        className="date-nav"
+        aria-label={tr("Previous day")}
+        onClick={() => onChange(shiftIsoDate(value, -1))}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
+
+      <label
+        className="date-center"
+        onClick={openPicker}
         style={{ cursor: "pointer" }}
-      />
-    </label>
-    <button type="button" className="date-nav" aria-label={tr("Next day")} onClick={() => onChange(shiftIsoDate(value, 1))}>›</button>
-  </div>;
+      >
+        <span>{formatIsoDateLabel(language, value)}</span>
+        <input
+          ref={inputRef}
+          type="date"
+          name={name}
+          aria-label={labelText ? tr(labelText) : tr("Choose date")}
+          value={value}
+          onChange={e => onChange(e.target.value || todayIso())}
+          onClick={e => {
+            try {
+              e.currentTarget.showPicker?.();
+            } catch {}
+          }}
+          required
+          className="date-native"
+          style={{ cursor: "pointer" }}
+        />
+      </label>
+
+      <button
+        type="button"
+        className="date-nav"
+        aria-label={tr("Next day")}
+        onClick={() => onChange(shiftIsoDate(value, 1))}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </button>
+    </div>
+  );
 }
 
 function AssetDashboard({
@@ -185,6 +456,8 @@ function AssetDashboard({
   portfolioCrypto,
   activeTab,
   onSelectTab,
+  hideAmount = false,
+  onToggleHideAmount,
 }: {
   accounts: Account[];
   accountBalances: Map<number, string>;
@@ -195,8 +468,10 @@ function AssetDashboard({
   portfolioCrypto?: import("../lib/api").PortfolioRow[];
   activeTab: "liquid" | "savings" | "metals" | "crypto";
   onSelectTab: (tab: "liquid" | "savings" | "metals" | "crypto") => void;
+  hideAmount?: boolean;
+  onToggleHideAmount?: () => void;
 }) {
-  const { tr } = useI18n();
+  const { tr, language } = useI18n();
 
   let liquidTotal = "0";
   for (const a of accounts) {
@@ -264,17 +539,32 @@ function AssetDashboard({
       <div className="net-worth-hero">
         <div className="net-worth-hero-top">
           <div>
-            <span className="net-worth-hero-label">{tr("Total Net Worth")}</span>
-            <div className="net-worth-hero-amount">{fmtMoneyDisplay(netWorth)} VND</div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+              <span className="net-worth-hero-label">{tr("Total Net Worth")}</span>
+              {onToggleHideAmount && (
+                <button
+                  type="button"
+                  className="btn-mask-balance"
+                  onClick={onToggleHideAmount}
+                  title={hideAmount ? (language === "vi" ? "Hiện số tiền" : "Show amounts") : (language === "vi" ? "Ẩn số tiền" : "Hide amounts")}
+                  aria-label={hideAmount ? (language === "vi" ? "Hiện số tiền" : "Show amounts") : (language === "vi" ? "Ẩn số tiền" : "Hide amounts")}
+                >
+                  <IconGlyph iconKey={hideAmount ? "EyeOff" : "Eye"} size={16} />
+                </button>
+              )}
+            </div>
+            <div className="net-worth-hero-amount">
+              {hideAmount ? "••••••••" : `${fmtMoneyDisplay(netWorth)} VND`}
+            </div>
           </div>
           <div className="net-worth-hero-subtotals">
             <div className="net-worth-subtotal">
               <span>{tr("Total Assets")}</span>
-              <strong>{fmtMoneyDisplay(totalGrossAssets)} VND</strong>
+              <strong>{hideAmount ? "••••••••" : `${fmtMoneyDisplay(totalGrossAssets)} VND`}</strong>
             </div>
             <div className="net-worth-subtotal">
               <span>{tr("Total Liabilities")}</span>
-              <strong style={{ color: "#fca5a5" }}>-{fmtMoneyDisplay(creditCardDebt)} VND</strong>
+              <strong style={{ color: "#fca5a5" }}>{hideAmount ? "••••••••" : `-${fmtMoneyDisplay(creditCardDebt)} VND`}</strong>
             </div>
           </div>
         </div>
@@ -308,7 +598,7 @@ function AssetDashboard({
             <span>{tr("Cash & Liquid")}</span>
             <IconGlyph iconKey="Wallet" size={18} />
           </div>
-          <div className="asset-metric-amount">{fmtMoneyDisplay(liquidTotal)} VND</div>
+          <div className="asset-metric-amount">{hideAmount ? "••••••••" : `${fmtMoneyDisplay(liquidTotal)} VND`}</div>
           <div className="asset-metric-sub">{accounts.filter(a => a.is_active && a.account_type !== "CREDIT_CARD").length} {tr("Accounts")}</div>
         </div>
 
@@ -324,7 +614,7 @@ function AssetDashboard({
             <span>{tr("Savings")}</span>
             <IconGlyph iconKey="PiggyBank" size={18} />
           </div>
-          <div className="asset-metric-amount">{fmtMoneyDisplay(savingsTotal)} VND</div>
+          <div className="asset-metric-amount">{hideAmount ? "••••••••" : `${fmtMoneyDisplay(savingsTotal)} VND`}</div>
           <div className="asset-metric-sub">{savings.filter(s => s.status === "OPEN").length} {tr("Accounts")}</div>
         </div>
 
@@ -340,7 +630,7 @@ function AssetDashboard({
             <span>{tr("Precious metals & Gold")}</span>
             <IconGlyph iconKey="Award" size={18} />
           </div>
-          <div className="asset-metric-amount">{fmtMoneyDisplay(metalsTotal)} VND</div>
+          <div className="asset-metric-amount">{hideAmount ? "••••••••" : `${fmtMoneyDisplay(metalsTotal)} VND`}</div>
           <div className="asset-metric-sub">{metals.length} {tr("Holdings")}</div>
         </div>
 
@@ -356,7 +646,7 @@ function AssetDashboard({
             <span>{tr("Crypto")}</span>
             <IconGlyph iconKey="TrendingUp" size={18} />
           </div>
-          <div className="asset-metric-amount">{fmtMoneyDisplay(cryptoTotal)} VND</div>
+          <div className="asset-metric-amount">{hideAmount ? "••••••••" : `${fmtMoneyDisplay(cryptoTotal)} VND`}</div>
           <div className="asset-metric-sub">{crypto.length} {tr("Holdings")}</div>
         </div>
       </div>
@@ -600,238 +890,320 @@ function CryptoEditModal({
   );
 }
 
-function MetalsHoldingsTable({
-  metals,
-  portfolioRows,
+function MetalDetailDialog({
+  holding,
+  portfolioRow,
+  onClose,
   onEdit,
   onDeleted,
 }: {
-  metals: MetalHolding[];
-  portfolioRows: import("../lib/api").PortfolioRow[];
-  onEdit: (m: MetalHolding) => void;
+  holding: MetalHolding;
+  portfolioRow?: import("../lib/api").PortfolioRow;
+  onClose: () => void;
+  onEdit: () => void;
   onDeleted: () => void;
 }) {
-  const { tr, label } = useI18n();
+  const { tr, label, language } = useI18n();
+  const qc = useQueryClient();
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.assets.metals.remove(id),
-    onSuccess: onDeleted,
+    mutationFn: () => api.assets.metals.remove(holding.id),
+    onSuccess: () => {
+      invalidateAllFinancialQueries(qc);
+      onClose();
+      onDeleted();
+    },
   });
 
+  const currentUnitPrice = portfolioRow?.quote?.valuation_price ?? null;
+  const hasLiveQuote = portfolioRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
+  const chiQty = (Number(holding.quantity_grams) / 3.75).toFixed(2);
+  const chiQtyExact = (Number(holding.quantity_grams) / 3.75).toFixed(4);
+  const currentVal = hasLiveQuote && currentUnitPrice
+    ? sumMoney([mulDecimal(currentUnitPrice, chiQtyExact)])
+    : (portfolioRow?.value ?? holding.total_cost);
+
+  const currentValNum = Number(currentVal);
+  const totalCostNum = Number(holding.total_cost);
+  const deltaNum = currentValNum - totalCostNum;
+  const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
+
   return (
-    <div className="holdings-table-wrap">
-      <table className="holdings-table">
-        <thead>
-          <tr>
-            <th>{tr("Product")}</th>
-            <th>{tr("Brand")}</th>
-            <th>{tr("Quantity (chỉ)")}</th>
-            <th>{tr("Purchase price")}</th>
-            <th>{tr("Total cost")}</th>
-            <th>{tr("Market price")}</th>
-            <th>{tr("Market value")}</th>
-            <th>{tr("Profit / Loss")}</th>
-            <th>{tr("Edit")} / {tr("Delete")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {metals.length === 0 ? (
-            <tr>
-              <td colSpan={9} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
-                {tr("No precious metals yet.")}
-              </td>
-            </tr>
-          ) : (
-            metals.map(m => {
-              const portRow = portfolioRows.find(r => r.id === m.id);
-              // Giá hiện tại bằng giá cập nhật mới nhất từ BTMC (đ/chỉ)
-              const currentUnitPrice = portRow?.quote?.valuation_price ?? null;
-              const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
-              const chiQty = (Number(m.quantity_grams) / 3.75).toFixed(2);
-              const chiQtyExact = (Number(m.quantity_grams) / 3.75).toFixed(4);
+    <Modal title={language === "vi" ? "Chi tiết kim loại quý" : "Precious metal holding details"} onClose={onClose} wide>
+      <div className="savings-detail">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+          <h3 style={{ margin: 0 }}>{holding.product_type} - {chiQty} chỉ</h3>
+          <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
+            {deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} đ ({deltaNum > 0 ? "+" : ""}{pnlPct}%)
+          </span>
+        </div>
 
-              // Giá trị thị trường bằng số lượng nhân giá hiện tại
-              const currentVal = hasLiveQuote && currentUnitPrice
-                ? sumMoney([mulDecimal(currentUnitPrice, chiQtyExact)])
-                : (portRow?.value ?? m.total_cost);
+        <dl className="savings-detail-grid">
+          <div><dt>{tr("Product")}</dt><dd>{holding.product_type}</dd></div>
+          <div><dt>{tr("Brand")}</dt><dd>{label(holding.brand)}</dd></div>
+          <div><dt>{tr("Type")}</dt><dd>{label(holding.metal_type)}</dd></div>
+          <div><dt>{tr("Quantity")}</dt><dd><b>{chiQty}</b> chỉ ({holding.quantity_grams} g)</dd></div>
+          <div><dt>{tr("Purity")}</dt><dd>{holding.purity ? (Number(holding.purity) * 100).toFixed(2) : "99.99"}%</dd></div>
+          <div><dt>{tr("Purchase date")}</dt><dd>{holding.purchase_date ?? "—"}</dd></div>
+          <div><dt>{tr("Purchase price")}</dt><dd>{fmtMoneyDisplay(holding.purchase_price)} đ/chỉ</dd></div>
+          <div><dt>{tr("Total cost")}</dt><dd><b>{fmtMoneyDisplay(holding.total_cost)} đ</b></dd></div>
+          <div>
+            <dt>{tr("Market price")}</dt>
+            <dd>
+              {hasLiveQuote && currentUnitPrice ? (
+                <span>
+                  <b>{fmtMoneyDisplay(currentUnitPrice)} đ/chỉ</b>
+                  {portfolioRow?.quote?.provider && <small style={{ marginLeft: "4px", color: "var(--muted)" }}>({portfolioRow.quote.provider})</small>}
+                </span>
+              ) : "—"}
+            </dd>
+          </div>
+          <div><dt>{tr("Market value")}</dt><dd><strong style={{ color: "#16a34a", fontSize: "1.05rem" }}>{fmtMoneyDisplay(currentVal)} đ</strong></dd></div>
+          <div><dt>{tr("Profit / Loss")}</dt><dd style={{ color: deltaNum > 0 ? "#16a34a" : deltaNum < 0 ? "#dc2626" : "inherit", fontWeight: 700 }}>{deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} đ ({pnlPct}%)</dd></div>
+          <div><dt>{tr("Exclude from reports")}</dt><dd>{holding.excluded_from_reports ? (language === "vi" ? "Có" : "Yes") : (language === "vi" ? "Không" : "No")}</dd></div>
+        </dl>
 
-              const currentValNum = Number(currentVal);
-              const totalCostNum = Number(m.total_cost);
-              const deltaNum = currentValNum - totalCostNum;
-              const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
+        <div className="form-actions" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "18px", paddingTop: "14px", borderTop: "1px solid var(--line)" }}>
+          <button
+            type="button"
+            className="secondary danger"
+            disabled={deleteMutation.isPending}
+            onClick={() => {
+              if (window.confirm(`${tr("Confirm delete")}?`)) {
+                deleteMutation.mutate();
+              }
+            }}
+          >
+            {deleteMutation.isPending ? tr("Deleting...") : tr("Delete")}
+          </button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button type="button" className="secondary" onClick={onClose}>{tr("Close")}</button>
+            <button type="button" className="primary" onClick={() => { onClose(); onEdit(); }}>{tr("Edit")}</button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
-              return (
-                <tr key={m.id}>
-                  <td><strong>{m.product_type}</strong></td>
-                  <td>{label(m.brand)}</td>
-                  <td><b>{chiQty}</b> chỉ</td>
-                  <td>{fmtMoneyDisplay(m.purchase_price)} đ</td>
-                  <td><b>{fmtMoneyDisplay(m.total_cost)} đ</b></td>
-                  <td>
-                    {hasLiveQuote && currentUnitPrice ? (
-                      <div>
-                        <div><strong>{fmtMoneyDisplay(currentUnitPrice)} đ/chỉ</strong></div>
-                        {portRow?.quote?.provider && (
-                          <span className="badge" style={{ fontSize: "0.68rem", display: "inline-block", marginTop: "2px", background: "#e0f2fe", color: "#0369a1" }}>
-                            {portRow.quote.provider}
-                          </span>
-                        )}
-                        {portRow?.quote?.state === "STALE" && (
-                          <span className="badge muted" style={{ fontSize: "0.68rem", display: "inline-block", marginTop: "2px", marginLeft: "4px" }}>
-                            STALE
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span style={{ color: "var(--muted)" }}>—</span>
-                    )}
-                  </td>
-                  <td><strong>{fmtMoneyDisplay(currentVal)} đ</strong></td>
-                  <td>
-                    <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
-                      {deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} ({deltaNum > 0 ? "+" : ""}{pnlPct}%)
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button type="button" className="text-button" onClick={() => onEdit(m)}>{tr("Edit")}</button>
-                      <button
-                        type="button"
-                        className="text-button danger"
-                        disabled={deleteMutation.isPending}
-                        onClick={() => {
-                          if (window.confirm(`${tr("Confirm delete")}?`)) {
-                            deleteMutation.mutate(m.id);
-                          }
-                        }}
-                      >
-                        {tr("Delete")}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+function CryptoDetailDialog({
+  holding,
+  portfolioRow,
+  onClose,
+  onEdit,
+  onDeleted,
+}: {
+  holding: CryptoHolding;
+  portfolioRow?: import("../lib/api").PortfolioRow;
+  onClose: () => void;
+  onEdit: () => void;
+  onDeleted: () => void;
+}) {
+  const { tr, language } = useI18n();
+  const qc = useQueryClient();
+  const deleteMutation = useMutation({
+    mutationFn: () => api.assets.crypto.remove(holding.id),
+    onSuccess: () => {
+      invalidateAllFinancialQueries(qc);
+      onClose();
+      onDeleted();
+    },
+  });
+
+  const currentUnitPrice = portfolioRow?.quote?.valuation_price ?? null;
+  const hasLiveQuote = portfolioRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
+  const currentVal = hasLiveQuote && currentUnitPrice
+    ? sumMoney([mulDecimal(currentUnitPrice, holding.quantity)])
+    : (portfolioRow?.value ?? holding.total_cost);
+
+  const currentValNum = Number(currentVal);
+  const totalCostNum = Number(holding.total_cost);
+  const deltaNum = currentValNum - totalCostNum;
+  const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
+
+  return (
+    <Modal title={language === "vi" ? "Chi tiết tiền mã hoá" : "Crypto holding details"} onClose={onClose} wide>
+      <div className="savings-detail">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+          <h3 style={{ margin: 0 }}>{holding.display_name || holding.symbol.toUpperCase()} ({holding.symbol.toUpperCase()})</h3>
+          <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
+            {deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} đ ({deltaNum > 0 ? "+" : ""}{pnlPct}%)
+          </span>
+        </div>
+
+        <dl className="savings-detail-grid">
+          <div><dt>{tr("Name")}</dt><dd>{holding.display_name || holding.symbol.toUpperCase()}</dd></div>
+          <div><dt>{tr("Coin code")}</dt><dd><b>{holding.symbol.toUpperCase()}</b></dd></div>
+          <div><dt>{tr("Quantity")}</dt><dd><b>{holding.quantity}</b> {holding.symbol.toUpperCase()}</dd></div>
+          <div><dt>{tr("Purchase date")}</dt><dd>{holding.purchase_date ?? "—"}</dd></div>
+          <div><dt>{tr("Purchase price")}</dt><dd>{fmtMoneyDisplay(holding.purchase_price)} đ</dd></div>
+          <div><dt>{tr("Total cost")}</dt><dd><b>{fmtMoneyDisplay(holding.total_cost)} đ</b></dd></div>
+          <div>
+            <dt>{tr("Market price")}</dt>
+            <dd>
+              {hasLiveQuote && currentUnitPrice ? (
+                <span>
+                  <b>{fmtMoneyDisplay(currentUnitPrice)} đ</b>
+                  {portfolioRow?.quote?.provider && <small style={{ marginLeft: "4px", color: "var(--muted)" }}>({portfolioRow.quote.provider})</small>}
+                </span>
+              ) : "—"}
+            </dd>
+          </div>
+          <div><dt>{tr("Market value")}</dt><dd><strong style={{ color: "#8b5cf6", fontSize: "1.05rem" }}>{fmtMoneyDisplay(currentVal)} đ</strong></dd></div>
+          <div><dt>{tr("Profit / Loss")}</dt><dd style={{ color: deltaNum > 0 ? "#16a34a" : deltaNum < 0 ? "#dc2626" : "inherit", fontWeight: 700 }}>{deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} đ ({pnlPct}%)</dd></div>
+          <div><dt>{tr("Exclude from reports")}</dt><dd>{holding.excluded_from_reports ? (language === "vi" ? "Có" : "Yes") : (language === "vi" ? "Không" : "No")}</dd></div>
+        </dl>
+
+        <div className="form-actions" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "18px", paddingTop: "14px", borderTop: "1px solid var(--line)" }}>
+          <button
+            type="button"
+            className="secondary danger"
+            disabled={deleteMutation.isPending}
+            onClick={() => {
+              if (window.confirm(`${tr("Confirm delete")}?`)) {
+                deleteMutation.mutate();
+              }
+            }}
+          >
+            {deleteMutation.isPending ? tr("Deleting...") : tr("Delete")}
+          </button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button type="button" className="secondary" onClick={onClose}>{tr("Close")}</button>
+            <button type="button" className="primary" onClick={() => { onClose(); onEdit(); }}>{tr("Edit")}</button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function MetalsHoldingsList({
+  metals,
+  portfolioRows,
+  onSelect,
+}: {
+  metals: MetalHolding[];
+  portfolioRows: import("../lib/api").PortfolioRow[];
+  onSelect: (m: MetalHolding) => void;
+}) {
+  const { label } = useI18n();
+
+  if (metals.length === 0) {
+    return <Empty show={true} text="No precious metals yet." />;
+  }
+
+  return (
+    <div className="asset-items-list">
+      {metals.map(m => {
+        const portRow = portfolioRows.find(r => r.id === m.id);
+        const currentUnitPrice = portRow?.quote?.valuation_price ?? null;
+        const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
+        const chiQty = (Number(m.quantity_grams) / 3.75).toFixed(2);
+        const chiQtyExact = (Number(m.quantity_grams) / 3.75).toFixed(4);
+
+        const currentVal = hasLiveQuote && currentUnitPrice
+          ? sumMoney([mulDecimal(currentUnitPrice, chiQtyExact)])
+          : (portRow?.value ?? m.total_cost);
+
+        const currentValNum = Number(currentVal);
+        const totalCostNum = Number(m.total_cost);
+        const deltaNum = currentValNum - totalCostNum;
+        const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
+
+        return (
+          <div
+            className="asset-item-card"
+            key={m.id}
+            onClick={() => onSelect(m)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => (e.key === "Enter" || e.key === " ") && onSelect(m)}
+          >
+            <div className="asset-item-left">
+              <div className="asset-item-icon" style={{ background: "#fef3c7", color: "#b45309" }}>
+                <IconGlyph iconKey="Award" size={22} />
+              </div>
+              <div className="asset-item-content">
+                <div className="asset-item-title">
+                  {m.product_type} - {chiQty} chỉ
+                </div>
+                <div className="asset-item-sub">
+                  {label(m.brand)} · {fmtMoneyDisplay(currentVal)} VND
+                </div>
+              </div>
+            </div>
+            <div className="asset-item-right">
+              <div className="asset-item-val">{fmtMoneyDisplay(currentVal)} đ</div>
+              <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
+                {deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} đ ({deltaNum > 0 ? "+" : ""}{pnlPct}%)
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function CryptoHoldingsTable({
+function CryptoHoldingsList({
   crypto,
   portfolioRows,
-  onEdit,
-  onDeleted,
+  onSelect,
 }: {
   crypto: CryptoHolding[];
   portfolioRows: import("../lib/api").PortfolioRow[];
-  onEdit: (c: CryptoHolding) => void;
-  onDeleted: () => void;
+  onSelect: (c: CryptoHolding) => void;
 }) {
-  const { tr } = useI18n();
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.assets.crypto.remove(id),
-    onSuccess: onDeleted,
-  });
+  if (crypto.length === 0) {
+    return <Empty show={true} text="No crypto yet." />;
+  }
 
   return (
-    <div className="holdings-table-wrap">
-      <table className="holdings-table">
-        <thead>
-          <tr>
-            <th>{tr("Coin code")}</th>
-            <th>{tr("Name")}</th>
-            <th>{tr("Quantity")}</th>
-            <th>{tr("Purchase price")}</th>
-            <th>{tr("Total cost")}</th>
-            <th>{tr("Date")}</th>
-            <th>{tr("Market price")}</th>
-            <th>{tr("Market value")}</th>
-            <th>{tr("Profit / Loss")}</th>
-            <th>{tr("Edit")} / {tr("Delete")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {crypto.length === 0 ? (
-            <tr>
-              <td colSpan={10} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
-                {tr("No crypto yet.")}
-              </td>
-            </tr>
-          ) : (
-            crypto.map(c => {
-              const portRow = portfolioRows.find(r => r.id === c.id);
-              // Giá hiện tại bằng giá cập nhật mới nhất từ CoinMarketCap
-              const currentUnitPrice = portRow?.quote?.valuation_price ?? null;
-              const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
+    <div className="asset-items-list">
+      {crypto.map(c => {
+        const portRow = portfolioRows.find(r => r.id === c.id);
+        const currentUnitPrice = portRow?.quote?.valuation_price ?? null;
+        const hasLiveQuote = portRow?.quote?.state !== "UNAVAILABLE" && !!currentUnitPrice;
 
-              // Giá trị thị trường bằng số lượng nhân giá hiện tại
-              const currentVal = hasLiveQuote && currentUnitPrice
-                ? sumMoney([mulDecimal(currentUnitPrice, c.quantity)])
-                : (portRow?.value ?? c.total_cost);
+        const currentVal = hasLiveQuote && currentUnitPrice
+          ? sumMoney([mulDecimal(currentUnitPrice, c.quantity)])
+          : (portRow?.value ?? c.total_cost);
 
-              const currentValNum = Number(currentVal);
-              const totalCostNum = Number(c.total_cost);
-              const deltaNum = currentValNum - totalCostNum;
-              const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
+        const currentValNum = Number(currentVal);
+        const totalCostNum = Number(c.total_cost);
+        const deltaNum = currentValNum - totalCostNum;
+        const pnlPct = totalCostNum > 0 ? ((deltaNum / totalCostNum) * 100).toFixed(2) : "0.00";
 
-              return (
-                <tr key={c.id}>
-                  <td><strong>{c.symbol.toUpperCase()}</strong></td>
-                  <td>{c.display_name || c.symbol.toUpperCase()}</td>
-                  <td><b>{c.quantity}</b></td>
-                  <td>{fmtMoneyDisplay(c.purchase_price)} đ</td>
-                  <td><b>{fmtMoneyDisplay(c.total_cost)} đ</b></td>
-                  <td>{c.purchase_date}</td>
-                  <td>
-                    {hasLiveQuote && currentUnitPrice ? (
-                      <div>
-                        <div><strong>{fmtMoneyDisplay(currentUnitPrice)} đ</strong></div>
-                        {portRow?.quote?.provider && (
-                          <span className="badge" style={{ fontSize: "0.68rem", display: "inline-block", marginTop: "2px", background: "#e0f2fe", color: "#0369a1" }}>
-                            {portRow.quote.provider}
-                          </span>
-                        )}
-                        {portRow?.quote?.state === "STALE" && (
-                          <span className="badge muted" style={{ fontSize: "0.68rem", display: "inline-block", marginTop: "2px", marginLeft: "4px" }}>
-                            STALE
-                          </span>
-                        )}
-                      </div>
-                    ) : (
-                      <span style={{ color: "var(--muted)" }}>—</span>
-                    )}
-                  </td>
-                  <td><strong>{fmtMoneyDisplay(currentVal)} đ</strong></td>
-                  <td>
-                    <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
-                      {deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} ({deltaNum > 0 ? "+" : ""}{pnlPct}%)
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button type="button" className="text-button" onClick={() => onEdit(c)}>{tr("Edit")}</button>
-                      <button
-                        type="button"
-                        className="text-button danger"
-                        disabled={deleteMutation.isPending}
-                        onClick={() => {
-                          if (window.confirm(`${tr("Confirm delete")}?`)) {
-                            deleteMutation.mutate(c.id);
-                          }
-                        }}
-                      >
-                        {tr("Delete")}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+        return (
+          <div
+            className="asset-item-card"
+            key={c.id}
+            onClick={() => onSelect(c)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => (e.key === "Enter" || e.key === " ") && onSelect(c)}
+          >
+            <div className="asset-item-left">
+              <div className="asset-item-icon" style={{ background: "#ede9fe", color: "#7c3aed" }}>
+                <IconGlyph iconKey="TrendingUp" size={22} />
+              </div>
+              <div className="asset-item-content">
+                <div className="asset-item-title">
+                  {c.display_name || c.symbol.toUpperCase()} ({c.symbol.toUpperCase()})
+                </div>
+                <div className="asset-item-sub">
+                  {c.quantity} {c.symbol.toUpperCase()} · {fmtMoneyDisplay(currentVal)} VND
+                </div>
+              </div>
+            </div>
+            <div className="asset-item-right">
+              <div className="asset-item-val">{fmtMoneyDisplay(currentVal)} đ</div>
+              <span className={`pnl-pill ${deltaNum > 0 ? "pnl-positive" : deltaNum < 0 ? "pnl-negative" : "pnl-neutral"}`}>
+                {deltaNum > 0 ? "+" : ""}{fmtMoneyDisplay(String(deltaNum))} đ ({deltaNum > 0 ? "+" : ""}{pnlPct}%)
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1042,10 +1414,12 @@ function LiquidAccountsDashboard({
   accounts,
   balances,
   language,
+  hideAmount = false,
 }: {
   accounts: Account[];
   balances: Map<number, string>;
   language: Language;
+  hideAmount?: boolean;
 }) {
   const { tr } = useI18n();
 
@@ -1094,7 +1468,7 @@ function LiquidAccountsDashboard({
     label: t.name,
     value: t.amount,
     color: t.color,
-    formattedValue: `${fmtMoneyDisplay(String(Math.round(t.amount))) ?? "0"} đ`,
+    formattedValue: hideAmount ? "••••••" : `${fmtMoneyDisplay(String(Math.round(t.amount))) ?? "0"} đ`,
   }));
 
   return (
@@ -1107,7 +1481,7 @@ function LiquidAccountsDashboard({
               {language === "vi" ? "Tổng số dư thanh toán" : "Total liquid balance"}
             </span>
             <strong style={{ fontSize: "1.45rem", fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
-              {fmtMoneyDisplay(String(Math.round(grandTotal))) ?? "0"} <span style={{ fontSize: "0.92rem", fontWeight: 600 }}>đ</span>
+              {hideAmount ? "••••••••" : `${fmtMoneyDisplay(String(Math.round(grandTotal))) ?? "0"} đ`}
             </strong>
           </div>
           <span className="badge muted" style={{ fontSize: "0.76rem", padding: "4px 10px", borderRadius: "999px" }}>
@@ -1134,7 +1508,7 @@ function LiquidAccountsDashboard({
                   <span className="liquid-bar-count">({item.count} {language === "vi" ? "TK" : "accs"})</span>
                 </div>
                 <div className="liquid-bar-val-group">
-                  <span className="liquid-bar-amt">{fmtMoneyDisplay(String(Math.round(item.amount))) ?? "0"} đ</span>
+                  <span className="liquid-bar-amt">{hideAmount ? "••••••" : `${fmtMoneyDisplay(String(Math.round(item.amount))) ?? "0"} đ`}</span>
                   <span className="liquid-bar-pct" style={{ color: item.color }}>{item.pct.toFixed(1)}%</span>
                 </div>
               </div>
@@ -1158,7 +1532,7 @@ function LiquidAccountsDashboard({
         <ReportDonutChart
           data={pieData}
           totalLabel={language === "vi" ? "Tổng cộng" : "Total"}
-          totalValueFormatted={`${fmtMoneyDisplay(String(Math.round(grandTotal))) ?? "0"} đ`}
+          totalValueFormatted={hideAmount ? "••••••••" : `${fmtMoneyDisplay(String(Math.round(grandTotal))) ?? "0"} đ`}
           legendPosition="right"
           height={180}
         />
@@ -1178,6 +1552,7 @@ function Assets() {
   const cryptoQ = useQuery({ queryKey: ["crypto"], queryFn: api.assets.crypto.list });
   const brands = useQuery({ queryKey: ["metal-brands"], queryFn: api.assets.metalBrands });
 
+  const _tabs = [["savings","Savings"], ["metals","Precious metals"], ["crypto","Crypto"]] as const; void _tabs;
   const [tab, setTab] = useState<"liquid" | "savings" | "metals" | "crypto">("liquid");
   const [addModal, setAddModal] = useState<"metal" | "crypto" | null>(null);
   const [metalQty, setMetalQty] = useState("");
@@ -1190,8 +1565,26 @@ function Assets() {
   const [cryptoPrice, setCryptoPrice] = useState("");
   const [cryptoTotal, setCryptoTotal] = useState("");
 
+  const [detailMetal, setDetailMetal] = useState<MetalHolding | null>(null);
+  const [detailCrypto, setDetailCrypto] = useState<CryptoHolding | null>(null);
   const [editingMetal, setEditingMetal] = useState<MetalHolding | null>(null);
   const [editingCrypto, setEditingCrypto] = useState<CryptoHolding | null>(null);
+  const [hideAmount, setHideAmount] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("pf_hide_amount") === "true";
+    }
+    return false;
+  });
+
+  const toggleHideAmount = () => {
+    setHideAmount(prev => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        localStorage.setItem("pf_hide_amount", String(next));
+      }
+      return next;
+    });
+  };
 
   const fx = useQuery({ queryKey: ["fx", "usd-vnd"], queryFn: api.fx.usdVnd, enabled: cryptoCurrency === "USD", staleTime: 5 * 60 * 1000 });
   const metal = useMutation({
@@ -1381,7 +1774,7 @@ function Assets() {
   const liquidAccounts = (accountsQ.data ?? []).filter(a => a.is_active && a.account_type !== "CREDIT_CARD");
 
   return (
-    <Section title="Assets" subtitle="Manage assets, investments, and net worth in one place.">
+    <div className="overview-page" style={{ width: "100%", maxWidth: "100%" }}>
       <Loading show={q.isPending || accountsQ.isPending} />
       <Error error={q.error} />
 
@@ -1395,6 +1788,8 @@ function Assets() {
         portfolioCrypto={p?.crypto}
         activeTab={tab}
         onSelectTab={setTab}
+        hideAmount={hideAmount}
+        onToggleHideAmount={toggleHideAmount}
       />
 
       {tab === "liquid" && (
@@ -1403,6 +1798,7 @@ function Assets() {
             accounts={liquidAccounts}
             balances={balances}
             language={language}
+            hideAmount={hideAmount}
           />
 
           <div className="liquid-accounts-panel">
@@ -1426,7 +1822,7 @@ function Assets() {
                       </div>
                     </div>
                     <div className="liquid-account-bal">
-                      {fmtMoneyDisplay(bal) ?? "—"} {a.currency}
+                      {hideAmount ? "••••••" : `${fmtMoneyDisplay(bal) ?? "—"} ${a.currency}`}
                     </div>
                   </div>
                 );
@@ -1437,7 +1833,7 @@ function Assets() {
         </div>
       )}
 
-      {tab === "savings" && <SavingsPanel />}
+      {tab === "savings" && <SavingsPanel hideAmount={hideAmount} />}
 
       {tab === "metals" && (() => {
         const metalsList = metalsQ.data ?? [];
@@ -1475,18 +1871,18 @@ function Assets() {
             <div className="asset-kpi-grid">
               <div className="asset-kpi-card">
                 <span>{tr("Total valuation")}</span>
-                <strong>{fmtMoneyDisplay(metalsValuation) || "0"} đ</strong>
+                <strong>{hideAmount ? "••••••••" : `${fmtMoneyDisplay(metalsValuation) || "0"} đ`}</strong>
                 <small className="hint">{filteredMetals.length} {tr("Holdings")}</small>
               </div>
               <div className="asset-kpi-card">
                 <span>{tr("Total invested")}</span>
-                <strong>{fmtMoneyDisplay(metalsTotalCost) || "0"} đ</strong>
+                <strong>{hideAmount ? "••••••••" : `${fmtMoneyDisplay(metalsTotalCost) || "0"} đ`}</strong>
                 <small className="hint">{tr("Total cost")}</small>
               </div>
               <div className="asset-kpi-card">
                 <span>{tr("Net profit / loss")}</span>
                 <strong style={{ color: isPos ? "#16a34a" : isNeg ? "#dc2626" : "inherit" }}>
-                  {isPos ? "+" : ""}{fmtMoneyDisplay(metalsNetPl)} đ
+                  {hideAmount ? "••••••••" : `${isPos ? "+" : ""}${fmtMoneyDisplay(metalsNetPl)} đ`}
                 </strong>
                 <small style={{ color: isPos ? "#16a34a" : isNeg ? "#dc2626" : "inherit", fontWeight: 700 }}>
                   {isPos ? "+" : ""}{metalsRoi}% ROI
@@ -1546,12 +1942,11 @@ function Assets() {
               </div>
             </div>
 
-            {/* 3. Danh sách chi tiết hiện ở dưới full trang */}
-            <MetalsHoldingsTable
+            {/* 3. Danh sách chi tiết vắn tắt: Dòng 1 sản phẩm - số lượng, Dòng 2 thương hiệu và giá trị */}
+            <MetalsHoldingsList
               metals={filteredMetals}
               portfolioRows={p?.precious_metals ?? []}
-              onEdit={m => setEditingMetal(m)}
-              onDeleted={refreshHoldings}
+              onSelect={m => setDetailMetal(m)}
             />
           </div>
         );
@@ -1587,18 +1982,18 @@ function Assets() {
             <div className="asset-kpi-grid">
               <div className="asset-kpi-card">
                 <span>{tr("Total valuation")}</span>
-                <strong>{fmtMoneyDisplay(cryptoValuation) || "0"} đ</strong>
+                <strong>{hideAmount ? "••••••••" : `${fmtMoneyDisplay(cryptoValuation) || "0"} đ`}</strong>
                 <small className="hint">{filteredCrypto.length} {tr("Holdings")}</small>
               </div>
               <div className="asset-kpi-card">
                 <span>{tr("Total invested")}</span>
-                <strong>{fmtMoneyDisplay(cryptoTotalCost) || "0"} đ</strong>
+                <strong>{hideAmount ? "••••••••" : `${fmtMoneyDisplay(cryptoTotalCost) || "0"} đ`}</strong>
                 <small className="hint">{tr("Total cost")}</small>
               </div>
               <div className="asset-kpi-card">
                 <span>{tr("Net profit / loss")}</span>
                 <strong style={{ color: isPos ? "#16a34a" : isNeg ? "#dc2626" : "inherit" }}>
-                  {isPos ? "+" : ""}{fmtMoneyDisplay(cryptoNetPl)} đ
+                  {hideAmount ? "••••••••" : `${isPos ? "+" : ""}${fmtMoneyDisplay(cryptoNetPl)} đ`}
                 </strong>
                 <small style={{ color: isPos ? "#16a34a" : isNeg ? "#dc2626" : "inherit", fontWeight: 700 }}>
                   {isPos ? "+" : ""}{cryptoRoi}% ROI
@@ -1645,12 +2040,11 @@ function Assets() {
               </div>
             </div>
 
-            {/* 3. Danh sách chi tiết hiện ở dưới full trang */}
-            <CryptoHoldingsTable
+            {/* 3. Danh sách chi tiết vắn tắt: tên, số lượng, giá trị */}
+            <CryptoHoldingsList
               crypto={filteredCrypto}
               portfolioRows={p?.crypto ?? []}
-              onEdit={c => setEditingCrypto(c)}
-              onDeleted={refreshHoldings}
+              onSelect={c => setDetailCrypto(c)}
             />
           </div>
         );
@@ -1800,6 +2194,40 @@ function Assets() {
         </Modal>
       )}
 
+      {detailMetal && (
+        <MetalDetailDialog
+          holding={detailMetal}
+          portfolioRow={p?.precious_metals?.find(r => r.id === detailMetal.id)}
+          onClose={() => setDetailMetal(null)}
+          onEdit={() => {
+            const m = detailMetal;
+            setDetailMetal(null);
+            setEditingMetal(m);
+          }}
+          onDeleted={() => {
+            setDetailMetal(null);
+            refreshHoldings();
+          }}
+        />
+      )}
+
+      {detailCrypto && (
+        <CryptoDetailDialog
+          holding={detailCrypto}
+          portfolioRow={p?.crypto?.find(r => r.id === detailCrypto.id)}
+          onClose={() => setDetailCrypto(null)}
+          onEdit={() => {
+            const c = detailCrypto;
+            setDetailCrypto(null);
+            setEditingCrypto(c);
+          }}
+          onDeleted={() => {
+            setDetailCrypto(null);
+            refreshHoldings();
+          }}
+        />
+      )}
+
       {editingMetal && (
         <MetalEditModal
           holding={editingMetal}
@@ -1816,7 +2244,7 @@ function Assets() {
           onCancel={() => setEditingCrypto(null)}
         />
       )}
-    </Section>
+    </div>
   );
 }
 
@@ -2097,10 +2525,6 @@ const QUICK_EXPENSE_CATEGORIES = [
   { nameVi: "Mua sắm", nameEn: "Shopping", icon: "ShoppingBag", match: ["mua sắm", "shopping", "quần áo", "clothes"] },
   { nameVi: "Di chuyển / Xăng xe", nameEn: "Transportation", icon: "Fuel", match: ["di chuyển", "xăng", "transportation", "xe cộ", "fuel"] },
   { nameVi: "Hóa đơn & Tiện ích", nameEn: "Bills & Utilities", icon: "Bolt", match: ["hóa đơn", "tiện ích", "điện", "nước", "internet", "bills", "utilities"] },
-  { nameVi: "Nhà cửa", nameEn: "Housing", icon: "Home", match: ["nhà cửa", "nhà ở", "tiền nhà", "home", "housing", "rent"] },
-  { nameVi: "Giải trí", nameEn: "Entertainment", icon: "Play", match: ["giải trí", "entertainment", "xem phim", "game", "chơi"] },
-  { nameVi: "Sức khỏe", nameEn: "Healthcare", icon: "Heart", match: ["sức khỏe", "thuốc", "khám", "health", "medical", "bệnh"] },
-  { nameVi: "Học tập", nameEn: "Education", icon: "Book", match: ["học tập", "giáo dục", "sách", "education", "khóa học"] },
 ];
 
 function QuickCategoryPills({
@@ -2190,7 +2614,7 @@ function savingsStatusClass(status: string): string {
   return "";
 }
 
-function SavingsPanel() {
+function SavingsPanel({ hideAmount = false }: { hideAmount?: boolean } = {}) {
   const { tr, language } = useI18n();
   const qc = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
@@ -2224,28 +2648,23 @@ function SavingsPanel() {
     invalidateAllFinancialQueries(qc);
   }
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.assets.savings.remove(id),
-    onSuccess: refresh,
-  });
-
   return (
     <div className="savings-panel" style={{ width: "100%" }}>
       {/* 1. Dashboard tổng hợp Tiết kiệm */}
       <div className="asset-kpi-grid">
         <div className="asset-kpi-card">
           <span>{tr("Total principal")}</span>
-          <strong>{fmtMoneyDisplay(totalPrincipal) || "0"} đ</strong>
+          <strong>{hideAmount ? "••••••••" : `${fmtMoneyDisplay(totalPrincipal) || "0"} đ`}</strong>
           <small className="hint">{openRows.length} {tr("Active accounts count")}</small>
         </div>
         <div className="asset-kpi-card">
           <span>{tr("Total expected interest")}</span>
-          <strong style={{ color: "#16a34a" }}>{fmtMoneyDisplay(totalExpectedInterest) || "0"} đ</strong>
+          <strong style={{ color: "#16a34a" }}>{hideAmount ? "••••••••" : `${fmtMoneyDisplay(totalExpectedInterest) || "0"} đ`}</strong>
           <small className="hint">{tr("At maturity")}</small>
         </div>
         <div className="asset-kpi-card">
           <span>{tr("Total projected maturity value")}</span>
-          <strong style={{ color: "#0284c7" }}>{fmtMoneyDisplay(totalProjectedMaturity) || "0"} đ</strong>
+          <strong style={{ color: "#0284c7" }}>{hideAmount ? "••••••••" : `${fmtMoneyDisplay(totalProjectedMaturity) || "0"} đ`}</strong>
           <small className="hint">{tr("Principal")} + {tr("Expected interest")}</small>
         </div>
         <div className="asset-kpi-card" style={{ borderColor: nearestAccount?.current_term?.maturing_soon ? "#f97316" : undefined }}>
@@ -2259,8 +2678,8 @@ function SavingsPanel() {
                 {nearestAccount.current_term.maturity_date} ({nearestAccount.current_term.days_to_maturity != null && nearestAccount.current_term.days_to_maturity >= 0 ? `${nearestAccount.current_term.days_to_maturity} ${tr("days")}` : tr("Matured")})
               </div>
               <div style={{ fontSize: "0.78rem", marginTop: "2px" }}>
-                <span>{tr("Principal")}: <b>{fmtMoneyDisplay(nearestAccount.principal)} đ</b></span>
-                <span style={{ marginLeft: "6px", color: "#16a34a" }}>· {tr("Projected value at maturity")}: <b>{fmtMoneyDisplay(sumMoney([nearestAccount.principal, nearestAccount.current_term.expected_interest]))} đ</b></span>
+                <span>{tr("Principal")}: <b>{hideAmount ? "••••••" : `${fmtMoneyDisplay(nearestAccount.principal)} đ`}</b></span>
+                <span style={{ marginLeft: "6px", color: "#16a34a" }}>· {tr("Projected value at maturity")}: <b>{hideAmount ? "••••••" : `${fmtMoneyDisplay(sumMoney([nearestAccount.principal, nearestAccount.current_term.expected_interest]))} đ`}</b></span>
               </div>
             </div>
           ) : (
@@ -2339,71 +2758,49 @@ function SavingsPanel() {
       <Error error={savingsQ.error} />
       <Loading show={savingsQ.isPending} />
 
-      {/* 3. Danh sách chi tiết hiện ở dưới full trang */}
-      <div className="holdings-table-wrap">
-        <table className="holdings-table">
-          <thead>
-            <tr>
-              <th>{tr("Institution")}</th>
-              <th>{tr("Savings account name")}</th>
-              <th>{tr("Principal")}</th>
-              <th>{tr("Interest rate")}</th>
-              <th>{tr("Term (months)")}</th>
-              <th>{tr("Deposit date")}</th>
-              <th>{tr("Maturity date")}</th>
-              <th>{tr("Expected interest")}</th>
-              <th>{tr("Status")}</th>
-              <th>{tr("Edit")} / {tr("Delete")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {displayRows.length === 0 ? (
-              <tr>
-                <td colSpan={10} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>
-                  {tr("No savings accounts yet.")}
-                </td>
-              </tr>
-            ) : (
-              displayRows.map(row => {
-                const status = savingsStatusText(row);
-                const term = row.current_term;
-                return (
-                  <tr key={row.id} onClick={() => setDetailId(row.id)} style={{ cursor: "pointer" }}>
-                    <td><strong>{row.institution}</strong></td>
-                    <td>{row.name}</td>
-                    <td><strong>{fmtMoneyDisplay(row.principal)} {row.currency}</strong></td>
-                    <td>{term ? `${fmtRate(term.annual_rate)}%/năm` : "—"}</td>
-                    <td>{term ? `${term.term_months} ${tr("months")}` : "—"}</td>
-                    <td>{term?.start_date ?? row.opened_date}</td>
-                    <td>{term?.maturity_date ?? "—"}</td>
-                    <td>{term?.expected_interest ? `${fmtMoneyDisplay(term.expected_interest)} đ` : "—"}</td>
-                    <td><span className={`badge ${savingsStatusClass(status)}`}>{tr(status)}</span></td>
-                    <td onClick={e => e.stopPropagation()}>
-                      <div style={{ display: "flex", gap: "6px" }}>
-                        <button type="button" className="text-button" onClick={() => setDetailId(row.id)}>
-                          {tr("Details")}
-                        </button>
-                        <button
-                          type="button"
-                          className="text-button danger"
-                          disabled={deleteMutation.isPending}
-                          onClick={() => {
-                            if (window.confirm(tr("Are you sure you want to delete this savings account?"))) {
-                              deleteMutation.mutate(row.id);
-                            }
-                          }}
-                        >
-                          {tr("Delete")}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* 3. Danh sách chi tiết vắn tắt: Tên sổ, tiền gốc, ngày đáo hạn */}
+      {displayRows.length === 0 ? (
+        <Empty show={true} text="No savings accounts yet." />
+      ) : (
+        <div className="asset-items-list">
+          {displayRows.map(row => {
+            const status = savingsStatusText(row);
+            const maturityVal = row.current_term?.expected_interest
+              ? sumMoney([row.principal, row.current_term.expected_interest])
+              : row.principal;
+            return (
+              <div
+                className="asset-item-card"
+                key={row.id}
+                onClick={() => setDetailId(row.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => (e.key === "Enter" || e.key === " ") && setDetailId(row.id)}
+              >
+                <div className="asset-item-left">
+                  <div className="asset-item-icon" style={{ background: "#dcfce7", color: "#15803d" }}>
+                    <IconGlyph iconKey="PiggyBank" size={22} />
+                  </div>
+                  <div className="asset-item-content">
+                    <div className="asset-item-title">
+                      {row.name}
+                    </div>
+                    <div className="asset-item-sub">
+                      {tr("Principal")}: <span className="savings-card-principal"><b>{fmtMoneyDisplay(row.principal)} {row.currency}</b></span> · {tr("Maturity date")}: <b>{row.current_term ? row.current_term.maturity_date : "—"}</b>
+                    </div>
+                  </div>
+                </div>
+                <div className="asset-item-right">
+                  <div className="asset-item-val">{fmtMoneyDisplay(maturityVal)} {row.currency}</div>
+                  <span className={`badge ${savingsStatusClass(status)}`}>
+                    {status === "Ongoing" ? (row.current_term?.maturity_date ?? tr(status)) : tr(status)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {createOpen && (
         <Modal title="Add savings account" onClose={() => setCreateOpen(false)}>
@@ -2440,10 +2837,9 @@ function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccount
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const v = (n: string) => String(f.get(n) ?? "").trim();
-    const fId = savingsDeduct ? Number(savingsFundingAccount || v("funding_account_id") || (walletAccounts[0]?.id ? String(walletAccounts[0].id) : "0")) : undefined;
     create.mutate({
       institution: v("institution"), product_name: v("product_name") || undefined, name: v("name"),
-      principal: principal || v("principal"), funding_account_id: fId && fId > 0 ? fId : undefined, opened_date: openedDate || v("opened_date"),
+      principal: principal || v("principal"), funding_account_id: Number(v("funding_account_id")), opened_date: openedDate || v("opened_date"),
       term_months: Number(v("term_months")), annual_rate: v("annual_rate"), non_term_rate: v("non_term_rate") || "0",
       interest_payment_method: v("interest_payment_method") as SavingsCreateInput["interest_payment_method"],
       maturity_action: v("maturity_action") as SavingsCreateInput["maturity_action"],
@@ -2461,7 +2857,7 @@ function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccount
       <Field label="Savings account name"><input name="name" required /></Field>
     </fieldset>
     <fieldset><legend>{tr("Deposit amount")}</legend>
-      <Field label="Deposit amount"><div className="amount-row"><MoneyInput value={principal} onChange={setPrincipal} placeholder="0" required /><span className="currency-badge">VND</span></div></Field>
+      <Field label="Deposit amount"><div className="amount-row"><MoneyInput name="principal" value={principal} onChange={setPrincipal} placeholder="0" required /><span className="currency-badge">VND</span></div></Field>
       <Field label="Deposit date"><DateRow name="opened_date" value={openedDate} onChange={setOpenedDate} language={language} label="Deposit date" /></Field>
       <Field label="Term (months)"><input name="term_months" type="number" min={1} step={1} required value={termMonths} onChange={e => setTermMonths(e.target.value)} /></Field>
       <label className="checkbox-row" style={{ marginTop: "4px" }}>
@@ -3671,23 +4067,43 @@ function getLevel1ExpenseCategories(categories: Category[]): Category[] {
   return categories.filter(c => c.parent_id == null && c.name.toLowerCase() !== "income" && c.is_active !== false);
 }
 
-function Reports() {
+function Reports({ initialParams }: { initialParams?: ReportFilterParams | null } = {}) {
   const { tr, label, language } = useI18n();
   const eventsQ = useQuery({ queryKey: ["events"], queryFn: api.events.list });
   const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
+  const activeAccounts = useMemo(() => (accountsQ.data ?? []).filter(a => a.is_active), [accountsQ.data]);
+  const { balances } = useAccountBalances(activeAccounts);
 
-  const [timeScope, setTimeScope] = useState<"ALL" | "YEAR" | "QUARTER" | "MONTH" | "WEEK" | "DAY" | "CUSTOM">("MONTH");
-  const [selectedYear, setSelectedYear] = useState<string>(() => String(new Date().getFullYear()));
-  const [selectedQuarter, setSelectedQuarter] = useState<number>(() => Math.floor(new Date().getMonth() / 3) + 1);
-  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>(() => todayIso());
+  const [selectedAccountId, setSelectedAccountId] = useState<number | "ALL" | null>(() => initialParams?.accountId ?? "ALL");
+  const [timeScope, setTimeScope] = useState<"ALL" | "YEAR" | "QUARTER" | "MONTH" | "WEEK" | "DAY" | "CUSTOM">(() => initialParams?.timeScope ?? "MONTH");
+  const [selectedYear, setSelectedYear] = useState<string>(() => initialParams?.selectedYear ?? String(new Date().getFullYear()));
+  const [selectedQuarter, setSelectedQuarter] = useState<number>(() => initialParams?.selectedQuarter ?? (Math.floor(new Date().getMonth() / 3) + 1));
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(() => initialParams?.selectedMonthKey ?? null);
+  const [selectedDate, setSelectedDate] = useState<string>(() => initialParams?.selectedDate ?? todayIso());
   const [dayWindowOffset, setDayWindowOffset] = useState<number>(0);
-  const [customStart, setCustomStart] = useState(() => `${new Date().getFullYear()}-01-01`);
-  const [customEnd, setCustomEnd] = useState(() => todayIso());
+  const [customStart, setCustomStart] = useState(() => initialParams?.customStart ?? `${new Date().getFullYear()}-01-01`);
+  const [customEnd, setCustomEnd] = useState(() => initialParams?.customEnd ?? todayIso());
+  const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(() => initialParams?.selectedWeekStart ?? null);
+  const [selectedWeekEnd, setSelectedWeekEnd] = useState<string | null>(() => initialParams?.selectedWeekEnd ?? null);
   const [activeReportTab, setActiveReportTab] = useState<"time" | "category" | "account" | "payee">("time");
   const [categoryFlow, setCategoryFlow] = useState<"EXPENSE" | "INCOME">("EXPENSE");
   const [expandedParents, setExpandedParents] = useState<Record<number, boolean>>({});
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+
+  useEffect(() => {
+    if (!initialParams) return;
+    if (initialParams.timeScope) setTimeScope(initialParams.timeScope);
+    if (initialParams.selectedYear) setSelectedYear(initialParams.selectedYear);
+    if (initialParams.selectedQuarter) setSelectedQuarter(initialParams.selectedQuarter);
+    if (initialParams.selectedMonthKey !== undefined) setSelectedMonthKey(initialParams.selectedMonthKey);
+    if (initialParams.selectedDate) setSelectedDate(initialParams.selectedDate);
+    if (initialParams.customStart) setCustomStart(initialParams.customStart);
+    if (initialParams.customEnd) setCustomEnd(initialParams.customEnd);
+    if (initialParams.selectedWeekStart !== undefined) setSelectedWeekStart(initialParams.selectedWeekStart);
+    if (initialParams.selectedWeekEnd !== undefined) setSelectedWeekEnd(initialParams.selectedWeekEnd);
+    if (initialParams.accountId !== undefined) setSelectedAccountId(initialParams.accountId);
+  }, [initialParams]);
 
   const todayStr = todayIso();
   const currentMonthKey = useMemo(() => todayStr.slice(0, 7), [todayStr]);
@@ -3763,9 +4179,6 @@ function Reports() {
     end.setDate(end.getDate() + 6);
     return formatYmd(end);
   }, [lastWeekMonday]);
-
-  const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(() => thisWeekStart);
-  const [selectedWeekEnd, setSelectedWeekEnd] = useState<string | null>(() => thisWeekEnd);
 
   const currentMonthWeeks = useMemo(() => {
     const all = getYearWeeks(selectedWeekYear, language);
@@ -3874,9 +4287,12 @@ function Reports() {
       if (e.excluded_from_reports) return false;
       if (startDate && e.transaction_date < startDate) return false;
       if (endDate && e.transaction_date > endDate) return false;
+      if (selectedAccountId != null && selectedAccountId !== "ALL") {
+        if (!e.entries.some(en => en.account_id === selectedAccountId)) return false;
+      }
       return true;
     });
-  }, [events, startDate, endDate]);
+  }, [events, startDate, endDate, selectedAccountId]);
 
   let totalIncome = "0";
   let totalExpense = "0";
@@ -4148,6 +4564,46 @@ function Reports() {
 
   return (
     <div className="reports-page">
+      {/* Money Lover Mobile Header */}
+      <div className="ml-mobile-header mobile-only">
+        <div className="ml-header-account-pill">
+          <AccountRow
+            label="Select account"
+            accounts={activeAccounts}
+            value={selectedAccountId != null ? String(selectedAccountId) : ""}
+            onChange={v => setSelectedAccountId(v === "ALL" ? "ALL" : Number(v))}
+            balances={balances}
+            allowAll
+          />
+        </div>
+
+        <div className="ml-header-right-btns">
+          <button
+            type="button"
+            className="ml-header-circle-btn"
+            aria-label="More"
+            title={language === "vi" ? "Khoảng thời gian" : "Time period"}
+            onClick={() => setMobileMoreOpen(true)}
+          >
+            <span style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>⋯</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Desktop Header */}
+      <div className="desktop-only" style={{ marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ minWidth: "200px", maxWidth: "340px", width: "100%" }}>
+          <AccountRow
+            label="Select account"
+            accounts={activeAccounts}
+            value={selectedAccountId != null ? String(selectedAccountId) : ""}
+            onChange={v => setSelectedAccountId(v === "ALL" ? "ALL" : Number(v))}
+            balances={balances}
+            allowAll
+          />
+        </div>
+      </div>
+
       {/* Time Filters: Tất cả | Năm | Quý | Tháng | Tuần | Ngày | Tùy chỉnh */}
       <div className="ledger-time-filter-wrap" style={{ marginBottom: "16px" }}>
         <div className="ledger-time-tabs" role="tablist">
@@ -4805,6 +5261,80 @@ function Reports() {
           )}
         </div>
       )}
+      {mobileMoreOpen && (
+        <div className="ml-popup-backdrop" onClick={() => setMobileMoreOpen(false)}>
+          <div className="ml-popup-card" onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", padding: "0 4px" }}>
+              <span style={{ fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+                {language === "vi" ? "Khoảng thời gian" : "Time period"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobileMoreOpen(false)}
+                style={{ background: "none", border: "none", fontSize: "16px", fontWeight: 700, cursor: "pointer", color: "#64748b", padding: "2px 8px" }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <button
+              type="button"
+              className={`ml-popup-pill-btn ${timeScope === "DAY" ? "active" : ""}`}
+              onClick={() => { setTimeScope("DAY"); setMobileMoreOpen(false); }}
+            >
+              {language === "vi" ? "Ngày" : "Day"}
+            </button>
+
+            <button
+              type="button"
+              className={`ml-popup-pill-btn ${timeScope === "WEEK" ? "active" : ""}`}
+              onClick={() => { setTimeScope("WEEK"); setMobileMoreOpen(false); }}
+            >
+              {language === "vi" ? "Tuần" : "Week"}
+            </button>
+
+            <button
+              type="button"
+              className={`ml-popup-pill-btn ${timeScope === "MONTH" ? "active" : ""}`}
+              onClick={() => { setTimeScope("MONTH"); setMobileMoreOpen(false); }}
+            >
+              {language === "vi" ? "Tháng" : "Month"}
+            </button>
+
+            <button
+              type="button"
+              className={`ml-popup-pill-btn ${timeScope === "QUARTER" ? "active" : ""}`}
+              onClick={() => { setTimeScope("QUARTER"); setMobileMoreOpen(false); }}
+            >
+              {language === "vi" ? "Quý" : "Quarter"}
+            </button>
+
+            <button
+              type="button"
+              className={`ml-popup-pill-btn ${timeScope === "YEAR" ? "active" : ""}`}
+              onClick={() => { setTimeScope("YEAR"); setMobileMoreOpen(false); }}
+            >
+              {language === "vi" ? "Năm" : "Year"}
+            </button>
+
+            <button
+              type="button"
+              className={`ml-popup-pill-btn ${timeScope === "ALL" ? "active" : ""}`}
+              onClick={() => { setTimeScope("ALL"); setMobileMoreOpen(false); }}
+            >
+              {language === "vi" ? "Tất cả" : "All"}
+            </button>
+
+            <button
+              type="button"
+              className={`ml-popup-pill-btn ${timeScope === "CUSTOM" ? "active" : ""}`}
+              onClick={() => { setTimeScope("CUSTOM"); setMobileMoreOpen(false); }}
+            >
+              {language === "vi" ? "Tuỳ chỉnh" : "Custom"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5181,6 +5711,7 @@ function Accounts() {
   const { label, tr, language } = useI18n();
   const qc = useQueryClient();
   const [formTarget, setFormTarget] = useState<"new" | Account | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [adjusting, setAdjusting] = useState<Account | null>(null);
   const [selectedAccountForTxns, setSelectedAccountForTxns] = useState<Account | null>(null);
   const [statementAccount, setStatementAccount] = useState<Account | null>(null);
@@ -5190,7 +5721,10 @@ function Accounts() {
 
   const query = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const balances = useAccountBalances(query.data);
-  const toggle = useMutation({ mutationFn: (account: Account) => api.accounts.update(account.id, { is_active: !account.is_active }), onSuccess: () => invalidateAllFinancialQueries(qc) });
+  const toggle = useMutation({
+    mutationFn: (account: Account) => api.accounts.update(account.id, { is_active: !account.is_active }),
+    onSuccess: () => invalidateAllFinancialQueries(qc),
+  });
 
   const reorder = useMutation({
     mutationFn: async (reorderedList: Account[]) => {
@@ -5262,134 +5796,195 @@ function Accounts() {
     ? allAccounts
     : allAccounts.filter(x => x.account_type === filterType);
 
-  return <section className="accounts-section">
-    <div className="accounts-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", marginBottom: "16px" }}>
-      <div className="accounts-toolbar-left" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-        <button type="button" className="primary" onClick={() => setFormTarget("new")}>+ {tr("Add account")}</button>
-        <AccountTypeFilterDropdown
-          selected={filterType}
-          onSelect={setFilterType}
-          accounts={allAccounts}
-        />
+  return (
+    <section className="accounts-section">
+      <div className="accounts-toolbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+        <div className="accounts-toolbar-left" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <AccountTypeFilterDropdown
+            selected={filterType}
+            onSelect={setFilterType}
+            accounts={allAccounts}
+          />
+          <button
+            type="button"
+            className="account-add-btn"
+            onClick={() => setFormTarget("new")}
+            title={tr("Add account")}
+            aria-label={tr("Add account")}
+          >
+            <IconGlyph iconKey="Plus" size={20} />
+          </button>
+        </div>
+        {allAccounts.length > 1 && (
+          <div className="accounts-toolbar-hint" style={{ fontSize: "0.8rem", color: "var(--muted)", display: "flex", alignItems: "center", gap: "6px" }}>
+            <span>⠿ {language === "vi" ? "Kéo thả để sắp xếp" : "Drag to reorder"}</span>
+          </div>
+        )}
       </div>
-      {allAccounts.length > 1 && (
-        <div className="accounts-toolbar-hint" style={{ fontSize: "0.8rem", color: "var(--muted)", display: "flex", alignItems: "center", gap: "6px" }}>
-          <span>⠿ {language === "vi" ? "Kéo thả thẻ để sắp xếp thứ tự" : "Drag cards to reorder"}</span>
-        </div>
+
+      <Error error={query.error ?? toggle.error ?? balances.error ?? move.error} />
+      <Loading show={query.isPending} />
+      <Empty show={!query.isPending && allAccounts.length === 0} text="No accounts yet." />
+      <Empty show={!query.isPending && allAccounts.length > 0 && filteredAccounts.length === 0} text="No accounts match this filter." />
+
+      <div className="cards">
+        {filteredAccounts.map((x, i) => {
+          const bal = balances.balances.get(x.id);
+          const isCreditCard = x.account_type === "CREDIT_CARD";
+          const brand = getAccountBrand(x.name, x.account_type);
+          const isSelected = selectedAccountId === x.id || (formTarget && typeof formTarget === "object" && formTarget.id === x.id);
+
+          return (
+            <article
+              className={`account-card-clickable ${isCreditCard ? "account-card-credit" : "account-card-bank"} ${!x.is_active ? "inactive" : ""} ${isSelected ? "is-selected" : ""} ${draggingId === x.id ? "is-dragging" : ""} ${dragOverId === x.id ? "is-drag-over" : ""}`}
+              key={x.id}
+              draggable={true}
+              onDragStart={e => {
+                e.dataTransfer.setData("text/plain", String(x.id));
+                e.dataTransfer.effectAllowed = "move";
+                setDraggingId(x.id);
+              }}
+              onDragOver={e => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dragOverId !== x.id) {
+                  setDragOverId(x.id);
+                }
+              }}
+              onDragLeave={() => {
+                if (dragOverId === x.id) {
+                  setDragOverId(null);
+                }
+              }}
+              onDrop={e => {
+                e.preventDefault();
+                handleDrop(x);
+              }}
+              onDragEnd={() => {
+                setDraggingId(null);
+                setDragOverId(null);
+              }}
+              style={{
+                "--brand-color": brand.primaryColor,
+                "--brand-gradient": brand.gradient,
+                "--brand-tint": brand.cardBgTint,
+                borderTop: `4px solid ${brand.primaryColor}`,
+              } as React.CSSProperties}
+              onClick={() => {
+                setSelectedAccountId(curr => (curr === x.id ? null : x.id));
+              }}
+              title={language === "vi" ? "Bấm vào để xem các thao tác" : "Click to view actions"}
+            >
+              <div className="account-card-brand-bar" style={{ background: brand.gradient }} />
+              <div className="account-card-header">
+                <span className="account-name">
+                  <AccountLogo name={x.name} accountType={x.account_type} size={36} />
+                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    <strong style={{ fontSize: "0.95rem" }}>{x.name}</strong>
+                    <span className="account-card-type-tag" style={{ color: brand.primaryColor }}>
+                      {label(x.account_type)} · {x.currency}
+                    </span>
+                  </div>
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span
+                    className={`status-icon-badge ${x.is_active ? "active" : "inactive"}`}
+                    title={tr(x.is_active ? "Active" : "Inactive")}
+                    aria-label={tr(x.is_active ? "Active" : "Inactive")}
+                  >
+                    {x.is_active ? "✓" : "✕"}
+                  </span>
+                  <span className="account-card-drag-handle" title="Kéo thả để sắp xếp thứ tự" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="8" cy="5" r="1.5" fill="currentColor" />
+                      <circle cx="8" cy="12" r="1.5" fill="currentColor" />
+                      <circle cx="8" cy="19" r="1.5" fill="currentColor" />
+                      <circle cx="16" cy="5" r="1.5" fill="currentColor" />
+                      <circle cx="16" cy="12" r="1.5" fill="currentColor" />
+                      <circle cx="16" cy="19" r="1.5" fill="currentColor" />
+                    </svg>
+                  </span>
+                </div>
+              </div>
+
+              <p className="account-balance" style={{ marginTop: "4px" }}>
+                {tr(isCreditCard ? "Initial debt" : "Current balance")}:{" "}
+                <strong style={{ color: isCreditCard ? "#dc2626" : undefined }}>
+                  {fmtMoneyDisplay(bal) ?? (balances.isPending ? "…" : "—")} {x.currency}
+                </strong>
+              </p>
+
+              {isCreditCard && x.credit_limit && (
+                <div className="account-credit-info">
+                  <div className="account-credit-row">
+                    <span>{tr("Credit limit")}:</span>
+                    <strong>{fmtMoneyDisplay(x.credit_limit)} VND</strong>
+                  </div>
+                  {bal != null && (
+                    <div className="account-credit-row">
+                      <span>{tr("Available credit")}:</span>
+                      <strong className="positive">{fmtMoneyDisplay(sumMoney([x.credit_limit, bal]))} VND</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isSelected && (
+                <div className="card-actions account-card-actions-wrapper" onClick={e => e.stopPropagation()}>
+                  <button type="button" className="text-button" aria-label={tr("Move up")} disabled={move.isPending || i === 0} onClick={() => moveBy(i, -1)}>↑</button>
+                  <button type="button" className="text-button" aria-label={tr("Move down")} disabled={move.isPending || i === allAccounts.length - 1} onClick={() => moveBy(i, 1)}>↓</button>
+                  <button type="button" className="text-button" onClick={() => setSelectedAccountForTxns(x)} title="Xem giao dịch">{language === "vi" ? "Giao dịch" : "Transactions"}</button>
+                  <button type="button" className="text-button" onClick={() => setStatementAccount(x)} title="Xem & In sao kê">{language === "vi" ? "Sao kê" : "Statement"}</button>
+                  <button type="button" className="text-button" onClick={() => setFormTarget(x)}>{tr("Edit")}</button>
+                  <button type="button" className="text-button" onClick={() => setAdjusting(x)}>{tr("Adjust balance")}</button>
+                  <button type="button" className="text-button" disabled={toggle.isPending} onClick={() => toggle.mutate(x)}>{tr(x.is_active ? "Deactivate" : "Activate")}</button>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+
+      {formTarget != null && (
+        <Modal
+          title={formTarget === "new" ? "Add account" : "Edit account"}
+          onClose={() => setFormTarget(null)}
+        >
+          <AccountFormDialog
+            editing={formTarget === "new" ? null : formTarget}
+            onDone={() => {
+              setFormTarget(null);
+              refresh();
+            }}
+            onCancel={() => setFormTarget(null)}
+          />
+        </Modal>
       )}
-    </div>
-    <Error error={query.error ?? toggle.error ?? balances.error ?? move.error} />
-    <Loading show={query.isPending} />
-    <Empty show={!query.isPending && allAccounts.length === 0} text="No accounts yet." />
-    <Empty show={!query.isPending && allAccounts.length > 0 && filteredAccounts.length === 0} text="No accounts match this filter." />
-    <div className="cards">{filteredAccounts.map((x, i) => {
-      const bal = balances.balances.get(x.id);
-      const isCreditCard = x.account_type === "CREDIT_CARD";
-      const brand = getAccountBrand(x.name, x.account_type);
-      return <article
-        className={`account-card-clickable ${isCreditCard ? "account-card-credit" : "account-card-bank"} ${!x.is_active ? "inactive" : ""} ${draggingId === x.id ? "is-dragging" : ""} ${dragOverId === x.id ? "is-drag-over" : ""}`}
-        key={x.id}
-        draggable={true}
-        onDragStart={e => {
-          e.dataTransfer.setData("text/plain", String(x.id));
-          e.dataTransfer.effectAllowed = "move";
-          setDraggingId(x.id);
-        }}
-        onDragOver={e => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          if (dragOverId !== x.id) {
-            setDragOverId(x.id);
-          }
-        }}
-        onDragLeave={() => {
-          if (dragOverId === x.id) {
-            setDragOverId(null);
-          }
-        }}
-        onDrop={e => {
-          e.preventDefault();
-          handleDrop(x);
-        }}
-        onDragEnd={() => {
-          setDraggingId(null);
-          setDragOverId(null);
-        }}
-        style={{
-          "--brand-color": brand.primaryColor,
-          "--brand-gradient": brand.gradient,
-          "--brand-tint": brand.cardBgTint,
-          borderTop: `4px solid ${brand.primaryColor}`,
-        } as React.CSSProperties}
-        onClick={e => {
-          if ((e.target as HTMLElement).closest("button")) return;
-          setSelectedAccountForTxns(x);
-        }}
-        title="Bấm để xem toàn bộ giao dịch hoặc kéo thả để đổi thứ tự"
-      >
-        <div className="account-card-brand-bar" style={{ background: brand.gradient }} />
-        <div className="account-card-header">
-          <span className="account-name">
-            <AccountLogo name={x.name} accountType={x.account_type} size={36} />
-            <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-              <strong style={{ fontSize: "0.95rem" }}>{x.name}</strong>
-              <span className="account-card-type-tag" style={{ color: brand.primaryColor }}>
-                {label(x.account_type)} · {x.currency}
-              </span>
-            </div>
-          </span>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <Status active={x.is_active} />
-            <span className="account-card-drag-handle" title="Kéo thả để sắp xếp thứ tự" aria-hidden="true">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="8" cy="5" r="1.5" fill="currentColor" />
-                <circle cx="8" cy="12" r="1.5" fill="currentColor" />
-                <circle cx="8" cy="19" r="1.5" fill="currentColor" />
-                <circle cx="16" cy="5" r="1.5" fill="currentColor" />
-                <circle cx="16" cy="12" r="1.5" fill="currentColor" />
-                <circle cx="16" cy="19" r="1.5" fill="currentColor" />
-              </svg>
-            </span>
-          </div>
-        </div>
 
-        <p className="account-balance" style={{ marginTop: "4px" }}>
-          {tr(isCreditCard ? "Initial debt" : "Current balance")}:{" "}
-          <strong style={{ color: isCreditCard ? "#dc2626" : undefined }}>
-            {fmtMoneyDisplay(bal) ?? (balances.isPending ? "…" : "—")} {x.currency}
-          </strong>
-        </p>
-
-        {isCreditCard && x.credit_limit && <div className="account-credit-info">
-          <div className="account-credit-row">
-            <span>{tr("Credit limit")}:</span>
-            <strong>{fmtMoneyDisplay(x.credit_limit)} VND</strong>
-          </div>
-          {bal != null && <div className="account-credit-row">
-            <span>{tr("Available credit")}:</span>
-            <strong className="positive">{fmtMoneyDisplay(sumMoney([x.credit_limit, bal]))} VND</strong>
-          </div>}
-        </div>}
-
-        <div className="card-actions" onClick={e => e.stopPropagation()}>
-          <button type="button" className="text-button" aria-label={tr("Move up")} disabled={move.isPending || i === 0} onClick={() => moveBy(i, -1)}>↑</button>
-          <button type="button" className="text-button" aria-label={tr("Move down")} disabled={move.isPending || i === (allAccounts.length) - 1} onClick={() => moveBy(i, 1)}>↓</button>
-          <button type="button" className="text-button" onClick={() => setStatementAccount(x)} title="Xem & In sao kê tài khoản">{language === "vi" ? "Sao kê" : "Statement"}</button>
-          <button type="button" className="text-button" onClick={() => setFormTarget(x)}>{tr("Edit")}</button>
-          <button type="button" className="text-button" onClick={() => setAdjusting(x)}>{tr("Adjust balance")}</button>
-          <button type="button" className="text-button" disabled={toggle.isPending} onClick={() => toggle.mutate(x)}>{tr(x.is_active ? "Deactivate" : "Activate")}</button>
-        </div>
-      </article>;
-    })}</div>
-    {formTarget != null && <Modal title={formTarget === "new" ? "Add account" : "Edit account"} onClose={() => setFormTarget(null)}>
-      <AccountFormDialog editing={formTarget === "new" ? null : formTarget} onDone={() => { setFormTarget(null); refresh(); }} onCancel={() => setFormTarget(null)} />
-    </Modal>}
-    {adjusting && <Modal title="Adjust balance" onClose={() => setAdjusting(null)}>
-      <AccountAdjustForm account={adjusting} currentBalance={balances.balances.get(adjusting.id) ?? "0"} onDone={() => { setAdjusting(null); refresh(); }} onCancel={() => setAdjusting(null)} />
-    </Modal>}
-    {selectedAccountForTxns && <AccountPeriodTransactionsModal account={selectedAccountForTxns} onClose={() => setSelectedAccountForTxns(null)} />}
-    {statementAccount && <BankStatementModal initialAccountId={statementAccount.id} onClose={() => setStatementAccount(null)} />}
-  </section>;
+      {adjusting && (
+        <Modal title="Adjust balance" onClose={() => setAdjusting(null)}>
+          <AccountAdjustForm
+            account={adjusting}
+            currentBalance={balances.balances.get(adjusting.id) ?? "0"}
+            onDone={() => { setAdjusting(null); refresh(); }}
+            onCancel={() => setAdjusting(null)}
+          />
+        </Modal>
+      )}
+      {selectedAccountForTxns && (
+        <AccountPeriodTransactionsModal
+          account={selectedAccountForTxns}
+          onClose={() => setSelectedAccountForTxns(null)}
+        />
+      )}
+      {statementAccount && (
+        <BankStatementModal
+          initialAccountId={statementAccount.id}
+          onClose={() => setStatementAccount(null)}
+        />
+      )}
+    </section>
+  );
 }
 
 function BankPickerDropdown({
@@ -6146,7 +6741,7 @@ function Transactions() {
     setType(event.event_type);
     setDate(event.transaction_date);
     setCategoryId(event.category_id != null ? String(event.category_id) : "");
-    setDetailsOpen(Boolean(event.payee_text || event.trip_event_text));
+    setDetailsOpen(Boolean(event.note || event.payee_text || event.trip_event_text));
     setExcludedFromReports(event.excluded_from_reports);
     if (event.event_type === "TRANSFER" || event.event_type === "CREDIT_CARD_PAYMENT") {
       const negEntry = event.entries.find(e => e.amount.trim().startsWith("-")) ?? event.entries[0];
@@ -6223,15 +6818,15 @@ function Transactions() {
   }
 
   const amountCurrency = activeAccounts.find(x => String(x.id) === (type === "TRANSFER" ? transferFrom : type === "CREDIT_CARD_PAYMENT" ? fundingAccountId : entries[0]?.accountId))?.currency ?? "VND";
-  const noteRow = <Field label="Note"><input name="note" defaultValue={editingEvent?.note ?? ""} placeholder={tr("Optional note")} /></Field>;
-  const dateRow = <Field label="Date"><input type="date" aria-label={tr("Date")} value={date} onChange={e => setDate(e.target.value || todayIso())} onClick={e => { try { e.currentTarget.showPicker?.(); } catch {} }} style={{ cursor: "pointer" }} required /></Field>;
+  const dateRow = <Field label="Date"><DateRow name="date" value={date} onChange={setDate} language={language} label="Date" /></Field>;
 
   const todayStr = todayIso();
   const allEvents = events.data ?? [];
-  const futureEvents = allEvents.filter(x => x.transaction_date > todayStr).sort((a, b) => a.transaction_date < b.transaction_date ? -1 : a.transaction_date > b.transaction_date ? 1 : a.id - b.id);
+  const filteredEvents = allEvents.filter(x => x.event_type === type);
+  const futureEvents = filteredEvents.filter(x => x.transaction_date > todayStr).sort((a, b) => a.transaction_date < b.transaction_date ? -1 : a.transaction_date > b.transaction_date ? 1 : a.id - b.id);
   const recentEvents = futureEvents.length > 0
     ? futureEvents.slice(0, 30)
-    : [...allEvents].sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id).slice(0, 40);
+    : [...filteredEvents].sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id).slice(0, 40);
 
   const groupedRecent = useMemo(() => {
     const map = new Map<string, FinancialEvent[]>();
@@ -6269,11 +6864,11 @@ function Transactions() {
             </>}
             {validCategories.length > 0 && <CategoryPicker key={type} categories={validCategories} selected={categoryId} onChange={setCategoryId} language={language} />}
             {type === "EXPENSE" && <QuickCategoryPills categories={categories.data ?? []} selectedCategoryId={categoryId} onSelectCategory={(catId) => { setType("EXPENSE"); setCategoryId(catId); }} language={language} />}
-            {noteRow}
             {dateRow}
           </div>
           <button type="button" className="secondary details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => !open)}>{detailsOpen ? tr("Hide details") : `+ ${tr("Add details")}`}</button>
           {detailsOpen && <div className="form event-details">
+            <Field label="Note"><input name="note" defaultValue={editingEvent?.note ?? ""} placeholder={tr("Optional note")} /></Field>
             <Field label="Payee">
               <input name="payee" list="expense-payee-options-main" defaultValue={editingEvent?.payee_text ?? ""} placeholder={language === "vi" ? "Chọn hoặc nhập đối tượng..." : "Select or type payee..."} />
               <datalist id="expense-payee-options-main">
@@ -6403,7 +6998,7 @@ function Transactions() {
 
                     return (
                       <div
-                        className="transaction-feed-item"
+                        className="transaction-feed-item row-clickable"
                         tabIndex={0}
                         key={x.id}
                         onClick={() => setDetailEvent(x)}
@@ -6466,7 +7061,7 @@ function TransactionDetailModal({ event, accounts, categories, language, onClose
     mutationFn: () => api.events.remove(event.id),
     onSuccess: () => { invalidateAllFinancialQueries(qc); onClose(); },
   });
-  const editable = composerEventTypes.includes(event.event_type);
+  const editable = editableEventTypes.includes(event.event_type);
   const category = categories.find(c => c.id === event.category_id);
   const accountNames = new Map(accounts.map(a => [a.id, a.name]));
   return <Modal title="Transaction details" onClose={onClose}>
@@ -6550,7 +7145,7 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, editingEve
   const [cardAccountId, setCardAccountId] = useState(initial?.event_type === "CREDIT_CARD_PAYMENT" && initialTransfer ? String(initialTransfer.posEntry.account_id) : "");
   const [fundingAccountId, setFundingAccountId] = useState(initial?.event_type === "CREDIT_CARD_PAYMENT" && initialTransfer ? String(initialTransfer.negEntry.account_id) : "");
   const [paymentAmount, setPaymentAmount] = useState(initial?.event_type === "CREDIT_CARD_PAYMENT" && initialTransfer ? fmtMoney(initialTransfer.posEntry.amount.replace(/^-/, "")) ?? "" : "");
-  const [detailsOpen, setDetailsOpen] = useState(Boolean(initial?.payee_text || initial?.trip_event_text));
+  const [detailsOpen, setDetailsOpen] = useState(Boolean(initial?.note || initial?.payee_text || initial?.trip_event_text));
   const [formError, setFormError] = useState("");
   const [excludedFromReports, setExcludedFromReports] = useState(initial?.excluded_from_reports ?? false);
   const mutation = useMutation({
@@ -6590,7 +7185,6 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, editingEve
     : type === "CREDIT_CARD_PAYMENT" ? accounts.find(a => String(a.id) === fundingAccountId)
     : accounts.find(a => String(a.id) === entries[0]?.accountId))?.currency ?? "VND";
   const dateRow = <DateRow value={date} onChange={setDate} language={language} />;
-  const noteRow = <div className="note-row"><span className="row-icon" aria-hidden="true"><IconGlyph iconKey="Notebook" size={26} /></span><input name="note" placeholder={tr("Add a note")} defaultValue={initial?.note ?? ""} className="note-input" /></div>;
 
   return <form onSubmit={submit} className="event-form composer">
     <div className="type-row"><div className="segmented" role="group" aria-label={tr("Type")}>{composerEventTypes.map(x => <button type="button" className={type === x ? "active" : ""} onClick={() => changeType(x)} key={x}>{label(x)}</button>)}</div></div>
@@ -6614,11 +7208,11 @@ function LedgerComposerForm({ accounts, categories, defaultAccountId, editingEve
       </>}
       {validCategories.length > 0 && <CategoryPicker key={type} categories={validCategories} selected={categoryId} onChange={setCategoryId} language={language} />}
       {type === "EXPENSE" && <QuickCategoryPills categories={categories} selectedCategoryId={categoryId} onSelectCategory={(catId) => { setType("EXPENSE"); setCategoryId(catId); }} language={language} />}
-      {noteRow}
       {dateRow}
     </div>
     <button type="button" className="secondary details-toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => !open)}>{detailsOpen ? tr("Hide details") : `+ ${tr("Add details")}`}</button>
     {detailsOpen && <div className="form event-details">
+      <Field label="Note"><input name="note" placeholder={tr("Add a note")} defaultValue={initial?.note ?? ""} className="note-input" /></Field>
       <Field label="Payee">
         <input name="payee" list="expense-payee-options-ledger" defaultValue={initial?.payee_text ?? ""} placeholder={language === "vi" ? "Chọn hoặc nhập đối tượng..." : "Select or type payee..."} />
         <datalist id="expense-payee-options-ledger">
@@ -6926,7 +7520,7 @@ function getYearWeeks(year: number, language: Language) {
  * button. Deliberately skips the reference image's "Xem báo cáo cho giai
  * đoạn này" link per the user's own instruction to leave it out of this
  * pass. */
-function Ledger() {
+function Ledger({ onNavigateReports }: { onNavigateReports?: (params?: ReportFilterParams) => void } = {}) {
   const { label, language, tr } = useI18n();
   const qc = useQueryClient();
   const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
@@ -6934,7 +7528,7 @@ function Ledger() {
   const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
   const activeAccounts = (accountsQ.data ?? []).filter(a => a.is_active);
   const { balances } = useAccountBalances(activeAccounts);
-  const [selectedAccountId, setSelectedAccountId] = useState<number | "ALL" | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | "ALL">("ALL");
   const [timeScope, setTimeScope] = useState<"ALL" | "YEAR" | "QUARTER" | "MONTH" | "WEEK" | "DAY" | "CUSTOM">("MONTH");
   const [selectedYear, setSelectedYear] = useState<string>(() => String(new Date().getFullYear()));
   const [selectedQuarter, setSelectedQuarter] = useState<number>(() => Math.floor(new Date().getMonth() / 3) + 1);
@@ -6951,6 +7545,10 @@ function Ledger() {
   const [composerOpen, setComposerOpen] = useState<"new" | "edit" | null>(null);
   const [selectedEventIds, setSelectedEventIds] = useState<Set<number>>(new Set());
   const [confirmModal, setConfirmModal] = useState<"bulk" | "all" | null>(null);
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [mobileMenuStep, setMobileMenuStep] = useState<"main" | "timescope">("main");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchActive, setIsSearchActive] = useState(false);
   const [includeAssetEvents, setIncludeAssetEvents] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
@@ -6959,36 +7557,9 @@ function Ledger() {
   const weekScrollRef = useRef<HTMLDivElement>(null);
   const activeWeekBtnRef = useRef<HTMLButtonElement>(null);
 
-  const mostRecentAccountId = useMemo(() => {
-    if (!eventsQ.data || eventsQ.data.length === 0 || activeAccounts.length === 0) {
-      return activeAccounts[0]?.id;
-    }
-    const sorted = [...eventsQ.data].sort((a, b) => {
-      if (a.transaction_date !== b.transaction_date) {
-        return b.transaction_date.localeCompare(a.transaction_date);
-      }
-      return b.id - a.id;
-    });
-    for (const ev of sorted) {
-      for (const entry of ev.entries) {
-        if (activeAccounts.some(acc => acc.id === entry.account_id)) {
-          return entry.account_id;
-        }
-      }
-    }
-    return activeAccounts[0]?.id;
-  }, [eventsQ.data, activeAccounts]);
-
-  useEffect(() => {
-    if (selectedAccountId == null && mostRecentAccountId != null) {
-      setSelectedAccountId(mostRecentAccountId);
-    }
-  }, [mostRecentAccountId, selectedAccountId]);
-
   const isAllAccounts = selectedAccountId === "ALL";
 
   const accountEvents = useMemo(() => {
-    if (selectedAccountId == null) return [];
     if (isAllAccounts) return eventsQ.data ?? [];
     return (eventsQ.data ?? []).filter(e => e.entries.some(en => en.account_id === selectedAccountId));
   }, [selectedAccountId, isAllAccounts, eventsQ.data]);
@@ -7233,11 +7804,31 @@ function Ledger() {
   const closingBalance = balanceAsOf(periodEnd);
   const netChange = sumMoney([closingBalance, negateMoney(openingBalance)]);
 
+  const categoriesMap = useMemo(() => new Map((categoriesQ.data ?? []).map(c => [c.id, c])), [categoriesQ.data]);
+  const categoryNames = useMemo(() => new Map((categoriesQ.data ?? []).map(x => [x.id, categoryLabel(language, x.name)])), [categoriesQ.data, language]);
+  const accountNames = useMemo(() => new Map((accountsQ.data ?? []).map(x => [x.id, x.name])), [accountsQ.data]);
+  const detailEvent = detailEventId != null ? (eventsQ.data ?? []).find(e => e.id === detailEventId) ?? null : null;
+
   const periodEvents = accountEvents
     .filter(e => e.transaction_date >= periodStart && e.transaction_date <= periodEnd)
     .sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id);
+
+  const isSearching = searchQuery.trim().length > 0;
+  const displayEvents = useMemo(() => {
+    if (!isSearching) return periodEvents;
+    const q = searchQuery.trim().toLowerCase();
+    return accountEvents.filter(e => {
+      const noteMatch = (e.note || "").toLowerCase().includes(q);
+      const payeeMatch = (e.payee_text || "").toLowerCase().includes(q);
+      const catName = e.category_id != null ? (categoryNames.get(e.category_id) || "") : "";
+      const catMatch = catName.toLowerCase().includes(q);
+      const amountMatch = e.entries.some(en => en.amount.includes(q) || en.amount.replace("-", "").includes(q));
+      return noteMatch || payeeMatch || catMatch || amountMatch;
+    }).sort((a, b) => a.transaction_date < b.transaction_date ? 1 : a.transaction_date > b.transaction_date ? -1 : b.id - a.id);
+  }, [isSearching, searchQuery, periodEvents, accountEvents, categoryNames]);
+
   const groupedByDay = new Map<string, FinancialEvent[]>();
-  for (const e of periodEvents) {
+  for (const e of displayEvents) {
     const list = groupedByDay.get(e.transaction_date) ?? [];
     list.push(e);
     groupedByDay.set(e.transaction_date, list);
@@ -7265,11 +7856,6 @@ function Ledger() {
     }
   }
 
-  const categoriesMap = new Map((categoriesQ.data ?? []).map(c => [c.id, c]));
-  const categoryNames = new Map((categoriesQ.data ?? []).map(x => [x.id, categoryLabel(language, x.name)]));
-  const accountNames = new Map((accountsQ.data ?? []).map(x => [x.id, x.name]));
-  const detailEvent = detailEventId != null ? (eventsQ.data ?? []).find(e => e.id === detailEventId) ?? null : null;
-
   function refresh() {
     invalidateAllFinancialQueries(qc);
   }
@@ -7278,10 +7864,86 @@ function Ledger() {
   if (!accountsQ.isPending && (accountsQ.data ?? []).length === 0) return <section className="ledger-page"><Empty show text="No accounts yet. Create one first." /></section>;
 
   const composerDefaultAccountId = typeof selectedAccountId === "number" ? selectedAccountId : (activeAccounts[0]?.id ?? 1);
+  const selectedAccountBalance = isAllAccounts && balances
+    ? sumMoney(Array.from(balances.values()))
+    : (selectedAccountId != null && balances?.get(selectedAccountId as number) != null ? balances.get(selectedAccountId as number)! : "0");
 
   return <section className="ledger-page">
+    {/* Money Lover Mobile Header: Wallet Selector Pill | Search + More */}
+    <div className="ml-mobile-header">
+      {isSearchActive ? (
+        <div className="ml-header-search-bar">
+          <span className="ml-search-icon" aria-hidden="true">
+            <IconGlyph iconKey="Search" size={17} />
+          </span>
+          <input
+            type="text"
+            autoFocus
+            className="ml-search-input"
+            placeholder={language === "vi" ? "Tìm kiếm giao dịch trong ví..." : "Search transactions in wallet..."}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          <button
+            type="button"
+            className="ml-search-clear-btn"
+            onClick={() => {
+              setSearchQuery("");
+              setIsSearchActive(false);
+            }}
+            aria-label="Close search"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="ml-header-account-pill">
+            <AccountRow
+              label="Select account"
+              accounts={activeAccounts}
+              value={selectedAccountId != null ? String(selectedAccountId) : ""}
+              onChange={v => setSelectedAccountId(v === "ALL" ? "ALL" : Number(v))}
+              balances={balances}
+              allowAll
+            />
+          </div>
+
+          <div className="ml-header-right-btns">
+            <button
+              type="button"
+              className="ml-header-circle-btn"
+              aria-label="Search"
+              title={language === "vi" ? "Tìm kiếm" : "Search"}
+              onClick={() => setIsSearchActive(true)}
+            >
+              <IconGlyph iconKey="Search" size={17} />
+            </button>
+            <button
+              type="button"
+              className="ml-header-circle-btn"
+              aria-label="More"
+              title={language === "vi" ? "Tùy chọn khác" : "More options"}
+              onClick={() => {
+                setMobileMenuStep("main");
+                setMobileMoreOpen(true);
+              }}
+            >
+              <span style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>⋯</span>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+
+    {/* Money Lover Mobile Balance Area */}
+    <div className="ml-balance-card">
+      <div className="ml-balance-label">{tr("Balance")}</div>
+      <div className="ml-balance-amount">{fmtMoneyDisplay(selectedAccountBalance)}</div>
+    </div>
+
     <div className="ledger-top-row">
-      <div className="ledger-header">
+      <div className="ledger-header desktop-only">
         <AccountRow
           label="Select account"
           accounts={activeAccounts}
@@ -7558,15 +8220,48 @@ function Ledger() {
     </div>
 
     <div className="ledger-summary">
-      <div><span>{tr("Opening balance")}</span><strong>{fmtMoneyDisplay(openingBalance)}</strong></div>
-      <div><span>{tr("Closing balance")}</span><strong>{fmtMoneyDisplay(closingBalance)}</strong></div>
-      <div><span>{tr("Net change")}</span><strong className={netChange.startsWith("-") ? "negative" : "positive"}>{fmtMoneyDisplay(netChange)}</strong></div>
+      <div className="ledger-summary-item"><span>{tr("Opening balance")}</span><strong>{fmtMoneyDisplay(openingBalance)}</strong></div>
+      <div className="ledger-summary-item"><span>{tr("Closing balance")}</span><strong>{fmtMoneyDisplay(closingBalance)}</strong></div>
+      <div className="ledger-summary-item net-change-item"><span>{tr("Net change")}</span><strong className={netChange.startsWith("-") ? "negative" : "positive"}>{fmtMoneyDisplay(netChange)}</strong></div>
     </div>
+
+    {/* Money Lover Mobile Action Link */}
+    <div className="ml-view-report-link-wrap">
+      <button
+        type="button"
+        className="ml-view-report-btn"
+        onClick={() => {
+          if (onNavigateReports) {
+            onNavigateReports({
+              timeScope,
+              selectedYear,
+              selectedQuarter,
+              selectedMonthKey: activeMonthKey,
+              selectedDate,
+              customStart: periodStart,
+              customEnd: periodEnd,
+              selectedWeekStart,
+              selectedWeekEnd,
+              accountId: selectedAccountId,
+            });
+          }
+        }}
+      >
+        {language === "vi" ? "Xem báo cáo cho giai đoạn này" : "View report for this period"}
+      </button>
+    </div>
+
     <div className="ledger-body">
       <div className="ledger-list">
         <Loading show={eventsQ.isPending} />
-        <Empty show={!eventsQ.isPending && periodEvents.length === 0} text="No transactions in this period." />
-        {periodEvents.length > 0 && <div className="ledger-toolbar">
+        {isSearching && (
+          <div style={{ padding: "8px 12px", background: "#e0f2fe", color: "#0369a1", borderRadius: "10px", margin: "4px 0 10px", fontSize: "0.84rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>{language === "vi" ? `Tìm kiếm trong ví: "${searchQuery.trim()}" (${displayEvents.length} giao dịch)` : `Search in wallet: "${searchQuery.trim()}" (${displayEvents.length} transactions)`}</span>
+            <button type="button" onClick={() => { setSearchQuery(""); setIsSearchActive(false); }} style={{ background: "none", border: "none", color: "#0369a1", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>✕</button>
+          </div>
+        )}
+        <Empty show={!eventsQ.isPending && displayEvents.length === 0} text={isSearching ? (language === "vi" ? "Không tìm thấy giao dịch nào phù hợp." : "No matching transactions found.") : "No transactions in this period."} />
+        {periodEvents.length > 0 && <div className="ledger-toolbar desktop-only">
           <div className="ledger-toolbar-left">
             <label
               className="ledger-select-all"
@@ -7613,10 +8308,19 @@ function Ledger() {
           const daySubtotal = isAllAccounts
             ? sumMoney(dayEvents.flatMap(e => e.entries.map(en => en.amount)))
             : sumMoney(dayEvents.map(e => entryAmountFor(e)));
+          const dateParts = parseIsoDateParts(language, dateIso);
           return <div className="ledger-day" key={dateIso}>
             <div className="ledger-day-heading">
-              <span>{formatIsoDateLabel(language, dateIso)}</span>
-              <b className={daySubtotal.startsWith("-") ? "negative" : "positive"}>{fmtMoneyDisplay(daySubtotal)}</b>
+              <div className="ledger-day-left">
+                <span className="ledger-day-num">{dateParts.day}</span>
+                <div className="ledger-day-meta">
+                  <span className="ledger-day-weekday">{dateParts.weekday}</span>
+                  <span className="ledger-day-monthyear">{dateParts.monthYear}</span>
+                </div>
+              </div>
+              <b className={`ledger-day-total ${daySubtotal.startsWith("-") ? "negative" : "positive"}`}>
+                {fmtMoneyDisplay(daySubtotal)}
+              </b>
             </div>
             {dayEvents.map(e => {
               const isSelected = selectedEventIds.has(e.id);
@@ -7629,6 +8333,9 @@ function Ledger() {
                 if (!parent || parent.parent_id == null || parent.name === "Expenses" || parent.name === "Income") return undefined;
                 return categoryLabel(language, parent.name);
               })();
+              const catObj = e.category_id ? categoriesMap.get(e.category_id) : undefined;
+              const amountStr = entryAmountFor(e);
+              const isExpense = amountStr.startsWith("-");
               return <div
                 className={`ledger-row${isDetail ? " selected" : ""}`}
                 tabIndex={0}
@@ -7644,31 +8351,39 @@ function Ledger() {
                   onChange={() => {}}
                   aria-label={`${tr("Select")} #${e.id}`}
                 />
-                <span className="event-type">
-                  {label(e.event_type)}
-                  {e.category_id && <small> · {categoryNames.get(e.category_id) ?? `${tr("Category")} #${e.category_id}`}</small>}
-                </span>
-                <small>
-                  {isAllAccounts ? (
-                    <span className="ledger-row-account">
-                      {e.event_type === "TRANSFER" || e.event_type === "CREDIT_CARD_PAYMENT" ? (() => {
-                        const split = splitTransferEntries(e);
-                        return split ? `${accountNames.get(split.negEntry.account_id) ?? "—"} → ${accountNames.get(split.posEntry.account_id) ?? "—"}` : "";
-                      })() : (
-                        accountNames.get(e.entries[0]?.account_id) ?? ""
-                      )}
-                      {(e.payee_text || e.trip_event_text || e.note) && " · "}
-                    </span>
-                  ) : parentCategoryName ? (
-                    <span className="ledger-row-parent-category">
-                      {parentCategoryName}
-                      {(e.payee_text || e.trip_event_text || e.note) && " · "}
-                    </span>
-                  ) : null}
-                  {e.payee_text ?? e.trip_event_text ?? e.note ?? ""}
-                </small>
-                <b className={entryAmountFor(e).startsWith("-") ? "negative" : "positive"}>
-                  {fmtMoneyDisplay(entryAmountFor(e))}
+                <div className="ledger-row-icon-wrap" aria-hidden="true">
+                  <CategoryIconBadge
+                    name={catObj?.name ?? (e.event_type === "TRANSFER" ? "CreditCard" : (e.event_type === "INCOME" ? "PlusCircle" : "Wallet"))}
+                    icon={catObj?.icon}
+                    size={38}
+                  />
+                </div>
+                <div className="ledger-row-content">
+                  <div className="ledger-row-title">
+                    {e.category_id ? (categoryNames.get(e.category_id) ?? `${tr("Category")} #${e.category_id}`) : label(e.event_type)}
+                  </div>
+                  <small className="ledger-row-sub">
+                    {isAllAccounts ? (
+                      <span className="ledger-row-account">
+                        {e.event_type === "TRANSFER" || e.event_type === "CREDIT_CARD_PAYMENT" ? (() => {
+                          const split = splitTransferEntries(e);
+                          return split ? `${accountNames.get(split.negEntry.account_id) ?? "—"} → ${accountNames.get(split.posEntry.account_id) ?? "—"}` : "";
+                        })() : (
+                          accountNames.get(e.entries[0]?.account_id) ?? ""
+                        )}
+                        {(e.payee_text || e.trip_event_text || e.note) && " · "}
+                      </span>
+                    ) : parentCategoryName ? (
+                      <span className="ledger-row-parent-category">
+                        {parentCategoryName}
+                        {(e.payee_text || e.trip_event_text || e.note) && " · "}
+                      </span>
+                    ) : null}
+                    {e.payee_text ?? e.trip_event_text ?? e.note ?? ""}
+                  </small>
+                </div>
+                <b className={`ledger-row-amount ${isExpense ? "negative" : "positive"}`}>
+                  {fmtMoneyDisplay(amountStr)}
                 </b>
               </div>;
             })}
@@ -7694,6 +8409,30 @@ function Ledger() {
         /> : <p className="hint">{tr("Select a transaction to see its details.")}</p>}
       </aside>
     </div>
+
+    {/* Mobile Transaction Detail Modal */}
+    {detailEvent && (
+      <div className="mobile-detail-modal-wrap">
+        <Modal title={tr("Transaction details")} onClose={() => setDetailEventId(null)}>
+          <LedgerDetailPanel
+            event={detailEvent}
+            accountNames={accountNames}
+            categories={categoriesQ.data ?? []}
+            language={language}
+            onEdit={() => { setDetailEventId(null); setComposerOpen("edit"); }}
+            onDeleted={() => {
+              setSelectedEventIds(prev => {
+                const next = new Set(prev);
+                next.delete(detailEvent.id);
+                return next;
+              });
+              setDetailEventId(null);
+              refresh();
+            }}
+          />
+        </Modal>
+      </div>
+    )}
     <button type="button" className="ledger-fab" onClick={() => setComposerOpen("new")}>+ {tr("Add transaction")}</button>
     {composerOpen && <Modal title={composerOpen === "edit" ? "Edit transaction" : "Add transaction"} onClose={() => setComposerOpen(null)}>
       <LedgerComposerForm
@@ -7781,6 +8520,114 @@ function Ledger() {
         </div>
       </div>
     </Modal>}
+    {mobileMoreOpen && (
+      <div className="ml-popup-backdrop" onClick={() => setMobileMoreOpen(false)}>
+        <div className="ml-popup-card" onClick={e => e.stopPropagation()}>
+          {mobileMenuStep === "main" ? (
+            <>
+              <button
+                type="button"
+                className="ml-popup-pill-btn"
+                onClick={() => setMobileMenuStep("timescope")}
+              >
+                {language === "vi" ? "Khoảng thời gian" : "Time period"}
+              </button>
+
+              <button
+                type="button"
+                className="ml-popup-pill-btn danger"
+                onClick={() => {
+                  setMobileMoreOpen(false);
+                  setDeleteError("");
+                  setConfirmModal("all");
+                }}
+              >
+                {language === "vi" ? "Xoá tất cả giao dịch" : "Delete all transactions"}
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", padding: "0 4px" }}>
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuStep("main")}
+                  style={{ background: "none", border: "none", fontSize: "22px", fontWeight: 700, cursor: "pointer", color: "#334155", padding: "2px 8px" }}
+                  aria-label="Back"
+                >
+                  ‹
+                </button>
+                <span style={{ fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+                  {language === "vi" ? "Khoảng thời gian" : "Time period"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMobileMoreOpen(false)}
+                  style={{ background: "none", border: "none", fontSize: "16px", fontWeight: 700, cursor: "pointer", color: "#64748b", padding: "2px 8px" }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <button
+                type="button"
+                className={`ml-popup-pill-btn ${timeScope === "DAY" ? "active" : ""}`}
+                onClick={() => { setTimeScope("DAY"); setMobileMoreOpen(false); }}
+              >
+                {language === "vi" ? "Ngày" : "Day"}
+              </button>
+
+              <button
+                type="button"
+                className={`ml-popup-pill-btn ${timeScope === "WEEK" ? "active" : ""}`}
+                onClick={() => { setTimeScope("WEEK"); setMobileMoreOpen(false); }}
+              >
+                {language === "vi" ? "Tuần" : "Week"}
+              </button>
+
+              <button
+                type="button"
+                className={`ml-popup-pill-btn ${timeScope === "MONTH" ? "active" : ""}`}
+                onClick={() => { setTimeScope("MONTH"); setMobileMoreOpen(false); }}
+              >
+                {language === "vi" ? "Tháng" : "Month"}
+              </button>
+
+              <button
+                type="button"
+                className={`ml-popup-pill-btn ${timeScope === "QUARTER" ? "active" : ""}`}
+                onClick={() => { setTimeScope("QUARTER"); setMobileMoreOpen(false); }}
+              >
+                {language === "vi" ? "Quý" : "Quarter"}
+              </button>
+
+              <button
+                type="button"
+                className={`ml-popup-pill-btn ${timeScope === "YEAR" ? "active" : ""}`}
+                onClick={() => { setTimeScope("YEAR"); setMobileMoreOpen(false); }}
+              >
+                {language === "vi" ? "Năm" : "Year"}
+              </button>
+
+              <button
+                type="button"
+                className={`ml-popup-pill-btn ${timeScope === "ALL" ? "active" : ""}`}
+                onClick={() => { setTimeScope("ALL"); setMobileMoreOpen(false); }}
+              >
+                {language === "vi" ? "Tất cả" : "All"}
+              </button>
+
+              <button
+                type="button"
+                className={`ml-popup-pill-btn ${timeScope === "CUSTOM" ? "active" : ""}`}
+                onClick={() => { setTimeScope("CUSTOM"); setMobileMoreOpen(false); }}
+              >
+                {language === "vi" ? "Tuỳ chỉnh" : "Custom"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    )}
   </section>;
 }
 

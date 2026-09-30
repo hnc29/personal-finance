@@ -1,10 +1,37 @@
+from __future__ import annotations
+
 import json
+import secrets
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
+INSECURE_DEFAULT_SECRET_KEYS: frozenset[str] = frozenset(
+    {
+        "personal-finance-secret-key-production-local",
+        "personal-finance-vps-production-key-change-me",
+        "dev-only-local-secret-key-do-not-use-in-production",
+        "secret",
+        "changeme",
+        "default",
+        "12345678",
+        "password",
+    }
+)
+
+
+def _get_project_root() -> Path:
+    file_parents = Path(__file__).resolve().parents
+    for p in file_parents:
+        if (p / "apps").exists() or (p / "data").exists():
+            return p
+    if len(file_parents) > 4:
+        return file_parents[4]
+    return file_parents[min(2, len(file_parents) - 1)]
+
+
+PROJECT_ROOT = _get_project_root()
 
 
 class Settings(BaseSettings):
@@ -12,12 +39,22 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     database_path: Path = PROJECT_ROOT / "data" / "finance.db"
-    secret_key: str = "personal-finance-secret-key-production-local"
+    secret_key: str = ""
     jwt_expiration_days: int = 30
 
     default_currency: str = "VND"
     default_timezone: str = "Asia/Ho_Chi_Minh"
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    app_url: str = "http://localhost:3000"
+
+    # SMTP email settings
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "noreply@personalfinance.local"
+    smtp_use_tls: bool = True
+
     ollama_enabled: bool = False
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = ""
@@ -50,10 +87,32 @@ class Settings(BaseSettings):
                 parsed = json.loads(value)
             except json.JSONDecodeError:
                 parsed = None
-            if isinstance(parsed, list) and all(isinstance(origin, str) for origin in parsed):
+            if isinstance(parsed, list) and all(
+                isinstance(origin, str) for origin in parsed
+            ):
                 return [origin.strip() for origin in parsed if origin.strip()]
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
+
+    @model_validator(mode="after")
+    def validate_secret_key_security(self) -> Settings:
+        is_prod = self.environment.strip().lower() in ("production", "prod", "staging")
+
+        if self.secret_key in INSECURE_DEFAULT_SECRET_KEYS:
+            raise ValueError(
+                f"Insecure public secret key '{self.secret_key}' is rejected. Please configure a strong, unique PF_SECRET_KEY."
+            )
+
+        if is_prod:
+            if not self.secret_key or len(self.secret_key) < 32:
+                raise ValueError(
+                    "PF_SECRET_KEY must be explicitly set to a strong secret key (at least 32 characters, non-default) for production/staging environments."
+                )
+        else:
+            if not self.secret_key:
+                self.secret_key = secrets.token_urlsafe(32)
+
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

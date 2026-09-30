@@ -27,6 +27,7 @@ Revision ID: 0019_excluded_from_reports
 Revises: 0018_transfer_pair_import
 Create Date: 2026-08-26
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa

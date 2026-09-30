@@ -32,8 +32,14 @@ def upgrade() -> None:
         sa.Column(
             "component_type",
             sa.Enum(
-                "CASH", "BANK", "EWALLET", "SAVINGS", "PRECIOUS_METAL",
-                "CRYPTO", "CREDIT_CARD", native_enum=False,
+                "CASH",
+                "BANK",
+                "EWALLET",
+                "SAVINGS",
+                "PRECIOUS_METAL",
+                "CRYPTO",
+                "CREDIT_CARD",
+                native_enum=False,
             ),
             nullable=False,
         ),
@@ -46,7 +52,9 @@ def upgrade() -> None:
         sa.Column("quote_provider", sa.String()),
         sa.Column("quoted_at", sa.DateTime(timezone=True)),
         sa.UniqueConstraint(
-            "snapshot_id", "component_type", "source_key",
+            "snapshot_id",
+            "component_type",
+            "source_key",
             name="uq_portfolio_snapshot_component_source",
         ),
         sa.CheckConstraint(

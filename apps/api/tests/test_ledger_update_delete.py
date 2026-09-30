@@ -50,7 +50,9 @@ def session(tmp_path: Path) -> Session:
     database_path = tmp_path / "synthetic-ledger-update-delete.db"
     env = os.environ.copy()
     env["PF_DATABASE_PATH"] = str(database_path)
-    subprocess.run(["alembic", "upgrade", "head"], check=True, env=env, capture_output=True)
+    subprocess.run(
+        ["alembic", "upgrade", "head"], check=True, env=env, capture_output=True
+    )
     engine = create_engine(f"sqlite:///{database_path}")
     with Session(engine) as database_session:
         database_session.execute(text("PRAGMA foreign_keys=ON"))
@@ -80,7 +82,9 @@ def categories(session: Session) -> dict[str, Category]:
 
 def _entry_count(session: Session, event_id: int) -> int:
     return session.scalar(
-        select(func.count(AccountEntry.id)).where(AccountEntry.financial_event_id == event_id)
+        select(func.count(AccountEntry.id)).where(
+            AccountEntry.financial_event_id == event_id
+        )
     )
 
 
@@ -93,7 +97,11 @@ def test_update_expense_replaces_amount_account_and_category(
             event_type=FinancialEventType.EXPENSE,
             transaction_date=date(2026, 8, 20),
             category_id=categories["food"].id,
-            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-50000))],
+            entries=[
+                AccountEntryCreate(
+                    account_id=accounts["wallet"].id, amount=Decimal(-50000)
+                )
+            ],
         ),
     )
     old_entry_id = event.entries[0].id
@@ -106,7 +114,11 @@ def test_update_expense_replaces_amount_account_and_category(
             transaction_date=date(2026, 8, 21),
             category_id=categories["eating_out"].id,
             payee_text="Quán phở",
-            entries=[AccountEntryCreate(account_id=accounts["bank"].id, amount=Decimal(-75000))],
+            entries=[
+                AccountEntryCreate(
+                    account_id=accounts["bank"].id, amount=Decimal(-75000)
+                )
+            ],
         ),
     )
 
@@ -137,7 +149,11 @@ def test_excluded_from_reports_defaults_false_and_is_editable(
             event_type=FinancialEventType.EXPENSE,
             transaction_date=date(2026, 8, 20),
             category_id=categories["food"].id,
-            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-50000))],
+            entries=[
+                AccountEntryCreate(
+                    account_id=accounts["wallet"].id, amount=Decimal(-50000)
+                )
+            ],
         ),
     )
     assert event.excluded_from_reports is False
@@ -149,7 +165,11 @@ def test_excluded_from_reports_defaults_false_and_is_editable(
             transaction_date=date(2026, 8, 20),
             category_id=categories["food"].id,
             excluded_from_reports=True,
-            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-10000))],
+            entries=[
+                AccountEntryCreate(
+                    account_id=accounts["wallet"].id, amount=Decimal(-10000)
+                )
+            ],
         ),
     )
     assert excluded_event.excluded_from_reports is True
@@ -162,7 +182,11 @@ def test_excluded_from_reports_defaults_false_and_is_editable(
             transaction_date=date(2026, 8, 20),
             category_id=categories["food"].id,
             excluded_from_reports=True,
-            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-50000))],
+            entries=[
+                AccountEntryCreate(
+                    account_id=accounts["wallet"].id, amount=Decimal(-50000)
+                )
+            ],
         ),
     )
     assert updated is not None
@@ -175,7 +199,11 @@ def test_excluded_from_reports_defaults_false_and_is_editable(
             event_type=FinancialEventType.EXPENSE,
             transaction_date=date(2026, 8, 20),
             category_id=categories["food"].id,
-            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-50000))],
+            entries=[
+                AccountEntryCreate(
+                    account_id=accounts["wallet"].id, amount=Decimal(-50000)
+                )
+            ],
         ),
     )
     assert unset_again is not None
@@ -191,8 +219,12 @@ def test_update_transfer_replaces_both_entries_with_no_leftover_rows(
             event_type=FinancialEventType.TRANSFER,
             transaction_date=date(2026, 8, 20),
             entries=[
-                AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-100000)),
-                AccountEntryCreate(account_id=accounts["bank"].id, amount=Decimal(100000)),
+                AccountEntryCreate(
+                    account_id=accounts["wallet"].id, amount=Decimal(-100000)
+                ),
+                AccountEntryCreate(
+                    account_id=accounts["bank"].id, amount=Decimal(100000)
+                ),
             ],
         ),
     )
@@ -205,15 +237,22 @@ def test_update_transfer_replaces_both_entries_with_no_leftover_rows(
             event_type=FinancialEventType.TRANSFER,
             transaction_date=date(2026, 8, 20),
             entries=[
-                AccountEntryCreate(account_id=accounts["bank"].id, amount=Decimal(-200000)),
-                AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(200000)),
+                AccountEntryCreate(
+                    account_id=accounts["bank"].id, amount=Decimal(-200000)
+                ),
+                AccountEntryCreate(
+                    account_id=accounts["wallet"].id, amount=Decimal(200000)
+                ),
             ],
         ),
     )
 
     assert updated is not None
     scaled_by_account = {e.account_id: e.amount_scaled for e in updated.entries}
-    assert scaled_by_account == {accounts["bank"].id: -2_000_000_000, accounts["wallet"].id: 2_000_000_000}
+    assert scaled_by_account == {
+        accounts["bank"].id: -2_000_000_000,
+        accounts["wallet"].id: 2_000_000_000,
+    }
     assert _entry_count(session, event.id) == 2
     # No orphaned account_entries rows anywhere in the table -- exactly 2,
     # belonging to this event, not 4 (2 old + 2 new).
@@ -221,26 +260,34 @@ def test_update_transfer_replaces_both_entries_with_no_leftover_rows(
     assert total == 2
 
 
-def test_update_unknown_event_returns_none(session: Session, accounts: dict[str, Account]) -> None:
+def test_update_unknown_event_returns_none(
+    session: Session, accounts: dict[str, Account]
+) -> None:
     result = update_financial_event(
         session,
         999,
         FinancialEventUpdate(
             event_type=FinancialEventType.EXPENSE,
             transaction_date=date(2026, 8, 20),
-            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1))],
+            entries=[
+                AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1))
+            ],
         ),
     )
     assert result is None
 
 
-def test_update_unknown_account_raises(session: Session, accounts: dict[str, Account]) -> None:
+def test_update_unknown_account_raises(
+    session: Session, accounts: dict[str, Account]
+) -> None:
     event = create_financial_event(
         session,
         FinancialEventCreate(
             event_type=FinancialEventType.EXPENSE,
             transaction_date=date(2026, 8, 20),
-            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1))],
+            entries=[
+                AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1))
+            ],
         ),
     )
     with pytest.raises(UnknownAccountError):
@@ -266,7 +313,9 @@ def test_update_invalid_balanced_pair_raises_and_keeps_original_entries(
             event_type=FinancialEventType.TRANSFER,
             transaction_date=date(2026, 8, 20),
             entries=[
-                AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1)),
+                AccountEntryCreate(
+                    account_id=accounts["wallet"].id, amount=Decimal(-1)
+                ),
                 AccountEntryCreate(account_id=accounts["bank"].id, amount=Decimal(1)),
             ],
         ),
@@ -280,8 +329,12 @@ def test_update_invalid_balanced_pair_raises_and_keeps_original_entries(
                 transaction_date=date(2026, 8, 20),
                 # same account on both legs -- violates the two-distinct-account rule
                 entries=[
-                    AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1)),
-                    AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(1)),
+                    AccountEntryCreate(
+                        account_id=accounts["wallet"].id, amount=Decimal(-1)
+                    ),
+                    AccountEntryCreate(
+                        account_id=accounts["wallet"].id, amount=Decimal(1)
+                    ),
                 ],
             ),
         )
@@ -316,7 +369,9 @@ def test_update_any_event_type_succeeds(
         FinancialEventUpdate(
             event_type=event_type,
             transaction_date=date(2026, 8, 21),
-            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1))],
+            entries=[
+                AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-1))
+            ],
         ),
     )
     assert updated is not None
@@ -324,13 +379,19 @@ def test_update_any_event_type_succeeds(
     assert _entry_count(session, event.id) == 1
 
 
-def test_delete_expense_removes_event_and_its_entry(session: Session, accounts: dict[str, Account]) -> None:
+def test_delete_expense_removes_event_and_its_entry(
+    session: Session, accounts: dict[str, Account]
+) -> None:
     event = create_financial_event(
         session,
         FinancialEventCreate(
             event_type=FinancialEventType.EXPENSE,
             transaction_date=date(2026, 8, 20),
-            entries=[AccountEntryCreate(account_id=accounts["wallet"].id, amount=Decimal(-50000))],
+            entries=[
+                AccountEntryCreate(
+                    account_id=accounts["wallet"].id, amount=Decimal(-50000)
+                )
+            ],
         ),
     )
     entry_id = event.entries[0].id
@@ -363,7 +424,9 @@ def test_delete_credit_card_payment_removes_both_entries_under_fk_enforcement(
     assert delete_financial_event(session, event_id) is True
     assert session.get(FinancialEvent, event_id) is None
     remaining = session.scalar(
-        select(func.count(AccountEntry.id)).where(AccountEntry.financial_event_id == event_id)
+        select(func.count(AccountEntry.id)).where(
+            AccountEntry.financial_event_id == event_id
+        )
     )
     assert remaining == 0
     assert session.execute(text("PRAGMA foreign_key_check")).fetchall() == []

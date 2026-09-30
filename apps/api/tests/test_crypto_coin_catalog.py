@@ -18,7 +18,9 @@ _SAMPLE = [
 ]
 
 
-def _client(payload: list[dict[str, str]] | None = None, *, error: Exception | None = None) -> Mock:
+def _client(
+    payload: list[dict[str, str]] | None = None, *, error: Exception | None = None
+) -> Mock:
     client = Mock()
     if error is not None:
         client.get.side_effect = error
@@ -30,7 +32,9 @@ def _client(payload: list[dict[str, str]] | None = None, *, error: Exception | N
 
 
 def test_search_matches_id_symbol_or_name_case_insensitively() -> None:
-    provider = CoinGeckoCoinListProvider(_client(), "https://example.invalid/coins/list")
+    provider = CoinGeckoCoinListProvider(
+        _client(), "https://example.invalid/coins/list"
+    )
 
     by_name = provider.search("ether")
     by_symbol = provider.search("BTC")
@@ -42,13 +46,19 @@ def test_search_matches_id_symbol_or_name_case_insensitively() -> None:
 
 
 def test_empty_query_returns_capped_list() -> None:
-    provider = CoinGeckoCoinListProvider(_client(), "https://example.invalid/coins/list")
+    provider = CoinGeckoCoinListProvider(
+        _client(), "https://example.invalid/coins/list"
+    )
     assert len(provider.search("", limit=2)) == 2
 
 
 def test_result_is_capped_at_limit() -> None:
-    many = [{"id": f"coin{i}", "symbol": f"c{i}", "name": f"Coin {i}"} for i in range(80)]
-    provider = CoinGeckoCoinListProvider(_client(many), "https://example.invalid/coins/list")
+    many = [
+        {"id": f"coin{i}", "symbol": f"c{i}", "name": f"Coin {i}"} for i in range(80)
+    ]
+    provider = CoinGeckoCoinListProvider(
+        _client(many), "https://example.invalid/coins/list"
+    )
     assert len(provider.search("coin", limit=50)) == 50
 
 

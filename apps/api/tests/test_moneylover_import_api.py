@@ -43,7 +43,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.database import get_db
 from app.main import app
 
-REAL_FILENAME = "MoneyLover_Tổng cộng(Wallet)_Tất cả(Category)_01_07_2026-31_07_2026.xlsx"
+REAL_FILENAME = (
+    "MoneyLover_Tổng cộng(Wallet)_Tất cả(Category)_01_07_2026-31_07_2026.xlsx"
+)
 
 
 def xlsx_bytes() -> bytes:
@@ -52,12 +54,33 @@ def xlsx_bytes() -> bytes:
     sheet.title = "Sổ giao dịch"
     sheet.append(
         [
-            "Id", "Ngày", "Nhóm", "Số tiền", "Đơn vị tiền tệ", "Ví",
-            "Ghi chú", "Với", "Sự kiện", "Không tính vào báo cáo", "Thành viên",
+            "Id",
+            "Ngày",
+            "Nhóm",
+            "Số tiền",
+            "Đơn vị tiền tệ",
+            "Ví",
+            "Ghi chú",
+            "Với",
+            "Sự kiện",
+            "Không tính vào báo cáo",
+            "Thành viên",
         ]
     )
     sheet.append(
-        ["synthetic-api-1", date(2026, 7, 15), "Food", 1, "USD", "Cash", "test", None, None, False, None]
+        [
+            "synthetic-api-1",
+            date(2026, 7, 15),
+            "Food",
+            1,
+            "USD",
+            "Cash",
+            "test",
+            None,
+            None,
+            False,
+            None,
+        ]
     )
     output = io.BytesIO()
     workbook.save(output)
@@ -69,8 +92,12 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     database_path = tmp_path / "synthetic-moneylover-import.db"
     env = os.environ.copy()
     env["PF_DATABASE_PATH"] = str(database_path)
-    subprocess.run(["alembic", "upgrade", "head"], check=True, env=env, capture_output=True)
-    engine = create_engine(f"sqlite:///{database_path}", connect_args={"check_same_thread": False})
+    subprocess.run(
+        ["alembic", "upgrade", "head"], check=True, env=env, capture_output=True
+    )
+    engine = create_engine(
+        f"sqlite:///{database_path}", connect_args={"check_same_thread": False}
+    )
     session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
     def override_get_db() -> Iterator[Session]:
@@ -89,7 +116,9 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         engine.dispose()
 
 
-def test_upload_with_percent_encoded_vietnamese_filename_header(client: TestClient) -> None:
+def test_upload_with_percent_encoded_vietnamese_filename_header(
+    client: TestClient,
+) -> None:
     """Mirrors the fixed frontend: filename sent as an encodeURIComponent-escaped
     X-Filename header (plain ASCII on the wire), decoded server-side."""
     response = client.post(
@@ -125,7 +154,10 @@ def test_upload_auto_applies_rows_whose_wallet_matches_an_existing_account(
 
     response = client.post(
         "/api/v1/imports/money-lover",
-        headers={"Content-Type": "application/octet-stream", "X-Filename": "upload.xlsx"},
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-Filename": "upload.xlsx",
+        },
         content=xlsx_bytes(),
     )
     assert response.status_code == 200, response.text
@@ -136,7 +168,9 @@ def test_upload_auto_applies_rows_whose_wallet_matches_an_existing_account(
 
     events = client.get("/api/v1/financial-events").json()
     assert len(events) == 1
-    assert events[0]["event_type"] == "INCOME"  # xlsx_bytes()'s row has amount=1 (positive)
+    assert (
+        events[0]["event_type"] == "INCOME"
+    )  # xlsx_bytes()'s row has amount=1 (positive)
     assert events[0]["entries"][0]["amount"] == "1.0000"
 
     batches = client.get("/api/v1/import-batches").json()
@@ -152,12 +186,17 @@ def test_raw_unencoded_header_would_be_impossible_over_http(client: TestClient) 
     with pytest.raises(Exception):  # noqa: B017 - exact exception type is an httpx/httpcore internal
         client.post(
             "/api/v1/imports/money-lover",
-            headers={"Content-Type": "application/octet-stream", "X-Filename": REAL_FILENAME},
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-Filename": REAL_FILENAME,
+            },
             content=xlsx_bytes(),
         )
 
 
-def test_upload_without_filename_header_falls_back_to_default(client: TestClient) -> None:
+def test_upload_without_filename_header_falls_back_to_default(
+    client: TestClient,
+) -> None:
     response = client.post(
         "/api/v1/imports/money-lover",
         headers={"Content-Type": "application/octet-stream"},

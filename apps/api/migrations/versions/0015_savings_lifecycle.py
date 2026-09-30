@@ -192,7 +192,10 @@ def _detach_terms(columns: Sequence[str]) -> list[dict[str, object]]:
 
 
 def _reattach_terms(
-    rows: list[dict[str, object]], columns: Sequence[str], *, with_lifecycle_columns: bool
+    rows: list[dict[str, object]],
+    columns: Sequence[str],
+    *,
+    with_lifecycle_columns: bool,
 ) -> None:
     _create_savings_terms(with_lifecycle_columns=with_lifecycle_columns)
     if not rows:

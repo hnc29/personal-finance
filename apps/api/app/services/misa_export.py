@@ -67,14 +67,20 @@ def create_configuration(
 
     source_ids = [mapping.source_account_id for mapping in payload.mappings]
     if len(source_ids) != len(set(source_ids)):
-        raise InvalidMisaAccountMappingError("each source account may be mapped only once")
+        raise InvalidMisaAccountMappingError(
+            "each source account may be mapped only once"
+        )
 
     accounts = session.scalars(select(Account).where(Account.id.in_(source_ids))).all()
     existing_ids = {account.id for account in accounts}
     missing_ids = sorted(set(source_ids) - existing_ids)
     if missing_ids:
-        raise InvalidMisaAccountMappingError(f"unknown source account ids: {missing_ids}")
-    wrong_currency_ids = sorted(account.id for account in accounts if account.currency != currency)
+        raise InvalidMisaAccountMappingError(
+            f"unknown source account ids: {missing_ids}"
+        )
+    wrong_currency_ids = sorted(
+        account.id for account in accounts if account.currency != currency
+    )
     if wrong_currency_ids:
         raise InvalidMisaAccountMappingError(
             f"source accounts do not use configuration currency {currency}: {wrong_currency_ids}"
@@ -86,13 +92,17 @@ def create_configuration(
         target_code = mapping.target_account_code.strip()
         target_name = mapping.target_account_name.strip()
         if not target_code or not target_name:
-            raise InvalidMisaAccountMappingError("target account code and name must not be blank")
+            raise InvalidMisaAccountMappingError(
+                "target account code and name must not be blank"
+            )
         previous_name = target_names.setdefault(target_code, target_name)
         if previous_name != target_name:
             raise InvalidMisaAccountMappingError(
                 f"target account code {target_code!r} has inconsistent names"
             )
-        normalized_mappings.append((mapping.source_account_id, target_code, target_name))
+        normalized_mappings.append(
+            (mapping.source_account_id, target_code, target_name)
+        )
 
     configuration = MisaExportConfiguration(
         name=name,
@@ -117,7 +127,9 @@ def create_configuration(
     return configuration
 
 
-def list_exportable_events(session: Session, configuration_id: int) -> list[FinancialEvent]:
+def list_exportable_events(
+    session: Session, configuration_id: int
+) -> list[FinancialEvent]:
     """Return fully mapped events not previously exported by this configuration."""
     mapped_account_ids = select(MisaAccountMapping.source_account_id).where(
         MisaAccountMapping.configuration_id == configuration_id
@@ -162,7 +174,9 @@ def record_export(
         raise ValueError(f"inactive MISA export configuration: {configuration_id}")
 
     known_ids = set(
-        session.scalars(select(FinancialEvent.id).where(FinancialEvent.id.in_(unique_event_ids))).all()
+        session.scalars(
+            select(FinancialEvent.id).where(FinancialEvent.id.in_(unique_event_ids))
+        ).all()
     )
     missing_ids = sorted(set(unique_event_ids) - known_ids)
     if missing_ids:
@@ -193,7 +207,9 @@ def record_export(
         exported_at=exported_at or datetime.datetime.now(datetime.UTC),
         output_filename=output_filename.strip(),
         exported_events=[
-            MisaExportedEvent(configuration_id=configuration_id, financial_event_id=event_id)
+            MisaExportedEvent(
+                configuration_id=configuration_id, financial_event_id=event_id
+            )
             for event_id in unique_event_ids
         ],
     )
@@ -202,7 +218,9 @@ def record_export(
         session.commit()
     except IntegrityError as exc:
         session.rollback()
-        raise MisaEventAlreadyExportedError("one or more events were already exported") from exc
+        raise MisaEventAlreadyExportedError(
+            "one or more events were already exported"
+        ) from exc
     except Exception:
         session.rollback()
         raise

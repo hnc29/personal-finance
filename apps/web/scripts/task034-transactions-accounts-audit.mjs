@@ -14,7 +14,7 @@ const i18nSrc = readFileSync("lib/i18n.ts", "utf8");
 const composerMatch = page.match(/const composerEventTypes: EventType\[\] = \[([^\]]*)\];/);
 assert.ok(composerMatch, "TASK-034: composerEventTypes allowlist not found in page.tsx");
 const composerTypes = [...composerMatch[1].matchAll(/"([A-Z_]+)"/g)].map(m => m[1]);
-assert.deepEqual(composerTypes, ["EXPENSE", "INCOME", "TRANSFER", "CREDIT_CARD_PAYMENT"], "TASK-034: composerEventTypes no longer exactly [EXPENSE, INCOME, TRANSFER, CREDIT_CARD_PAYMENT]");
+assert.deepEqual(composerTypes, ["EXPENSE", "INCOME", "TRANSFER"], "TASK-034: composerEventTypes no longer exactly [EXPENSE, INCOME, TRANSFER]");
 assert.ok(!/advanced-type-select/.test(page), "TASK-034: the old advanced-type-select dropdown reappeared in Transactions()");
 assert.ok(!/otherTransactionType/.test(page), "TASK-034: a reference to the removed 'other transaction type' escape hatch reappeared");
 

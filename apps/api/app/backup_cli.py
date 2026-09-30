@@ -8,7 +8,9 @@ from app.services.backup import create_backup, prepare_restore, validate_backup
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Personal Finance SQLite backup workflow")
+    parser = argparse.ArgumentParser(
+        description="Personal Finance SQLite backup workflow"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     backup = commands.add_parser("create")
     backup.add_argument("destination", type=Path)

@@ -8,9 +8,18 @@ from app.services.transfer_matching import (
 )
 
 
-def event(day: date, amount: int, account: int, *, payee: str | None = None, note: str | None = None):
+def event(
+    day: date,
+    amount: int,
+    account: int,
+    *,
+    payee: str | None = None,
+    note: str | None = None,
+):
     entry = SimpleNamespace(amount_scaled=amount, account_id=account)
-    return SimpleNamespace(transaction_date=day, entries=(entry,), payee_text=payee, note=note)
+    return SimpleNamespace(
+        transaction_date=day, entries=(entry,), payee_text=payee, note=note
+    )
 
 
 def test_exact_date_unique_match_auto_pairs_and_is_used_once() -> None:
@@ -40,8 +49,12 @@ def test_ambiguous_match_is_not_auto_paired_when_competitor_is_reversed() -> Non
 
 def test_one_day_unique_match_auto_pairs_but_two_to_seven_days_review() -> None:
     day = date(2026, 8, 22)
-    one_day = score_transfer_candidate(event(day, -250_000, 1), event(day + timedelta(days=1), 250_000, 2))
-    review = score_transfer_candidate(event(day, -250_000, 1), event(day + timedelta(days=2), 250_000, 2))
+    one_day = score_transfer_candidate(
+        event(day, -250_000, 1), event(day + timedelta(days=1), 250_000, 2)
+    )
+    review = score_transfer_candidate(
+        event(day, -250_000, 1), event(day + timedelta(days=2), 250_000, 2)
+    )
 
     assert one_day is not None and one_day.auto_pair is True and one_day.review is False
     assert review is not None and review.auto_pair is False and review.review is True
@@ -49,11 +62,16 @@ def test_one_day_unique_match_auto_pairs_but_two_to_seven_days_review() -> None:
 
 def test_pairs_and_reviews_respect_date_boundaries() -> None:
     day = date(2026, 8, 22)
-    pairs, reviews = pair_transfer_rows((
-        event(day, -100_000, 1), event(day + timedelta(days=1), 100_000, 2),
-        event(day, -200_000, 3), event(day + timedelta(days=7), 200_000, 4),
-        event(day, -300_000, 5), event(day + timedelta(days=8), 300_000, 6),
-    ))
+    pairs, reviews = pair_transfer_rows(
+        (
+            event(day, -100_000, 1),
+            event(day + timedelta(days=1), 100_000, 2),
+            event(day, -200_000, 3),
+            event(day + timedelta(days=7), 200_000, 4),
+            event(day, -300_000, 5),
+            event(day + timedelta(days=8), 300_000, 6),
+        )
+    )
 
     assert len(pairs) == 1
     assert len(reviews) == 1

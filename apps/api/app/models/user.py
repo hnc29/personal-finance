@@ -12,10 +12,15 @@ class User(Base):
     """User entity for authentication, authorization and multi-tenant data isolation."""
 
     __tablename__ = "users"
+    __allow_unmapped__ = True
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    username: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True, nullable=False
+    )
+    email: Mapped[str | None] = mapped_column(
+        String(255), unique=True, index=True, nullable=True
+    )
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -31,3 +36,7 @@ class User(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    # Transient attributes for view-as impersonation session tracking
+    impersonated_by_id: int | None = None
+    impersonated_by_username: str | None = None

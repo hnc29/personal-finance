@@ -26,7 +26,6 @@ def _normalized(value: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", unaccented.lower()).split())
 
 
-
 class PricingProvider(Protocol):
     def quote(self, instrument: str, as_of: datetime.datetime) -> PriceQuote: ...
 
@@ -82,10 +81,22 @@ def resolve_metal_instrument(
     norm_product = _normalized(product_type)
 
     purity_str = str(purity) if purity is not None else ""
-    is_999 = "999" in purity_str and "9999" not in purity_str and "0.9999" not in purity_str
+    is_999 = (
+        "999" in purity_str and "9999" not in purity_str and "0.9999" not in purity_str
+    )
     suffix = "999" if is_999 else "9999"
 
-    if any(k in norm_product for k in ("nhan", "tron", "tron tron", "ep vi", "hung thinh vuong", "kim gia bao")):
+    if any(
+        k in norm_product
+        for k in (
+            "nhan",
+            "tron",
+            "tron tron",
+            "ep vi",
+            "hung thinh vuong",
+            "kim gia bao",
+        )
+    ):
         cat = "PLAIN_RING"
     elif any(k in norm_product for k in ("mieng", "bar", "thoi", "la")):
         cat = "GOLD_BAR"
@@ -119,7 +130,9 @@ def select_metal_quote(
     3. MANUAL quote for exact instrument.
     4. UNAVAILABLE (no cross-brand fallback).
     """
-    normalized_providers = {code.upper(): provider for code, provider in providers.items()}
+    normalized_providers = {
+        code.upper(): provider for code, provider in providers.items()
+    }
     norm_brand = brand.upper()
 
     # 1. Try own brand provider for exact instrument (LIVE)

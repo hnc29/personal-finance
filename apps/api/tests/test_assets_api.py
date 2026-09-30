@@ -425,9 +425,12 @@ def test_create_and_patch_metal_reject_excess_purity_precision_without_mutation(
         "purchase_price": "10",
         "total_cost": "20",
     }
-    assert client.post(
-        "/api/v1/assets/metals", json={**payload, "purity": "0.99999"}
-    ).status_code == 422
+    assert (
+        client.post(
+            "/api/v1/assets/metals", json={**payload, "purity": "0.99999"}
+        ).status_code
+        == 422
+    )
 
     created = client.post("/api/v1/assets/metals", json=payload)
     response = client.patch(
@@ -476,10 +479,13 @@ def test_create_and_patch_enforce_existing_quantity_rules_consistently(
             "total_cost": "20",
         }
 
-    assert client.post(
-        f"/api/v1/assets/{asset_type}",
-        json={**create_payload, quantity_field: invalid_value},
-    ).status_code == 422
+    assert (
+        client.post(
+            f"/api/v1/assets/{asset_type}",
+            json={**create_payload, quantity_field: invalid_value},
+        ).status_code
+        == 422
+    )
 
     created = client.post(f"/api/v1/assets/{asset_type}", json=create_payload)
     assert created.status_code == 201
@@ -624,12 +630,17 @@ def test_sync_crypto_prices_endpoint(client: TestClient) -> None:
     mock_quote.buy_price = Decimal("2080000000.0000")
     mock_quote.sell_price = Decimal("2080000000.0000")
 
-    with patch(
-        "app.services.crypto_pricing.CoinMarketCapPriceAdapter.fetch_all_quotes",
-        return_value={"BTC": (Decimal(80000), Decimal("2080000000.0000"), mock_quote)},
-    ), patch(
-        "app.services.crypto_pricing.CoinMarketCapPriceAdapter.get_usd_vnd_rate",
-        return_value=Decimal("26000.0000"),
+    with (
+        patch(
+            "app.services.crypto_pricing.CoinMarketCapPriceAdapter.fetch_all_quotes",
+            return_value={
+                "BTC": (Decimal(80000), Decimal("2080000000.0000"), mock_quote)
+            },
+        ),
+        patch(
+            "app.services.crypto_pricing.CoinMarketCapPriceAdapter.get_usd_vnd_rate",
+            return_value=Decimal("26000.0000"),
+        ),
     ):
         res = client.post("/api/v1/assets/crypto/sync-prices")
         assert res.status_code == 200
@@ -688,4 +699,3 @@ def test_sync_metal_prices_endpoint(client: TestClient) -> None:
         assert len(data["items"]) == 1
         assert data["items"][0]["brand"] == "SJC"
         assert data["items"][0]["valuation_price"] == "14700000.0000"
-

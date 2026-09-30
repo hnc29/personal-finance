@@ -121,10 +121,7 @@ def score_reconciliation_candidate(
     else:
         date_score = 5
     score = (
-        50
-        + date_score
-        + (30 if reference_matches else 0)
-        + similarity * 20 // 10_000
+        50 + date_score + (30 if reference_matches else 0) + similarity * 20 // 10_000
     )
     return ReconciliationScore(
         statement=statement,
@@ -176,9 +173,7 @@ def decide_reconciliation(
         and best.score - runner_up_score >= AUTO_MATCH_MARGIN
     )
     if exact_reference_unique or (
-        not reference_matches
-        and not best.reference_conflicts
-        and strong_unique_score
+        not reference_matches and not best.reference_conflicts and strong_unique_score
     ):
         same_strength = [
             candidate for candidate in candidates if candidate.score == best.score

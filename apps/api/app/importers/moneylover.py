@@ -65,7 +65,10 @@ def parse_moneylover_xlsx(source: bytes | BinaryIO) -> ParsedMoneyLoverFile:
             raise ValueError(f"missing required worksheet: {WORKSHEET}")
         sheet = workbook[WORKSHEET]
         header_values = tuple(cell.value for cell in next(sheet.iter_rows()))
-        if len(header_values) < len(HEADERS) or tuple(header_values[: len(HEADERS)]) != HEADERS:
+        if (
+            len(header_values) < len(HEADERS)
+            or tuple(header_values[: len(HEADERS)]) != HEADERS
+        ):
             raise ValueError("invalid Sổ giao dịch headers")
         source_headers = tuple(str(value) for value in header_values)
         rows: list[ParsedMoneyLoverRow] = []
@@ -84,21 +87,25 @@ def parse_moneylover_xlsx(source: bytes | BinaryIO) -> ParsedMoneyLoverFile:
                 transaction_date = transaction_date.date()
             if transaction_date is not None and not isinstance(transaction_date, date):
                 raise ValueError(f"invalid date at source row {row_number}")
-            rows.append(ParsedMoneyLoverRow(
-                row_number,
-                None if source_id is None else str(source_id),
-                payload,
-                transaction_date,
-                amount,
-                None if amount is None else money_to_scaled(amount),
-            ))
+            rows.append(
+                ParsedMoneyLoverRow(
+                    row_number,
+                    None if source_id is None else str(source_id),
+                    payload,
+                    transaction_date,
+                    amount,
+                    None if amount is None else money_to_scaled(amount),
+                )
+            )
         return ParsedMoneyLoverFile(digest, tuple(rows))
     finally:
         workbook.close()
 
 
 def raw_payload_text(payload: dict[str, object]) -> str:
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
 
 
 def semantic_fingerprint(payload: dict[str, object]) -> str:
@@ -110,4 +117,6 @@ def semantic_fingerprint(payload: dict[str, object]) -> str:
     # semantic key therefore deliberately excludes ``Id`` while retaining all
     # transaction fields that describe the row.
     semantic_payload = {key: value for key, value in payload.items() if key != "Id"}
-    return hashlib.sha256(raw_payload_text(semantic_payload).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        raw_payload_text(semantic_payload).encode("utf-8")
+    ).hexdigest()

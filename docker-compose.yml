@@ -1,0 +1,29 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: personal-finance-api
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PF_ENVIRONMENT=production
+      - PF_SECRET_KEY=${PF_SECRET_KEY:-personal-finance-vps-production-key-change-me}
+      - PF_CORS_ORIGINS=["http://169.58.57.223:3000","http://localhost:3000"]
+      - PF_DATABASE_PATH=/app/data/finance.db
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://169.58.57.223:8000
+    container_name: personal-finance-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api

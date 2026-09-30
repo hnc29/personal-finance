@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import CurrentUser
 from app.models.account import Account
 from app.models.ledger import AccountEntry, FinancialEvent
 from app.schemas.read_models import ImportApplyRead
@@ -34,6 +35,7 @@ def _export_rows(
     account_id: int | None,
     start_date: datetime.date | None,
     end_date: datetime.date | None,
+    user_id: int | None = None,
 ) -> list[tuple[AccountEntry, FinancialEvent]]:
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(400, "start_date must not be after end_date")
@@ -42,7 +44,13 @@ def _export_rows(
         .join(FinancialEvent, AccountEntry.financial_event_id == FinancialEvent.id)
         .order_by(FinancialEvent.id, AccountEntry.id)
     )
+    if user_id is not None:
+        stmt = stmt.where(FinancialEvent.user_id == user_id)
     if account_id is not None:
+        if user_id is not None:
+            acc = db.get(Account, account_id)
+            if acc is None or acc.user_id != user_id:
+                raise HTTPException(404, f"Account {account_id} not found")
         stmt = stmt.where(AccountEntry.account_id == account_id)
     if start_date is not None:
         stmt = stmt.where(FinancialEvent.transaction_date >= start_date)
@@ -73,12 +81,17 @@ def _format_export_filename(
     start_date: datetime.date | None,
     end_date: datetime.date | None,
     ext: str,
+    user_id: int | None = None,
 ) -> str:
     account_name = "Tat-ca-tai-khoan"
     if account_id is not None:
         acc = db.get(Account, account_id)
-        if acc:
-            normalized = unicodedata.normalize("NFKD", acc.name).encode("ascii", "ignore").decode("ascii")
+        if acc and (user_id is None or acc.user_id == user_id):
+            normalized = (
+                unicodedata.normalize("NFKD", acc.name)
+                .encode("ascii", "ignore")
+                .decode("ascii")
+            )
             sanitized = re.sub(r"[^\w\-]+", "_", normalized.strip())
             account_name = sanitized or f"Tai-khoan-{account_id}"
     start_str = start_date.isoformat() if start_date else "tu-dau"
@@ -88,6 +101,7 @@ def _format_export_filename(
 
 @router.get("/exports/events.csv")
 def export_csv(
+    current_user: CurrentUser,
     db: Session = Depends(get_db),  # noqa: B008
     account_id: int | None = Query(None),
     start_date: datetime.date | None = Query(None),  # noqa: B008
@@ -96,7 +110,9 @@ def export_csv(
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["event_id", "date", "event_type", "account_id", "amount"])
-    for entry, event in _export_rows(db, account_id, start_date, end_date):
+    for entry, event in _export_rows(
+        db, account_id, start_date, end_date, user_id=current_user.id
+    ):
         writer.writerow(
             [
                 event.id,
@@ -106,7 +122,9 @@ def export_csv(
                 entry.amount,
             ]
         )
-    filename = _format_export_filename(db, account_id, start_date, end_date, "csv")
+    filename = _format_export_filename(
+        db, account_id, start_date, end_date, "csv", user_id=current_user.id
+    )
     return StreamingResponse(
         iter([out.getvalue().encode()]),
         media_type="text/csv",
@@ -116,6 +134,7 @@ def export_csv(
 
 @router.get("/exports/events.xlsx")
 def export_xlsx(
+    current_user: CurrentUser,
     db: Session = Depends(get_db),  # noqa: B008
     account_id: int | None = Query(None),
     start_date: datetime.date | None = Query(None),  # noqa: B008
@@ -126,7 +145,9 @@ def export_xlsx(
     wb = Workbook()
     ws = wb.active
     ws.append(["event_id", "date", "event_type", "account_id", "amount"])
-    for entry, event in _export_rows(db, account_id, start_date, end_date):
+    for entry, event in _export_rows(
+        db, account_id, start_date, end_date, user_id=current_user.id
+    ):
         ws.append(
             [
                 event.id,
@@ -139,7 +160,9 @@ def export_xlsx(
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
-    filename = _format_export_filename(db, account_id, start_date, end_date, "xlsx")
+    filename = _format_export_filename(
+        db, account_id, start_date, end_date, "xlsx", user_id=current_user.id
+    )
     return StreamingResponse(
         out,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -149,6 +172,7 @@ def export_xlsx(
 
 @router.get("/exports/statement/data")
 def export_statement_json(
+    current_user: CurrentUser,
     db: Session = Depends(get_db),  # noqa: B008
     account_id: int | None = Query(None),
     start_date: datetime.date | None = Query(None),  # noqa: B008
@@ -156,11 +180,14 @@ def export_statement_json(
 ):
     from app.services.statement_export import get_statement_data
 
-    return get_statement_data(db, account_id, start_date, end_date)
+    return get_statement_data(
+        db, account_id, start_date, end_date, user_id=current_user.id
+    )
 
 
 @router.get("/exports/statement.xlsx")
 def export_statement_xlsx(
+    current_user: CurrentUser,
     db: Session = Depends(get_db),  # noqa: B008
     account_id: int | None = Query(None),
     start_date: datetime.date | None = Query(None),  # noqa: B008
@@ -168,8 +195,12 @@ def export_statement_xlsx(
 ):
     from app.services.statement_export import generate_statement_xlsx
 
-    out = generate_statement_xlsx(db, account_id, start_date, end_date)
-    filename = _format_export_filename(db, account_id, start_date, end_date, "xlsx")
+    out = generate_statement_xlsx(
+        db, account_id, start_date, end_date, user_id=current_user.id
+    )
+    filename = _format_export_filename(
+        db, account_id, start_date, end_date, "xlsx", user_id=current_user.id
+    )
     filename = f"sao_ke_{filename}"
     return StreamingResponse(
         out,
@@ -180,6 +211,7 @@ def export_statement_xlsx(
 
 @router.get("/exports/statement.csv")
 def export_statement_csv(
+    current_user: CurrentUser,
     db: Session = Depends(get_db),  # noqa: B008
     account_id: int | None = Query(None),
     start_date: datetime.date | None = Query(None),  # noqa: B008
@@ -187,8 +219,12 @@ def export_statement_csv(
 ):
     from app.services.statement_export import generate_statement_csv
 
-    out = generate_statement_csv(db, account_id, start_date, end_date)
-    filename = _format_export_filename(db, account_id, start_date, end_date, "csv")
+    out = generate_statement_csv(
+        db, account_id, start_date, end_date, user_id=current_user.id
+    )
+    filename = _format_export_filename(
+        db, account_id, start_date, end_date, "csv", user_id=current_user.id
+    )
     filename = f"sao_ke_{filename}"
     # Prepend UTF-8 BOM for Excel compatibility
     csv_bytes = b"\xef\xbb\xbf" + out.getvalue().encode("utf-8")
@@ -201,6 +237,7 @@ def export_statement_csv(
 
 @router.post("/imports/money-lover")
 def import_money_lover(
+    current_user: CurrentUser,
     payload: bytes = Body(...),
     filename: str = Header("upload.xlsx", alias="X-Filename"),
     db: Session = Depends(get_db),  # noqa: B008
@@ -235,7 +272,7 @@ def import_money_lover(
         except (UnicodeDecodeError, csv.Error) as exc:
             raise HTTPException(400, "Invalid CSV file") from exc
     try:
-        batch = import_moneylover(db, payload, name)
+        batch = import_moneylover(db, payload, name, user_id=current_user.id)
         # TASK-040: "dữ liệu tải lên nhưng không đưa vào data ... hãy đưa
         # thẳng các bản ghi vào tương ứng" -- an upload used to only ever
         # create raw rows that nothing ever consumed. Applying in the same
@@ -243,7 +280,7 @@ def import_money_lover(
         # in Transactions/net worth immediately, with no separate manual
         # step; unmatched wallets or invalid rows are reported back rather
         # than silently dropped or blocking the whole batch.
-        apply_result = apply_import_batch(db, batch.id)
+        apply_result = apply_import_batch(db, batch.id, user_id=current_user.id)
     except Exception as exc:
         raise HTTPException(400, str(exc)) from exc
     db.commit()
@@ -257,7 +294,11 @@ def import_money_lover(
 
 
 @router.post("/imports/{batch_id}/apply", response_model=ImportApplyRead)
-def apply_import(batch_id: int, db: Session = Depends(get_db)):  # noqa: B008
+def apply_import(
+    batch_id: int,
+    current_user: CurrentUser,
+    db: Session = Depends(get_db),  # noqa: B008
+):
     """Apply (or re-apply) a batch's not-yet-applied rows to the ledger.
 
     Idempotent -- rows already applied (e.g. by the auto-apply above, or a
@@ -266,7 +307,7 @@ def apply_import(batch_id: int, db: Session = Depends(get_db)):  # noqa: B008
     unmatched wallets (fixed since) gets pushed into the ledger.
     """
     try:
-        result = apply_import_batch(db, batch_id)
+        result = apply_import_batch(db, batch_id, user_id=current_user.id)
     except BatchNotFoundError as exc:
         raise HTTPException(404, "Import batch not found") from exc
     db.commit()

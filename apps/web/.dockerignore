@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.gitignore
+e2e
+tests
+scripts
+*.log
+npm-debug.log*
+.DS_Store
+._*
+**/._*
+**/.DS_Store

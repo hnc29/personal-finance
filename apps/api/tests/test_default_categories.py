@@ -16,7 +16,12 @@ from app.services.default_categories import (
 def db(tmp_path) -> Session:
     database = tmp_path / "synthetic.db"
     env = {**os.environ, "PF_DATABASE_PATH": str(database)}
-    subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True, env=env, capture_output=True)
+    subprocess.run(
+        ["uv", "run", "alembic", "upgrade", "head"],
+        check=True,
+        env=env,
+        capture_output=True,
+    )
     engine = create_engine(f"sqlite:///{database}")
     with Session(engine) as value:
         yield value
@@ -43,7 +48,11 @@ def test_non_empty_database_preserves_custom_and_merges(db: Session) -> None:
     db.commit()
     assert merge_default_categories(db)["inserted"] == 79
     db.refresh(custom)
-    assert (custom.name, custom.parent_id, custom.is_active) == ("My category", None, False)
+    assert (custom.name, custom.parent_id, custom.is_active) == (
+        "My category",
+        None,
+        False,
+    )
 
 
 def test_catalog_depth_is_at_most_three(db: Session) -> None:

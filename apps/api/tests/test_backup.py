@@ -8,7 +8,9 @@ from app.services.backup import InvalidBackupError, create_backup, prepare_resto
 
 def _synthetic_db(path: Path) -> None:
     with sqlite3.connect(path) as connection:
-        connection.execute("CREATE TABLE synthetic_records (amount_scaled INTEGER NOT NULL)")
+        connection.execute(
+            "CREATE TABLE synthetic_records (amount_scaled INTEGER NOT NULL)"
+        )
         connection.execute("INSERT INTO synthetic_records VALUES (12340000)")
 
 
@@ -22,7 +24,9 @@ def test_backup_and_restore_preparation_are_consistent(tmp_path: Path) -> None:
     prepare_restore(backup, replacement)
 
     with sqlite3.connect(replacement) as connection:
-        assert connection.execute("SELECT amount_scaled FROM synthetic_records").fetchone() == (12340000,)
+        assert connection.execute(
+            "SELECT amount_scaled FROM synthetic_records"
+        ).fetchone() == (12340000,)
 
 
 def test_backup_never_overwrites_destination(tmp_path: Path) -> None:

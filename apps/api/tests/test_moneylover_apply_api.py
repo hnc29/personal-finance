@@ -32,11 +32,34 @@ def xlsx_bytes(amount: object = -50_000) -> bytes:
     sheet.title = "Sổ giao dịch"
     sheet.append(
         [
-            "Id", "Ngày", "Nhóm", "Số tiền", "Đơn vị tiền tệ", "Ví",
-            "Ghi chú", "Với", "Sự kiện", "Không tính vào báo cáo", "Thành viên",
+            "Id",
+            "Ngày",
+            "Nhóm",
+            "Số tiền",
+            "Đơn vị tiền tệ",
+            "Ví",
+            "Ghi chú",
+            "Với",
+            "Sự kiện",
+            "Không tính vào báo cáo",
+            "Thành viên",
         ]
     )
-    sheet.append(["row-1", date(2026, 8, 1), "Ăn ngoài", amount, "VND", "ZaloPay", None, None, None, False, None])
+    sheet.append(
+        [
+            "row-1",
+            date(2026, 8, 1),
+            "Ăn ngoài",
+            amount,
+            "VND",
+            "ZaloPay",
+            None,
+            None,
+            None,
+            False,
+            None,
+        ]
+    )
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -47,8 +70,12 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     database_path = tmp_path / "synthetic-apply-api.db"
     env = os.environ.copy()
     env["PF_DATABASE_PATH"] = str(database_path)
-    subprocess.run(["alembic", "upgrade", "head"], check=True, env=env, capture_output=True)
-    engine = create_engine(f"sqlite:///{database_path}", connect_args={"check_same_thread": False})
+    subprocess.run(
+        ["alembic", "upgrade", "head"], check=True, env=env, capture_output=True
+    )
+    engine = create_engine(
+        f"sqlite:///{database_path}", connect_args={"check_same_thread": False}
+    )
     session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
     def override_get_db() -> Iterator[Session]:
@@ -77,7 +104,10 @@ def test_manual_apply_pushes_a_previously_unmatched_batch_once_the_account_exist
 ) -> None:
     upload = client.post(
         "/api/v1/imports/money-lover",
-        headers={"Content-Type": "application/octet-stream", "X-Filename": "upload.xlsx"},
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-Filename": "upload.xlsx",
+        },
         content=xlsx_bytes(),
     )
     assert upload.status_code == 200, upload.text

@@ -22,7 +22,23 @@ def workbook_bytes(headers=HEADERS, rows=()):
 
 
 def test_parses_rows_and_preserves_source_data() -> None:
-    data = workbook_bytes(rows=[("id-1", date(2026, 8, 22), "Food", 12.5, "USD", "Cash", "note", "", "", False, "member")])
+    data = workbook_bytes(
+        rows=[
+            (
+                "id-1",
+                date(2026, 8, 22),
+                "Food",
+                12.5,
+                "USD",
+                "Cash",
+                "note",
+                "",
+                "",
+                False,
+                "member",
+            )
+        ]
+    )
     parsed = parse_moneylover_xlsx(data)
     row = parsed.rows[0]
     assert row.source_row_number == 2

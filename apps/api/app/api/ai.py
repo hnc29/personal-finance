@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 
 from app.core.config import settings
+from app.core.security import CurrentUser
 from app.schemas.ai import AiSuggestionRequest, AiSuggestionResponse
 from app.services.ollama import OllamaUnavailableError, generate_suggestion
 
@@ -17,9 +18,15 @@ def ai_status() -> dict[str, bool | str]:
 
 
 @router.post("/suggest", response_model=AiSuggestionResponse)
-def suggest(data: AiSuggestionRequest) -> AiSuggestionResponse:
+def suggest(
+    data: AiSuggestionRequest,
+    _current_user: CurrentUser,
+) -> AiSuggestionResponse:
     if not settings.ollama_enabled or not settings.ollama_model:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Local AI is disabled")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Local AI is disabled",
+        )
     try:
         suggestion = generate_suggestion(
             settings.ollama_base_url,
@@ -29,5 +36,7 @@ def suggest(data: AiSuggestionRequest) -> AiSuggestionResponse:
             settings.ollama_timeout_seconds,
         )
     except OllamaUnavailableError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
     return AiSuggestionResponse(suggestion=suggestion)

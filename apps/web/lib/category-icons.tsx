@@ -53,6 +53,36 @@ const PlusCircle = (p: IconProps) => (
     <path d="M12 8v8M8 12h8" />
   </Svg>
 );
+const Plus = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 5v14M5 12h14" />
+  </Svg>
+);
+const ChevronDown = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m6 9 6 6 6-6" />
+  </Svg>
+);
+const Search = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m21 21-4.8-4.8" />
+  </Svg>
+);
+const Eye = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </Svg>
+);
+const EyeOff = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+    <line x1="2" y1="2" x2="22" y2="22" />
+  </Svg>
+);
 const Utensils = (p: IconProps) => (
   <Svg {...p}>
     <path d="M6 3v7a2 2 0 0 0 4 0V3M8 3v18M16 3c-1.5 0-2.5 1.5-2.5 4v4h5" />
@@ -672,11 +702,12 @@ export function iconForCategory(
 // key, so a category can store a chosen key (``Category.icon``) instead of
 // only ever getting the name-inferred default above. ---
 const ICON_REGISTRY: Record<string, (p: IconProps) => React.ReactElement> = {
-  Wallet, MinusCircle, PlusCircle, Utensils, Coffee, Basket, Receipt, Bolt,
+  Wallet, MinusCircle, PlusCircle, Plus, ChevronDown, Utensils, Coffee, Basket, Receipt, Bolt,
   Droplet, Wifi, Phone, Home, Fuel, Car, Bus, Parking, Wrench, ShoppingBag,
   Shirt, Monitor, Box, Users, Baby, Paw, Heart, Activity, Pill, Play,
   Gamepad, Book, Plane, Luggage, Gift, Shield, Percent, Briefcase,
-  TrendingUp, Refund, Grid,
+  TrendingUp, Refund, Grid, Search,
+  Eye, EyeOff,
   Calendar, Camera, Music, Cake, Cart, Umbrella, Bed, Ball, Beer, Popcorn,
   Palette, Trophy, BarChart, CreditCard, Ticket, Globe, GraduationCap,
   Cocktail, Tag, Envelope, MoneyBag, PiggyBank, Truck, Speaker, Swim,
@@ -711,7 +742,7 @@ export const ICON_GROUPS: { label: { en: string; vi: string }; keys: string[] }[
   { label: { en: "Entertainment", vi: "Giải trí" }, keys: ["Play", "Gamepad", "Music", "Piano", "Microphone", "Speaker", "Camera", "Ticket", "Ball", "Trophy", "ChatBubble", "Palette"] },
   { label: { en: "Education", vi: "Giáo dục" }, keys: ["Book", "GraduationCap", "Notebook", "Folder"] },
   { label: { en: "Travel & events", vi: "Du lịch & Sự kiện" }, keys: ["Umbrella", "Globe", "Calendar", "Flag", "Windmill"] },
-  { label: { en: "Other", vi: "Khác" }, keys: ["Shield", "Grid", "MinusCircle", "PlusCircle"] },
+  { label: { en: "Other", vi: "Khác" }, keys: ["Shield", "Grid", "MinusCircle", "PlusCircle", "Eye", "EyeOff", "Plus", "ChevronDown", "Search"] },
 ];
 
 /** Short bilingual label per icon key, used as the picker's aria-label /
@@ -737,7 +768,9 @@ const ICON_LABELS: Record<string, { en: string; vi: string }> = {
   Gift: { en: "Gift", vi: "Quà tặng" }, Shield: { en: "Insurance", vi: "Bảo hiểm" },
   Percent: { en: "Fees/Interest", vi: "Phí/Lãi" }, Briefcase: { en: "Business", vi: "Công việc" },
   TrendingUp: { en: "Investment", vi: "Đầu tư" }, Refund: { en: "Refund", vi: "Hoàn tiền" },
-  Grid: { en: "Other", vi: "Khác" },
+  Grid: { en: "Other", vi: "Khác" }, Search: { en: "Search", vi: "Tìm kiếm" },
+  Eye: { en: "Show", vi: "Hiện" }, EyeOff: { en: "Hide", vi: "Ẩn" },
+  Plus: { en: "Add", vi: "Thêm" }, ChevronDown: { en: "Expand", vi: "Mở rộng" },
   Calendar: { en: "Calendar", vi: "Lịch" }, Camera: { en: "Camera", vi: "Máy ảnh" },
   Music: { en: "Music", vi: "Âm nhạc" }, Cake: { en: "Cake", vi: "Bánh kem" },
   Cart: { en: "Cart", vi: "Giỏ hàng" }, Umbrella: { en: "Umbrella", vi: "Ô dù" },

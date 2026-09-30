@@ -120,7 +120,9 @@ def get_btmc_adapter() -> BtmcPriceAdapter:
 
 def _get_or_create_instrument(db: Session, canonical_code: str) -> PricingInstrument:
     existing = db.scalar(
-        select(PricingInstrument).where(PricingInstrument.canonical_code == canonical_code)
+        select(PricingInstrument).where(
+            PricingInstrument.canonical_code == canonical_code
+        )
     )
     if existing is not None:
         return existing
@@ -150,7 +152,9 @@ def _persist_live_quote(
     PricingInstrument/PricingProvider rows, then append it (append-only --
     see PriceQuote's before_update/before_delete guard)."""
     instrument = _get_or_create_instrument(db, canonical_code)
-    provider = _get_or_create_provider(db, raw_quote.provider.code, raw_quote.provider.name)
+    provider = _get_or_create_provider(
+        db, raw_quote.provider.code, raw_quote.provider.name
+    )
     quote = PriceQuote(
         instrument=instrument,
         provider=provider,

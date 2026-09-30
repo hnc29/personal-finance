@@ -25,7 +25,9 @@ def test_fetches_and_caches_the_usd_vnd_rate() -> None:
     client = Mock()
     client.get.return_value = response
     now = datetime.datetime(2026, 8, 26, 10, tzinfo=datetime.UTC)
-    provider = UsdVndRateProvider(client, "https://fx.example.invalid/latest/USD", clock=lambda: now)
+    provider = UsdVndRateProvider(
+        client, "https://fx.example.invalid/latest/USD", clock=lambda: now
+    )
 
     rate = provider.get_rate()
 
@@ -43,7 +45,10 @@ def test_second_call_within_ttl_does_not_refetch() -> None:
     client.get.return_value = response
     clock_value = datetime.datetime(2026, 8, 26, 10, tzinfo=datetime.UTC)
     provider = UsdVndRateProvider(
-        client, "https://fx.example.invalid/latest/USD", ttl=datetime.timedelta(hours=1), clock=lambda: clock_value
+        client,
+        "https://fx.example.invalid/latest/USD",
+        ttl=datetime.timedelta(hours=1),
+        clock=lambda: clock_value,
     )
 
     provider.get_rate()

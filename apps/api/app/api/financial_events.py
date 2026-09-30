@@ -24,6 +24,7 @@ from app.services.ledger import (
     InvalidEventEntriesError,
     ProtectedEventTypeError,
     UnknownAccountError,
+    UnknownCategoryError,
 )
 
 DbSession = Annotated[Session, Depends(get_db)]
@@ -37,10 +38,7 @@ def list_financial_events(
     current_user: CurrentUser,
 ) -> list[FinancialEvent]:
     """List all financial events with their entries, ordered by id."""
-    try:
-        return ledger_service.list_financial_events(db, user_id=current_user.id)
-    except TypeError:
-        return ledger_service.list_financial_events(db)
+    return ledger_service.list_financial_events(db, user_id=current_user.id)
 
 
 @router.get("/{event_id}", response_model=FinancialEventRead)
@@ -50,10 +48,9 @@ def get_financial_event(
     current_user: CurrentUser,
 ) -> FinancialEvent:
     """Return one financial event by id, mapping an unknown id to 404."""
-    try:
-        event = ledger_service.get_financial_event(db, event_id, user_id=current_user.id)
-    except TypeError:
-        event = ledger_service.get_financial_event(db, event_id)
+    event = ledger_service.get_financial_event(
+        db, event_id, user_id=current_user.id
+    )
     if event is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -74,14 +71,13 @@ def create_financial_event(
 ) -> FinancialEvent:
     """Create a financial event with its entries, validating both."""
     try:
-        try:
-            return ledger_service.create_financial_event(db, data, user_id=current_user.id)
-        except TypeError:
-            return ledger_service.create_financial_event(db, data)
-    except UnknownAccountError as exc:
+        return ledger_service.create_financial_event(
+            db, data, user_id=current_user.id
+        )
+    except (UnknownAccountError, UnknownCategoryError) as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found",
+            detail="Account or Category not found",
         ) from exc
     except InvalidEventEntriesError as exc:
         raise HTTPException(
@@ -92,7 +88,10 @@ def create_financial_event(
 
 @router.patch("/{event_id}", response_model=FinancialEventRead)
 def update_financial_event(
-    event_id: int, data: FinancialEventUpdate, db: DbSession
+    event_id: int,
+    data: FinancialEventUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> FinancialEvent:
     """Replace an event's fields and entries wholesale (TASK-042).
 
@@ -103,11 +102,13 @@ def update_financial_event(
     domain flow and cannot be edited here.
     """
     try:
-        event = ledger_service.update_financial_event(db, event_id, data)
-    except UnknownAccountError as exc:
+        event = ledger_service.update_financial_event(
+            db, event_id, data, user_id=current_user.id
+        )
+    except (UnknownAccountError, UnknownCategoryError) as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found",
+            detail="Account or Category not found",
         ) from exc
     except InvalidEventEntriesError as exc:
         raise HTTPException(
@@ -129,7 +130,10 @@ def update_financial_event(
 
 @router.delete("/{event_id}", response_model=DeletedEventRead)
 def delete_financial_event(
-    event_id: int, db: DbSession, force: bool = False
+    event_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+    force: bool = False,
 ) -> DeletedEventRead:
     """Delete an event and its entries (TASK-042).
 
@@ -138,16 +142,13 @@ def delete_financial_event(
     deleted here without force=True.
     """
     try:
-        if force:
-            deleted = ledger_service.delete_financial_event(
-                db, event_id, force=True
-            )
-        else:
-            deleted = ledger_service.delete_financial_event(db, event_id)
+        deleted = ledger_service.delete_financial_event(
+            db, event_id, user_id=current_user.id, force=force
+        )
     except ProtectedEventTypeError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"{exc.args[0].value} events are managed elsewhere and cannot be deleted here",
+            detail=f"{exc.args[0].value} events are managed elsewhere and cannot be edited here",
         ) from exc
     if not deleted:
         raise HTTPException(

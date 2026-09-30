@@ -35,10 +35,7 @@ def create_account(
     current_user: CurrentUser,
 ) -> Account:
     """Create a new account."""
-    try:
-        return account_service.create_account(db, data, user_id=current_user.id)
-    except TypeError:
-        return account_service.create_account(db, data)
+    return account_service.create_account(db, data, user_id=current_user.id)
 
 
 @router.get("", response_model=list[AccountRead], response_model_exclude_none=True)
@@ -47,23 +44,19 @@ def list_accounts(
     current_user: CurrentUser,
 ) -> list[Account]:
     """Return every account ordered by its user-controlled sort_order."""
-    try:
-        return account_service.list_accounts(db, user_id=current_user.id)
-    except TypeError:
-        return account_service.list_accounts(db)
+    return account_service.list_accounts(db, user_id=current_user.id)
 
 
-@router.get("/{account_id}", response_model=AccountRead, response_model_exclude_none=True)
+@router.get(
+    "/{account_id}", response_model=AccountRead, response_model_exclude_none=True
+)
 def get_account(
     account_id: int,
     db: DbSession,
     current_user: CurrentUser,
 ) -> Account:
     """Return a single account or 404 if it does not exist."""
-    try:
-        account = account_service.get_account(db, account_id, user_id=current_user.id)
-    except TypeError:
-        account = account_service.get_account(db, account_id)
+    account = account_service.get_account(db, account_id, user_id=current_user.id)
     if account is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -73,8 +66,18 @@ def get_account(
 
 
 @router.get("/{account_id}/balance", response_model=AccountBalanceRead)
-def get_account_balance(account_id: int, db: DbSession) -> AccountBalanceRead:
+def get_account_balance(
+    account_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> AccountBalanceRead:
     """Return the account's balance summed from its entries, or 404."""
+    account = account_service.get_account(db, account_id, user_id=current_user.id)
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found",
+        )
     balance = ledger_service.account_balance(db, account_id)
     if balance is None:
         raise HTTPException(
@@ -84,12 +87,19 @@ def get_account_balance(account_id: int, db: DbSession) -> AccountBalanceRead:
     return AccountBalanceRead(account_id=account_id, balance=balance)
 
 
-@router.patch("/{account_id}", response_model=AccountRead, response_model_exclude_none=True)
+@router.patch(
+    "/{account_id}", response_model=AccountRead, response_model_exclude_none=True
+)
 def update_account(
-    account_id: int, data: AccountUpdate, db: DbSession
+    account_id: int,
+    data: AccountUpdate,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> Account:
     """Apply a partial update or 404 if the account does not exist."""
-    account = account_service.update_account(db, account_id, data)
+    account = account_service.update_account(
+        db, account_id, data, user_id=current_user.id
+    )
     if account is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

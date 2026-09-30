@@ -68,38 +68,48 @@ def test_quote_states_cover_live_stale_manual_and_unavailable() -> None:
         is QuoteState.STALE
     )
     assert (
-        quote_state(
-            quoted_at=now, as_of=now, stale_after=max_age, is_manual=True
-        )
+        quote_state(quoted_at=now, as_of=now, stale_after=max_age, is_manual=True)
         is QuoteState.MANUAL
     )
     assert (
-        quote_state(
-            quoted_at=now, as_of=now, stale_after=max_age, is_available=False
-        )
+        quote_state(quoted_at=now, as_of=now, stale_after=max_age, is_available=False)
         is QuoteState.UNAVAILABLE
     )
 
 
 def test_cache_does_not_replace_newer_observation_with_older_quote() -> None:
     cache = InMemoryQuoteCache()
-    newer = PriceQuote(observed_at=datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC))
-    older = PriceQuote(observed_at=datetime.datetime(2026, 8, 23, 11, tzinfo=datetime.UTC))
+    newer = PriceQuote(
+        observed_at=datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
+    )
+    older = PriceQuote(
+        observed_at=datetime.datetime(2026, 8, 23, 11, tzinfo=datetime.UTC)
+    )
     cache.put("BTC/USD", newer)
     cache.put("BTC/USD", older)
-    assert cache.get("BTC/USD", datetime.datetime(2026, 8, 23, 13, tzinfo=datetime.UTC)) is newer
+    assert (
+        cache.get("BTC/USD", datetime.datetime(2026, 8, 23, 13, tzinfo=datetime.UTC))
+        is newer
+    )
 
 
 def test_cache_can_resolve_older_quote_as_of_before_newer_observation() -> None:
     cache = InMemoryQuoteCache()
-    older = PriceQuote(observed_at=datetime.datetime(2026, 8, 23, 11, tzinfo=datetime.UTC))
-    newer = PriceQuote(observed_at=datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC))
+    older = PriceQuote(
+        observed_at=datetime.datetime(2026, 8, 23, 11, tzinfo=datetime.UTC)
+    )
+    newer = PriceQuote(
+        observed_at=datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
+    )
     cache.put("BTC/USD", older)
     cache.put("BTC/USD", newer)
 
-    assert cache.get(
-        "BTC/USD", datetime.datetime(2026, 8, 23, 11, 30, tzinfo=datetime.UTC)
-    ) is older
+    assert (
+        cache.get(
+            "BTC/USD", datetime.datetime(2026, 8, 23, 11, 30, tzinfo=datetime.UTC)
+        )
+        is older
+    )
 
 
 def test_provider_framework_uses_mocked_provider_on_cache_miss() -> None:
@@ -156,15 +166,44 @@ def _selection_quote(
 
 
 def test_resolve_metal_instrument() -> None:
-    assert resolve_metal_instrument("SJC", "Vàng miếng SJC", "0.9999") == "SJC_GOLD_BAR_9999"
-    assert resolve_metal_instrument("SJC", "Nhẫn trơn 999.9", "0.9999") == "SJC_PLAIN_RING_9999"
-    assert resolve_metal_instrument("PNJ", "Nhẫn Trơn PNJ 999.9", "0.9999") == "PNJ_PLAIN_RING_9999"
-    assert resolve_metal_instrument("PNJ", "Vàng miếng PNJ", "0.9999") == "PNJ_GOLD_BAR_9999"
-    assert resolve_metal_instrument("PNJ", "Vàng nguyên liệu", "0.999") == "PNJ_RAW_GOLD_999"
-    assert resolve_metal_instrument("DOJI", "Nhẫn tròn Hưng Thịnh Vượng", "0.9999") == "DOJI_PLAIN_RING_9999"
-    assert resolve_metal_instrument("DOJI", "Vàng miếng DOJI", "0.9999") == "DOJI_GOLD_BAR_9999"
-    assert resolve_metal_instrument("BTMC", "Nhẫn tròn trơn Vàng Rồng Thăng Long", "0.9999") == "BTMC_PLAIN_RING_9999"
-    assert resolve_metal_instrument("BTMH", "Nhẫn tròn ép vỉ Kim Gia Bảo", "0.9999") == "BTMH_PLAIN_RING_9999"
+    assert (
+        resolve_metal_instrument("SJC", "Vàng miếng SJC", "0.9999")
+        == "SJC_GOLD_BAR_9999"
+    )
+    assert (
+        resolve_metal_instrument("SJC", "Nhẫn trơn 999.9", "0.9999")
+        == "SJC_PLAIN_RING_9999"
+    )
+    assert (
+        resolve_metal_instrument("PNJ", "Nhẫn Trơn PNJ 999.9", "0.9999")
+        == "PNJ_PLAIN_RING_9999"
+    )
+    assert (
+        resolve_metal_instrument("PNJ", "Vàng miếng PNJ", "0.9999")
+        == "PNJ_GOLD_BAR_9999"
+    )
+    assert (
+        resolve_metal_instrument("PNJ", "Vàng nguyên liệu", "0.999")
+        == "PNJ_RAW_GOLD_999"
+    )
+    assert (
+        resolve_metal_instrument("DOJI", "Nhẫn tròn Hưng Thịnh Vượng", "0.9999")
+        == "DOJI_PLAIN_RING_9999"
+    )
+    assert (
+        resolve_metal_instrument("DOJI", "Vàng miếng DOJI", "0.9999")
+        == "DOJI_GOLD_BAR_9999"
+    )
+    assert (
+        resolve_metal_instrument(
+            "BTMC", "Nhẫn tròn trơn Vàng Rồng Thăng Long", "0.9999"
+        )
+        == "BTMC_PLAIN_RING_9999"
+    )
+    assert (
+        resolve_metal_instrument("BTMH", "Nhẫn tròn ép vỉ Kim Gia Bảo", "0.9999")
+        == "BTMH_PLAIN_RING_9999"
+    )
 
 
 def test_selection_returns_live_quote_from_own_brand() -> None:
@@ -209,7 +248,9 @@ def test_selection_uses_stale_cached_quote_of_exact_instrument() -> None:
     as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
     sjc = Mock(spec=PricingProviderProtocol)
     sjc.quote.side_effect = ValueError("SJC outage")
-    cached = _selection_quote("SJC", QuoteState.LIVE, as_of - datetime.timedelta(hours=2))
+    cached = _selection_quote(
+        "SJC", QuoteState.LIVE, as_of - datetime.timedelta(hours=2)
+    )
 
     result = select_metal_quote(
         instrument="SJC_GOLD_BAR_9999",
@@ -228,7 +269,9 @@ def test_selection_uses_manual_quote_when_no_live_or_cached_exists() -> None:
     as_of = datetime.datetime(2026, 8, 23, 12, tzinfo=datetime.UTC)
     provider = Mock(spec=PricingProviderProtocol)
     provider.quote.side_effect = ValueError("Outage")
-    manual = _selection_quote("MANUAL", QuoteState.MANUAL, as_of - datetime.timedelta(minutes=10))
+    manual = _selection_quote(
+        "MANUAL", QuoteState.MANUAL, as_of - datetime.timedelta(minutes=10)
+    )
 
     result = select_metal_quote(
         instrument="BTMH_RAW_GOLD_9999",
@@ -255,4 +298,3 @@ def test_selection_returns_unavailable_when_all_fail() -> None:
     assert result.state is QuoteState.UNAVAILABLE
     assert result.buy_price is None
     assert result.valuation_price is None
-

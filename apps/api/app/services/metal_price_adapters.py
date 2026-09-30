@@ -50,9 +50,7 @@ class _PriceTableParser(HTMLParser):
         # fallback -- see _parse_quoted_at below.
         self.full_text_parts: list[str] = []
 
-    def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, str | None]]
-    ) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
         if tag == "time" and self.quoted_at is None:
             self.quoted_at = attributes.get("datetime")
@@ -186,7 +184,8 @@ class HtmlMetalPriceAdapter:
         try:
             sell_price: Decimal | None = (
                 _money(record["sell"]) * self._unit_scale
-                if record.get("sell") and record["sell"].strip().lower() not in {"lien he", "—", "-", ""}
+                if record.get("sell")
+                and record["sell"].strip().lower() not in {"lien he", "—", "-", ""}
                 else None
             )
         except PriceSourceError:
@@ -245,16 +244,22 @@ class HtmlMetalPriceAdapter:
                 row_code = record.get("product_code")
                 row_name = record.get("product_name")
 
-                if row_code and (row_code == product_code or _normalized(row_code) == norm_target):
+                if row_code and (
+                    row_code == product_code or _normalized(row_code) == norm_target
+                ):
                     return record
-                if row_name and (_normalized(row_name) == norm_target or row_name == product_code):
+                if row_name and (
+                    _normalized(row_name) == norm_target or row_name == product_code
+                ):
                     if "product_code" not in record:
                         record["product_code"] = product_code
                     return record
 
         for row in rows[1:]:
             for cell in row:
-                if (_normalized(cell) == norm_target or cell == product_code) and len(row) >= 3:
+                if (_normalized(cell) == norm_target or cell == product_code) and len(
+                    row
+                ) >= 3:
                     return {
                         "product_name": cell,
                         "product_code": product_code,
