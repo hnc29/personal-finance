@@ -42,6 +42,13 @@ ssh -o StrictHostKeyChecking=no "${VPS_USER}@${VPS_HOST}" "
     echo '==> Installing Docker...'
     curl -fsSL https://get.docker.com | sh
   fi
+  # Ensure secure PF_SECRET_KEY in .env if not exists
+  if [ ! -f .env ] || ! grep -q "PF_SECRET_KEY=" .env; then
+    echo '==> Initializing secure PF_SECRET_KEY...'
+    RAND_KEY=\$(openssl rand -hex 32)
+    echo "PF_SECRET_KEY=\${RAND_KEY}" >> .env
+    chmod 600 .env
+  fi
   echo '==> Building and starting containers...'
   docker compose up -d --build
   echo '==> Checking container status...'
