@@ -431,6 +431,46 @@ def test_renew_pay_out_interest_requires_receiving_account(client: TestClient) -
     assert body["principal"] == "100000000.0000"
 
 
+def test_renew_with_custom_rollover_difference(client: TestClient) -> None:
+    bank_id = _make_bank_account(client)
+    # Give the bank account initial balance so it can afford adding extra principal
+    client.post(
+        "/api/v1/financial-events",
+        json={
+            "event_type": "INCOME",
+            "transaction_date": "2026-01-01",
+            "entries": [{"account_id": bank_id, "amount": "50000000"}],
+        },
+    )
+    account = _open_savings(
+        client,
+        funding_account_id=bank_id,
+        principal="100000000",
+        term_months=1,
+        opened_date="2026-01-01",
+        maturity_action="CLOSE",
+    )
+    # Principal 100M, interest 500k -> settled total 100.5M.
+    # Rollover to new principal 120M -> needs extra 19.5M debited from bank_id.
+    res = client.post(
+        f"/api/v1/assets/savings/{account['id']}/renew",
+        json={
+            "start_date": "2026-02-01",
+            "actual_interest": "500000",
+            "receiving_account_id": bank_id,
+            "new_principal": "120000000",
+            "new_annual_rate": "7.2",
+            "new_term_months": 3,
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["principal"] == "120000000.0000"
+    assert body["current_term"]["annual_rate"] == "7.2000"
+    assert body["current_term"]["term_months"] == 3
+
+
+
 def test_portfolio_overview_counts_savings_principal_exactly_once(
     client: TestClient,
 ) -> None:

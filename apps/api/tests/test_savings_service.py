@@ -443,3 +443,58 @@ def test_renewal_rejects_close_only_action_and_already_closed_term() -> None:
             already_closed_account,
             start_date=already_closed_term.maturity_date,
         )
+
+
+def test_renewal_with_custom_principal_greater_debits_funding_account() -> None:
+    session = FakeSession([wallet(1)])
+    account = savings_account()
+    original = term(maturity_action=MaturityAction.CLOSE)
+    original.account = account
+    account.terms.append(original)
+
+    # original principal 1000, interest 100 -> settled 1100.
+    # new principal 1500 -> diff +400 debited from wallet(1) as SAVINGS_DEPOSIT
+    renewed = renew_savings(
+        session,  # type: ignore[arg-type]
+        account,
+        start_date=original.maturity_date,
+        interest=Decimal(100),
+        receiving_account_id=1,
+        new_principal=Decimal(1500),
+        new_annual_rate=Decimal("6.5"),
+        new_term_months=6,
+    )
+    assert renewed.sequence == 2
+    assert renewed.principal == Decimal("1500.0000")
+    assert renewed.annual_rate == Decimal("6.5000")
+    assert renewed.term_months == 6
+    assert account.principal == Decimal("1500.0000")
+    (event,) = session.financial_events()
+    assert event.event_type is FinancialEventType.SAVINGS_DEPOSIT  # type: ignore[attr-defined]
+    assert event.entries[0].amount_scaled == -4_000_000  # type: ignore[attr-defined]
+
+
+def test_renewal_with_custom_principal_less_credits_wallet_account() -> None:
+    session = FakeSession([wallet(1)])
+    account = savings_account()
+    original = term(maturity_action=MaturityAction.CLOSE)
+    original.account = account
+    account.terms.append(original)
+
+    # original principal 1000, interest 100 -> settled 1100.
+    # new principal 800 -> refund 300 credited to wallet(1) as SAVINGS_WITHDRAWAL
+    renewed = renew_savings(
+        session,  # type: ignore[arg-type]
+        account,
+        start_date=original.maturity_date,
+        interest=Decimal(100),
+        receiving_account_id=1,
+        new_principal=Decimal(800),
+    )
+    assert renewed.sequence == 2
+    assert renewed.principal == Decimal("800.0000")
+    assert account.principal == Decimal("800.0000")
+    (event,) = session.financial_events()
+    assert event.event_type is FinancialEventType.SAVINGS_WITHDRAWAL  # type: ignore[attr-defined]
+    assert event.entries[0].amount_scaled == 3_000_000  # type: ignore[attr-defined]
+

@@ -160,11 +160,21 @@ class SavingsRenewRequest(BaseModel):
     start_date: datetime.date
     actual_interest: Decimal = Decimal(0)
     receiving_account_id: int | None = None
+    new_principal: Decimal | None = None
+    new_annual_rate: Decimal | None = None
+    new_term_months: int | None = None
 
     @field_validator("actual_interest")
     @classmethod
     def _exact_money(cls, value: Decimal) -> Decimal:
         money_to_scaled(value)
+        return value
+
+    @field_validator("new_principal", "new_annual_rate")
+    @classmethod
+    def _exact_optional_money(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None:
+            money_to_scaled(value)
         return value
 
 
@@ -481,6 +491,9 @@ def renew_savings_route(
             start_date=data.start_date,
             interest=data.actual_interest,
             receiving_account_id=data.receiving_account_id,
+            new_principal=data.new_principal,
+            new_annual_rate=data.new_annual_rate,
+            new_term_months=data.new_term_months,
         )
     except SavingsActionError as exc:
         db.rollback()

@@ -410,6 +410,9 @@ def renew_savings(
     start_date: datetime.date,
     interest: Decimal | str | int = "0",
     receiving_account_id: int | None = None,
+    new_principal: Decimal | str | int | None = None,
+    new_annual_rate: Decimal | str | int | None = None,
+    new_term_months: int | None = None,
 ) -> SavingsTerm:
     """Tái tục: close the current term and open the next one from it.
 
@@ -425,33 +428,80 @@ def renew_savings(
       the new term's principal with *no* ledger event, so Net Worth still
       rises by exactly the interest without a fabricated bank-account
       deposit (BA spec §14). ``receiving_account_id`` is not used.
+    - If ``new_principal`` is given, explicit rollover is performed:
+      the difference between ``new_principal`` and (previous principal + interest)
+      is debited from ``receiving_account_id`` (if positive) or credited to
+      ``receiving_account_id`` (if negative).
     """
     _require_open(account)
     previous = _current_term(account)
     _require_term_active(previous)
-    if previous.maturity_action is MaturityAction.CLOSE:
+    if new_principal is None and previous.maturity_action is MaturityAction.CLOSE:
         raise SavingsActionError("term maturity action does not allow renewal")
     interest_scaled = money_to_scaled(interest)
     if interest_scaled < 0:
         raise SavingsActionError("interest must not be negative")
 
-    principal_scaled = previous.principal_scaled
-    if previous.maturity_action is MaturityAction.RENEW_PRINCIPAL_AND_INTEREST:
-        principal_scaled += interest_scaled
-    elif interest_scaled > 0:
-        if receiving_account_id is None:
-            raise SavingsActionError(
-                "receiving account is required to pay out renewal interest"
+    if new_principal is not None:
+        principal_scaled = money_to_scaled(new_principal)
+        if principal_scaled <= 0:
+            raise SavingsActionError("renewed principal must be positive")
+        matured_total_scaled = previous.principal_scaled + interest_scaled
+        diff = principal_scaled - matured_total_scaled
+        if diff > 0:
+            if receiving_account_id is None:
+                raise SavingsActionError(
+                    "receiving account is required when adding extra principal"
+                )
+            _asset_movement(
+                db,
+                account_id=receiving_account_id,
+                amount_scaled=-diff,
+                event_type=FinancialEventType.SAVINGS_DEPOSIT,
+                transaction_date=start_date,
             )
-        _asset_movement(
-            db,
-            account_id=receiving_account_id,
-            amount_scaled=interest_scaled,
-            event_type=FinancialEventType.INTEREST,
-            transaction_date=start_date,
-        )
-    if principal_scaled <= 0:
-        raise SavingsActionError("renewed principal must be positive")
+        elif diff < 0:
+            refund = -diff
+            if receiving_account_id is None:
+                raise SavingsActionError(
+                    "receiving account is required to receive excess funds"
+                )
+            _asset_movement(
+                db,
+                account_id=receiving_account_id,
+                amount_scaled=refund,
+                event_type=FinancialEventType.SAVINGS_WITHDRAWAL,
+                transaction_date=start_date,
+            )
+    else:
+        principal_scaled = previous.principal_scaled
+        if previous.maturity_action is MaturityAction.RENEW_PRINCIPAL_AND_INTEREST:
+            principal_scaled += interest_scaled
+        elif interest_scaled > 0:
+            if receiving_account_id is None:
+                raise SavingsActionError(
+                    "receiving account is required to pay out renewal interest"
+                )
+            _asset_movement(
+                db,
+                account_id=receiving_account_id,
+                amount_scaled=interest_scaled,
+                event_type=FinancialEventType.INTEREST,
+                transaction_date=start_date,
+            )
+        if principal_scaled <= 0:
+            raise SavingsActionError("renewed principal must be positive")
+
+    term_months = (
+        new_term_months
+        if new_term_months is not None and new_term_months > 0
+        else previous.term_months
+    )
+    annual_rate_scaled = (
+        money_to_scaled(new_annual_rate)
+        if new_annual_rate is not None
+        else previous.annual_rate_scaled
+    )
 
     previous.status = SavingsTermStatus.CLOSED
     previous.actual_interest_scaled = interest_scaled
@@ -463,9 +513,9 @@ def renew_savings(
         sequence=previous.sequence + 1,
         principal_scaled=principal_scaled,
         start_date=start_date,
-        maturity_date=add_months(start_date, previous.term_months),
-        term_months=previous.term_months,
-        annual_rate_scaled=previous.annual_rate_scaled,
+        maturity_date=add_months(start_date, term_months),
+        term_months=term_months,
+        annual_rate_scaled=annual_rate_scaled,
         non_term_rate_scaled=previous.non_term_rate_scaled,
         day_count_convention=previous.day_count_convention,
         interest_payment_method=previous.interest_payment_method,

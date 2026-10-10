@@ -2667,7 +2667,18 @@ function SavingsPanel({ hideAmount = false }: { hideAmount?: boolean } = {}) {
           <strong style={{ color: "#0284c7" }}>{hideAmount ? "••••••••" : `${fmtMoneyDisplay(totalProjectedMaturity) || "0"} đ`}</strong>
           <small className="hint">{tr("Principal")} + {tr("Expected interest")}</small>
         </div>
-        <div className="asset-kpi-card" style={{ borderColor: nearestAccount?.current_term?.maturing_soon ? "#f97316" : undefined }}>
+        <div
+          className="asset-kpi-card"
+          style={{
+            borderColor: nearestAccount?.current_term?.maturing_soon ? "#f97316" : undefined,
+            cursor: nearestAccount ? "pointer" : "default",
+          }}
+          onClick={() => nearestAccount && setDetailId(nearestAccount.id)}
+          role={nearestAccount ? "button" : undefined}
+          tabIndex={nearestAccount ? 0 : undefined}
+          onKeyDown={e => nearestAccount && (e.key === "Enter" || e.key === " ") && setDetailId(nearestAccount.id)}
+          title={nearestAccount ? (language === "vi" ? "Nhấn để xem và chỉnh sửa sổ này" : "Click to view and edit this account") : undefined}
+        >
           <span>{tr("Nearest maturity account")}</span>
           {nearestAccount && nearestAccount.current_term ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "2px" }}>
@@ -2681,6 +2692,21 @@ function SavingsPanel({ hideAmount = false }: { hideAmount?: boolean } = {}) {
                 <span>{tr("Principal")}: <b>{hideAmount ? "••••••" : `${fmtMoneyDisplay(nearestAccount.principal)} đ`}</b></span>
                 <span style={{ marginLeft: "6px", color: "#16a34a" }}>· {tr("Projected value at maturity")}: <b>{hideAmount ? "••••••" : `${fmtMoneyDisplay(sumMoney([nearestAccount.principal, nearestAccount.current_term.expected_interest]))} đ`}</b></span>
               </div>
+              {nearestAccount.current_term.days_to_maturity != null && nearestAccount.current_term.days_to_maturity <= 0 && (
+                <div style={{ marginTop: "6px" }}>
+                  <button
+                    type="button"
+                    className="primary"
+                    style={{ padding: "3px 10px", fontSize: "0.78rem", borderRadius: "6px" }}
+                    onClick={e => {
+                      e.stopPropagation();
+                      setDetailId(nearestAccount.id);
+                    }}
+                  >
+                    {tr("Settle")}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -2929,7 +2955,7 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
   const term = row?.current_term;
   const canCloseNormal = !!term && term.status === "ACTIVE" && term.days_to_maturity != null && term.days_to_maturity <= 0;
   const canEarlyClose = !!term && term.status === "ACTIVE" && term.days_to_maturity != null && term.days_to_maturity > 0;
-  const canRenew = !!term && term.status === "ACTIVE" && term.maturity_action !== "CLOSE";
+  const canRenew = !!term && term.status === "ACTIVE";
   return <Modal title="Savings account details" onClose={onClose} wide>
     <Loading show={detail.isPending} />
     <Error error={detail.error} />
@@ -2962,7 +2988,7 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
         {row.editable && <button type="button" className="secondary" onClick={() => setAction("edit")}>{tr("Edit")}</button>}
         {canCloseNormal && <button type="button" className="primary" onClick={() => setAction("close")}>{tr("Settle")}</button>}
         {canEarlyClose && <button type="button" className="secondary" onClick={() => setAction("early-close")}>{tr("Early settle")}</button>}
-        {canRenew && <button type="button" className="secondary" onClick={() => setAction("renew")}>{tr("Renew")}</button>}
+        {canRenew && <button type="button" className={canCloseNormal ? "primary" : "secondary"} onClick={() => setAction("renew")}>{tr("Roll over")}</button>}
         <button
           type="button"
           className="text-button danger"
@@ -2989,9 +3015,10 @@ function SavingsDetailDialog({ id, walletAccounts, onClose, onChanged }: { id: n
       </div>)}</div>
     </div>}
     {row && action === "edit" && <SavingsEditForm row={row} onDone={afterAction} onCancel={() => setAction(null)} />}
-    {row && action === "close" && <SavingsCloseForm id={row.id} kind="close" walletAccounts={walletAccounts} onDone={afterAction} onCancel={() => setAction(null)} />}
-    {row && action === "early-close" && <SavingsCloseForm id={row.id} kind="early-close" walletAccounts={walletAccounts} onDone={afterAction} onCancel={() => setAction(null)} />}
-    {row && action === "renew" && <SavingsRenewForm id={row.id} walletAccounts={walletAccounts} onDone={afterAction} onCancel={() => setAction(null)} />}
+    {row && action === "edit" && <SavingsEditForm row={row} onDone={afterAction} onCancel={() => setAction(null)} />}
+    {row && action === "close" && <SavingsCloseForm row={row} kind="close" walletAccounts={walletAccounts} onDone={afterAction} onCancel={() => setAction(null)} onSwitchToRenew={() => setAction("renew")} />}
+    {row && action === "early-close" && <SavingsCloseForm row={row} kind="early-close" walletAccounts={walletAccounts} onDone={afterAction} onCancel={() => setAction(null)} />}
+    {row && action === "renew" && <SavingsRenewForm row={row} walletAccounts={walletAccounts} onDone={afterAction} onCancel={() => setAction(null)} />}
   </Modal>;
 }
 
@@ -3027,57 +3054,281 @@ function SavingsEditForm({ row, onDone, onCancel }: { row: SavingsAccount; onDon
   </form>;
 }
 
-function SavingsCloseForm({ id, kind, walletAccounts, onDone, onCancel }: { id: number; kind: "close" | "early-close"; walletAccounts: Account[]; onDone: () => void; onCancel: () => void }) {
+function SavingsCloseForm({
+  row,
+  kind,
+  walletAccounts,
+  onDone,
+  onCancel,
+  onSwitchToRenew,
+}: {
+  row: SavingsAccount;
+  kind: "close" | "early-close";
+  walletAccounts: Account[];
+  onDone: () => void;
+  onCancel: () => void;
+  onSwitchToRenew?: () => void;
+}) {
   const { tr, label, language } = useI18n();
+  const term = row.current_term;
   const [closedDate, setClosedDate] = useState(todayIso());
-  const [actualInterest, setActualInterest] = useState("");
+  const initialInterest = term?.expected_interest ? String(Math.round(Number(term.expected_interest))) : "";
+  const [actualInterest, setActualInterest] = useState(initialInterest);
   const [fee, setFee] = useState("");
+
+  const defaultAccountId = useMemo(() => {
+    const matching = walletAccounts.find(a =>
+      (row.funding_account_id && a.id === row.funding_account_id) ||
+      (row.institution && a.name.toLowerCase().includes(row.institution.toLowerCase())) ||
+      (row.institution && row.institution.toLowerCase().includes(a.name.toLowerCase()))
+    );
+    return matching ? String(matching.id) : (walletAccounts[0] ? String(walletAccounts[0].id) : "");
+  }, [walletAccounts, row]);
+
+  const [receivingAccountId, setReceivingAccountId] = useState(defaultAccountId);
+
   const close = useMutation({
     mutationFn: (payload: { closed_date: string; receiving_account_id: number; actual_interest: string; fee?: string }) =>
-      kind === "close" ? api.assets.savings.close(id, payload) : api.assets.savings.earlyClose(id, payload),
+      kind === "close" ? api.assets.savings.close(row.id, payload) : api.assets.savings.earlyClose(row.id, payload),
     onSuccess: onDone,
   });
+
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     const v = (n: string) => String(f.get(n) ?? "").trim();
-    close.mutate({ closed_date: closedDate || v("closed_date"), receiving_account_id: Number(v("receiving_account_id")), actual_interest: actualInterest || "0", fee: kind === "early-close" ? (fee || "0") : undefined });
+    close.mutate({
+      closed_date: closedDate || v("closed_date"),
+      receiving_account_id: Number(receivingAccountId || v("receiving_account_id")),
+      actual_interest: actualInterest || "0",
+      fee: kind === "early-close" ? (fee || "0") : undefined,
+    });
   }
-  return <form className="form savings-form" onSubmit={submit}>
-    <Error error={close.error} />
-    <Field label="Settlement date"><DateRow name="closed_date" value={closedDate} onChange={setClosedDate} language={language} label="Settlement date" /></Field>
-    <Field label="Receiving account"><select name="receiving_account_id" required defaultValue="">
-      <option value="" disabled>{tr("Select account")}</option>
-      {walletAccounts.map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
-    </select></Field>
-    <Field label="Actual interest received"><div className="amount-row"><MoneyInput value={actualInterest} onChange={setActualInterest} placeholder="0" required /><span className="currency-badge">VND</span></div></Field>
-    {kind === "early-close" && <Field label="Fee (optional)"><div className="amount-row"><MoneyInput value={fee} onChange={setFee} placeholder="0" required={false} /><span className="currency-badge">VND</span></div></Field>}
-    <div className="form-actions"><Submit pending={close.isPending} text={kind === "close" ? "Settle" : "Early settle"} /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
-  </form>;
+
+  return (
+    <form className="form savings-form" onSubmit={submit}>
+      <Error error={close.error} />
+      <Field label="Settlement date">
+        <DateRow name="closed_date" value={closedDate} onChange={setClosedDate} language={language} label="Settlement date" />
+      </Field>
+      <Field label="Receiving account">
+        <select
+          name="receiving_account_id"
+          required
+          value={receivingAccountId}
+          onChange={e => setReceivingAccountId(e.target.value)}
+        >
+          <option value="" disabled>{tr("Select account")}</option>
+          {walletAccounts.map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
+        </select>
+        <small className="hint">{language === "vi" ? "Mặc định tài khoản cùng ngân hàng mở sổ." : "Defaulted to the same bank account."}</small>
+      </Field>
+      <Field label="Actual interest received">
+        <div className="amount-row">
+          <MoneyInput value={actualInterest} onChange={setActualInterest} placeholder="0" required />
+          <span className="currency-badge">VND</span>
+        </div>
+        <small className="hint">{language === "vi" ? "Tự động điền tiền lãi dự kiến. Bạn có thể chỉnh sửa ô này trước khi lưu." : "Auto-filled with expected interest; editable before saving."}</small>
+      </Field>
+      {kind === "early-close" && (
+        <Field label="Fee (optional)">
+          <div className="amount-row">
+            <MoneyInput value={fee} onChange={setFee} placeholder="0" required={false} />
+            <span className="currency-badge">VND</span>
+          </div>
+        </Field>
+      )}
+      <div className="form-actions" style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+        <Submit pending={close.isPending} text={kind === "close" ? "Settle" : "Early settle"} />
+        {onSwitchToRenew && kind === "close" && (
+          <button type="button" className="secondary" onClick={onSwitchToRenew}>
+            {language === "vi" ? "Tùy chọn: Gửi tiếp (Tái tục)" : "Option: Roll over"}
+          </button>
+        )}
+        <button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button>
+      </div>
+    </form>
+  );
 }
 
-function SavingsRenewForm({ id, walletAccounts, onDone, onCancel }: { id: number; walletAccounts: Account[]; onDone: () => void; onCancel: () => void }) {
+function SavingsRenewForm({
+  row,
+  walletAccounts,
+  onDone,
+  onCancel,
+}: {
+  row: SavingsAccount;
+  walletAccounts: Account[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
   const { tr, label, language } = useI18n();
+  const term = row.current_term;
   const [startDate, setStartDate] = useState(todayIso());
-  const [actualInterest, setActualInterest] = useState("");
-  const renew = useMutation({ mutationFn: (payload: { start_date: string; actual_interest: string; receiving_account_id?: number }) => api.assets.savings.renew(id, payload), onSuccess: onDone });
+  const initialInterest = term?.expected_interest ? String(Math.round(Number(term.expected_interest))) : "0";
+  const [actualInterest, setActualInterest] = useState(initialInterest);
+
+  const settlementTotal = sumMoney([row.principal, actualInterest || "0"]);
+  const [newPrincipal, setNewPrincipal] = useState(settlementTotal);
+  const [annualRate, setAnnualRate] = useState(term?.annual_rate ? fmtRate(term.annual_rate) : "");
+  const [termMonths, setTermMonths] = useState(term?.term_months ? String(term.term_months) : "12");
+
+  const defaultAccountId = useMemo(() => {
+    const matching = walletAccounts.find(a =>
+      (row.funding_account_id && a.id === row.funding_account_id) ||
+      (row.institution && a.name.toLowerCase().includes(row.institution.toLowerCase())) ||
+      (row.institution && row.institution.toLowerCase().includes(a.name.toLowerCase()))
+    );
+    return matching ? String(matching.id) : (walletAccounts[0] ? String(walletAccounts[0].id) : "");
+  }, [walletAccounts, row]);
+
+  const [receivingAccountId, setReceivingAccountId] = useState(defaultAccountId);
+
+  // Sync default newPrincipal when actualInterest changes if newPrincipal wasn't customized
+  const prevInterestRef = useRef(actualInterest);
+  useEffect(() => {
+    if (prevInterestRef.current !== actualInterest) {
+      prevInterestRef.current = actualInterest;
+      setNewPrincipal(sumMoney([row.principal, actualInterest || "0"]));
+    }
+  }, [actualInterest, row.principal]);
+
+  const renew = useMutation({
+    mutationFn: (payload: {
+      start_date: string;
+      actual_interest: string;
+      receiving_account_id?: number;
+      new_principal?: string;
+      new_annual_rate?: string;
+      new_term_months?: number;
+    }) => api.assets.savings.renew(row.id, payload),
+    onSuccess: onDone,
+  });
+
+  const diff = Number(newPrincipal || 0) - Number(settlementTotal || 0);
+
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const v = (n: string) => String(f.get(n) ?? "").trim();
-    const receiving = v("receiving_account_id");
-    renew.mutate({ start_date: startDate || v("start_date"), actual_interest: actualInterest || "0", receiving_account_id: receiving ? Number(receiving) : undefined });
+    renew.mutate({
+      start_date: startDate || todayIso(),
+      actual_interest: actualInterest || "0",
+      receiving_account_id: receivingAccountId ? Number(receivingAccountId) : undefined,
+      new_principal: newPrincipal || undefined,
+      new_annual_rate: annualRate || undefined,
+      new_term_months: termMonths ? Number(termMonths) : undefined,
+    });
   }
-  return <form className="form savings-form" onSubmit={submit}>
-    <Error error={renew.error} />
-    <Field label="Renewal start date"><DateRow name="start_date" value={startDate} onChange={setStartDate} language={language} label="Renewal start date" /></Field>
-    <Field label="Actual interest received"><div className="amount-row"><MoneyInput value={actualInterest} onChange={setActualInterest} placeholder="0" /><span className="currency-badge">VND</span></div></Field>
-    <Field label="Receiving account"><select name="receiving_account_id" defaultValue="">
-      <option value="">{tr("None")}</option>
-      {walletAccounts.map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
-    </select></Field>
-    <div className="form-actions"><Submit pending={renew.isPending} text="Renew" /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
-  </form>;
+
+  return (
+    <form className="form savings-form" onSubmit={submit}>
+      <Error error={renew.error} />
+      <div style={{ background: "var(--card-subtle, #f8fafc)", padding: "12px", borderRadius: "8px", border: "1px solid var(--line)", marginBottom: "12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+          <span>{language === "vi" ? "Tiền gốc hiện tại:" : "Current principal:"}</span>
+          <strong>{fmtMoneyDisplay(row.principal)} VND</strong>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+          <span>{language === "vi" ? "Tiền lãi đến ngày tất toán:" : "Interest earned:"}</span>
+          <strong style={{ color: "#16a34a" }}>+{fmtMoneyDisplay(actualInterest || "0")} VND</strong>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, borderTop: "1px dashed var(--line)", paddingTop: "6px", marginTop: "6px" }}>
+          <span>{language === "vi" ? "Tổng tiền tất toán (Gốc + Lãi):" : "Total settlement (Principal + Interest):"}</span>
+          <span style={{ color: "#0284c7" }}>{fmtMoneyDisplay(settlementTotal)} VND</span>
+        </div>
+      </div>
+
+      <Field label="Settlement date">
+        <DateRow name="start_date" value={startDate} onChange={setStartDate} language={language} label="Settlement date" />
+      </Field>
+
+      <Field label="Actual interest received">
+        <div className="amount-row">
+          <MoneyInput value={actualInterest} onChange={setActualInterest} placeholder="0" required />
+          <span className="currency-badge">VND</span>
+        </div>
+        <small className="hint">{language === "vi" ? "Tự động điền tiền lãi dự kiến. Bạn có thể chỉnh sửa số tiền này trước khi lưu." : "Pre-filled with expected interest; editable before saving."}</small>
+      </Field>
+
+      <Field label="New rollover amount">
+        <div className="amount-row">
+          <MoneyInput value={newPrincipal} onChange={setNewPrincipal} placeholder={settlementTotal} required />
+          <span className="currency-badge">VND</span>
+        </div>
+        <small className="hint">{language === "vi" ? "Mặc định bằng số tiền gốc + lãi đến ngày tất toán. Bạn có thể nhập lại số tiền gửi tiếp." : "Defaults to principal + interest. You can enter a new amount."}</small>
+      </Field>
+
+      {diff > 0 && (
+        <div style={{ background: "#fff7ed", border: "1px solid #fdba74", padding: "10px 12px", borderRadius: "8px", marginBottom: "12px", color: "#9a3412", fontSize: "0.85rem" }}>
+          <strong>{language === "vi" ? "Trích thêm từ tài khoản:" : "Additional deposit required:"}</strong>
+          <div>{language === "vi" ? `Số tiền gửi tiếp lớn hơn số tiền tất toán ${fmtMoneyDisplay(String(diff))} VND. Hệ thống sẽ trích số tiền này từ tài khoản:` : `New amount is ${fmtMoneyDisplay(String(diff))} VND greater. Extra will be deducted from:`}</div>
+          <div style={{ marginTop: "6px" }}>
+            <select
+              value={receivingAccountId}
+              onChange={e => setReceivingAccountId(e.target.value)}
+              required
+              style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #fdba74", background: "var(--card)", color: "var(--text)" }}
+            >
+              <option value="" disabled>{tr("Select account")}</option>
+              {walletAccounts.map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {diff < 0 && (
+        <div style={{ background: "#f0fdf4", border: "1px solid #86efac", padding: "10px 12px", borderRadius: "8px", marginBottom: "12px", color: "#166534", fontSize: "0.85rem" }}>
+          <strong>{language === "vi" ? "Đưa phần thừa vào tài khoản:" : "Excess funds deposited to:"}</strong>
+          <div>{language === "vi" ? `Số tiền gửi tiếp nhỏ hơn số tiền tất toán ${fmtMoneyDisplay(String(-diff))} VND. Phần thừa sẽ được chuyển vào tài khoản:` : `New amount is smaller by ${fmtMoneyDisplay(String(-diff))} VND. Excess will be returned to:`}</div>
+          <div style={{ marginTop: "6px" }}>
+            <select
+              value={receivingAccountId}
+              onChange={e => setReceivingAccountId(e.target.value)}
+              required
+              style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid #86efac", background: "var(--card)", color: "var(--text)" }}
+            >
+              <option value="" disabled>{tr("Select account")}</option>
+              {walletAccounts.map(a => <option value={a.id} key={a.id}>{a.name} · {label(a.account_type)}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {diff === 0 && (
+        <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", padding: "10px 12px", borderRadius: "8px", marginBottom: "12px", color: "#1e40af", fontSize: "0.85rem" }}>
+          {language === "vi" ? "Toàn bộ gốc và lãi được chuyển sang kỳ hạn mới (0 VND chênh lệch)." : "All principal + interest rolls over without cash adjustment."}
+        </div>
+      )}
+
+      <Field label="New interest rate">
+        <input
+          name="annual_rate"
+          inputMode="decimal"
+          pattern="^\\d+(\\.\\d{1,4})?$"
+          value={annualRate}
+          onChange={e => setAnnualRate(e.target.value)}
+          placeholder="0.0"
+          required
+        />
+      </Field>
+
+      <Field label="New term (months)">
+        <input
+          name="term_months"
+          type="number"
+          min={1}
+          step={1}
+          value={termMonths}
+          onChange={e => setTermMonths(e.target.value)}
+          required
+        />
+      </Field>
+
+      <div className="form-actions" style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+        <Submit pending={renew.isPending} text={language === "vi" ? "Xác nhận gửi tiếp" : "Confirm roll over"} />
+        <button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button>
+      </div>
+    </form>
+  );
 }
 
 // TASK-040: a short, human-readable tail describing what auto-apply did
@@ -4039,25 +4290,7 @@ function DataPage() {
   );
 }
 
-function getLevel1Category(categoryId: number | null | undefined, categories: Category[]): Category | undefined {
-  if (!categoryId) return undefined;
-  const byId = new Map(categories.map(c => [c.id, c]));
-  let current = byId.get(categoryId);
-  if (!current) return undefined;
 
-  const chain: Category[] = [];
-  const seen = new Set<number>();
-  while (current && !seen.has(current.id)) {
-    seen.add(current.id);
-    chain.unshift(current);
-    current = current.parent_id == null ? undefined : byId.get(current.parent_id);
-  }
-
-  if (chain.length > 1 && (chain[0].name.toLowerCase() === "expenses" || chain[0].name.toLowerCase() === "income")) {
-    return chain[1];
-  }
-  return chain[0];
-}
 
 function getLevel1ExpenseCategories(categories: Category[]): Category[] {
   const expensesRoot = categories.find(c => c.parent_id == null && c.name.toLowerCase() === "expenses");
@@ -4086,7 +4319,7 @@ function Reports({ initialParams }: { initialParams?: ReportFilterParams | null 
   const [customEnd, setCustomEnd] = useState(() => initialParams?.customEnd ?? todayIso());
   const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(() => initialParams?.selectedWeekStart ?? null);
   const [selectedWeekEnd, setSelectedWeekEnd] = useState<string | null>(() => initialParams?.selectedWeekEnd ?? null);
-  const [activeReportTab, setActiveReportTab] = useState<"time" | "category" | "account" | "payee">("time");
+  const [activeReportTab, setActiveReportTab] = useState<"time" | "category" | "account" | "debt">("time");
   const [categoryFlow, setCategoryFlow] = useState<"EXPENSE" | "INCOME">("EXPENSE");
   const [expandedParents, setExpandedParents] = useState<Record<number, boolean>>({});
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -4500,67 +4733,7 @@ function Reports({ initialParams }: { initialParams?: ReportFilterParams | null 
       .sort((a, b) => b.outflowNum - a.outflowNum);
   }, [filteredEvents, accounts, accountMap, expenseNum]);
 
-  // 4. Payee Breakdown (Using Level 1 Expense Categories)
-  const payeeStats = useMemo(() => {
-    const map = new Map<string, { expense: string; count: number; lastDate: string; icon?: string }>();
 
-    filteredEvents.forEach(e => {
-      // Chi tiêu theo đối tượng CHỈ tính các sự kiện chi tiêu (EXPENSE)
-      if (e.event_type !== "EXPENSE") return;
-
-      const lvl1Cat = getLevel1Category(e.category_id, categories ?? []);
-      let name = (e.payee_text || "").trim();
-      const icon = lvl1Cat?.icon ?? undefined;
-
-      if (!name) {
-        if (lvl1Cat) {
-          name = categoryLabel(language, lvl1Cat.name);
-        } else if (e.note && e.note.trim()) {
-          name = e.note.trim();
-        } else {
-          name = language === "vi" ? "Khác / Chưa phân loại" : "Other / Uncategorized";
-        }
-      }
-
-      if (!map.has(name)) {
-        map.set(name, { expense: "0", count: 0, lastDate: e.transaction_date, icon });
-      }
-      const pEntry = map.get(name)!;
-      pEntry.count++;
-      if (e.transaction_date > pEntry.lastDate) {
-        pEntry.lastDate = e.transaction_date;
-      }
-      if (!pEntry.icon && icon) {
-        pEntry.icon = icon;
-      }
-
-      let eventAmt = "0";
-      e.entries.forEach(en => {
-        const cleanAmt = en.amount.replace("-", "");
-        eventAmt = sumMoney([eventAmt, cleanAmt]);
-      });
-      pEntry.expense = sumMoney([pEntry.expense, eventAmt]);
-    });
-
-    return Array.from(map.entries())
-      .filter(([, data]) => Number(data.expense) > 0)
-      .map(([name, data]) => {
-        const expNum = Number(data.expense);
-        const share = expenseNum > 0 ? ((expNum / expenseNum) * 100).toFixed(1) : "0.0";
-        const avg = data.count > 0 ? Math.round(expNum / data.count) : 0;
-        return {
-          name,
-          icon: data.icon,
-          expense: data.expense,
-          expNum,
-          count: data.count,
-          lastDate: data.lastDate,
-          share,
-          avg: String(avg),
-        };
-      })
-      .sort((a, b) => b.expNum - a.expNum);
-  }, [filteredEvents, categories, expenseNum, language]);
 
   return (
     <div className="reports-page">
@@ -4952,11 +5125,11 @@ function Reports({ initialParams }: { initialParams?: ReportFilterParams | null 
         </button>
         <button
           type="button"
-          className={`reports-dim-btn ${activeReportTab === "payee" ? "active" : ""}`}
-          onClick={() => setActiveReportTab("payee")}
+          className={`reports-dim-btn ${activeReportTab === "debt" ? "active" : ""}`}
+          onClick={() => setActiveReportTab("debt")}
         >
-          <IconGlyph iconKey="Users" size={18} />
-          <span>{tr("By Payee")}</span>
+          <IconGlyph iconKey="CreditCard" size={18} />
+          <span>{tr("Debt Details")}</span>
         </button>
       </div>
 
@@ -5190,77 +5363,309 @@ function Reports({ initialParams }: { initialParams?: ReportFilterParams | null 
         </div>
       )}
 
-      {/* Tab 4: By Payee Dashboard */}
-      {activeReportTab === "payee" && (
-        <div className="reports-panel">
-          <div className="reports-panel-header">
-            <h3 className="reports-panel-title">{tr("Payee & Merchant Spending")}</h3>
-            <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
-              {payeeStats.length} {language === "vi" ? "đối tượng / nhóm chi tiêu" : "payees / categories"}
-            </span>
-          </div>
+      {/* Tab 4: Debt Details Dashboard */}
+      {activeReportTab === "debt" && (() => {
+        const creditCards = activeAccounts.filter(a => a.account_type === "CREDIT_CARD");
+        const loanAccounts = activeAccounts.filter(a =>
+          a.account_type !== "CREDIT_CARD" &&
+          (a.name.toLowerCase().includes("vay") ||
+           a.name.toLowerCase().includes("nợ") ||
+           a.name.toLowerCase().includes("loan") ||
+           a.name.toLowerCase().includes("debt") ||
+           (balances.get(a.id) ?? "").startsWith("-"))
+        );
 
-          <Empty show={payeeStats.length === 0} text={tr("No transactions in this period")} />
+        let totalCreditDebt = "0";
+        let totalCreditLimit = "0";
+        const cardDebtItems: {
+          account: Account;
+          limit: string;
+          debt: string;
+          available: string;
+          utilization: number;
+        }[] = [];
 
-          {payeeStats.length > 0 && (
-            <div className="report-split-grid">
-              <div style={{ overflowX: "auto" }}>
-                <table className="payee-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>{language === "vi" ? "Đối tượng chi tiêu" : "Expense Payee / Target"}</th>
-                      <th>{tr("Total Expenses")}</th>
-                      <th>{tr("Share")}</th>
-                      <th>{tr("Transaction Count")}</th>
-                      <th>{tr("Average per Transaction")}</th>
-                      <th>{language === "vi" ? "Lần gần nhất" : "Last Transaction"}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {payeeStats.map((p, idx) => (
-                      <tr key={p.name}>
-                        <td style={{ color: "var(--muted)", fontWeight: 700 }}>{idx + 1}</td>
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            {p.icon && <CategoryIcon name={p.name} icon={p.icon} size={18} />}
-                            <strong>{p.name}</strong>
-                          </div>
-                        </td>
-                        <td style={{ color: "#dc2626", fontWeight: 700 }}>
-                          -{fmtMoneyDisplay(p.expense)} VND
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <span style={{ fontSize: "0.8rem", width: "36px" }}>{p.share}%</span>
-                            <div style={{ width: 60, height: 6, borderRadius: 999, background: "#f1f5f9", overflow: "hidden" }}>
-                              <div style={{ width: `${Math.min(100, Math.max(0, Number(p.share)))}%`, height: "100%", background: PIE_COLORS[idx % PIE_COLORS.length], borderRadius: 999 }} />
-                            </div>
-                          </div>
-                        </td>
-                        <td>{p.count}</td>
-                        <td>{fmtMoneyDisplay(p.avg)} VND</td>
-                        <td style={{ color: "var(--muted)", fontSize: "0.8rem" }}>{p.lastDate}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <ReportDonutChart
-                title={language === "vi" ? "Tỷ trọng chi theo đối tượng" : "Spending by Payee"}
-                data={payeeStats.map((p, i) => ({
-                  label: p.name,
-                  value: p.expNum,
-                  color: PIE_COLORS[i % PIE_COLORS.length],
-                  formattedValue: `-${fmtMoneyDisplay(p.expense)}`,
-                }))}
-                totalLabel={tr("Total Expenses")}
-                totalValueFormatted={`-${fmtMoneyDisplay(totalExpense)}`}
-              />
+        for (const card of creditCards) {
+          const bal = balances.get(card.id) ?? "0";
+          const limit = card.credit_limit || "0";
+          totalCreditLimit = sumMoney([totalCreditLimit, limit]);
+          const debt = bal.startsWith("-") ? negateMoney(bal) : "0";
+          if (debt !== "0") {
+            totalCreditDebt = sumMoney([totalCreditDebt, debt]);
+          }
+          const available = Number(limit) > 0 ? (bal.startsWith("-") ? sumMoney([limit, bal]) : limit) : "0";
+          const utilization = Number(limit) > 0 ? Math.min(100, Math.max(0, Math.round((Number(debt) / Number(limit)) * 100))) : 0;
+          cardDebtItems.push({ account: card, limit, debt, available, utilization });
+        }
+
+        let totalLoanDebt = "0";
+        const loanDebtItems: {
+          account: Account;
+          debt: string;
+        }[] = [];
+
+        for (const loan of loanAccounts) {
+          const bal = balances.get(loan.id) ?? "0";
+          const debt = bal.startsWith("-") ? negateMoney(bal) : (loan.name.toLowerCase().includes("vay") || loan.name.toLowerCase().includes("nợ") ? bal : "0");
+          if (debt !== "0" && !debt.startsWith("-")) {
+            totalLoanDebt = sumMoney([totalLoanDebt, debt]);
+            loanDebtItems.push({ account: loan, debt });
+          }
+        }
+
+        const totalDebt = sumMoney([totalCreditDebt, totalLoanDebt]);
+        const overallUtilization = Number(totalCreditLimit) > 0 ? Math.round((Number(totalCreditDebt) / Number(totalCreditLimit)) * 100) : 0;
+
+        // Relevant debt transactions (Trả nợ, Vay, Thu nợ)
+        const debtTransactions = (eventsQ.data ?? []).filter(ev => {
+          const cat = categoriesQ.data?.find(c => c.id === ev.category_id);
+          const name = cat?.name?.toLowerCase() ?? "";
+          return name.includes("trả nợ") || name.includes("vay") || name.includes("thu nợ") || (ev.note && ev.note.toLowerCase().includes("nợ"));
+        }).slice(0, 10);
+
+        const donutData = [
+          ...cardDebtItems.filter(c => Number(c.debt) > 0).map((c, i) => ({
+            label: `${c.account.name} (${tr("Credit Card Debt")})`,
+            value: Number(c.debt),
+            color: PIE_COLORS[i % PIE_COLORS.length],
+            formattedValue: `${fmtMoneyDisplay(c.debt)} VND`,
+          })),
+          ...loanDebtItems.filter(l => Number(l.debt) > 0).map((l, i) => ({
+            label: `${l.account.name} (${tr("Loan Debt")})`,
+            value: Number(l.debt),
+            color: PIE_COLORS[(cardDebtItems.length + i) % PIE_COLORS.length],
+            formattedValue: `${fmtMoneyDisplay(l.debt)} VND`,
+          })),
+        ];
+
+        return (
+          <div className="reports-panel">
+            <div className="reports-panel-header">
+              <h3 className="reports-panel-title">{tr("Debt Details")}</h3>
+              <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
+                {creditCards.length + loanAccounts.length} {language === "vi" ? "tài khoản thẻ tín dụng & nợ vay" : "credit & loan accounts"}
+              </span>
             </div>
-          )}
-        </div>
-      )}
+
+            {/* KPI Cards Grid */}
+            <div className="asset-kpi-grid" style={{ marginBottom: "20px" }}>
+              <div className="asset-kpi-card" style={{ borderColor: Number(totalDebt) > 0 ? "#f87171" : undefined }}>
+                <span>{tr("Total Debt")}</span>
+                <strong style={{ color: Number(totalDebt) > 0 ? "#dc2626" : "var(--ink)" }}>
+                  {fmtMoneyDisplay(totalDebt)} VND
+                </strong>
+                <small className="hint">{language === "vi" ? "Bao gồm nợ thẻ & nợ vay" : "Includes cards & loans"}</small>
+              </div>
+              <div className="asset-kpi-card">
+                <span>{tr("Credit Card Debt")}</span>
+                <strong style={{ color: Number(totalCreditDebt) > 0 ? "#ea580c" : "var(--ink)" }}>
+                  {fmtMoneyDisplay(totalCreditDebt)} VND
+                </strong>
+                <small className="hint">{creditCards.length} {language === "vi" ? "thẻ tín dụng" : "credit cards"}</small>
+              </div>
+              <div className="asset-kpi-card">
+                <span>{tr("Loan Debt")}</span>
+                <strong style={{ color: Number(totalLoanDebt) > 0 ? "#dc2626" : "var(--ink)" }}>
+                  {fmtMoneyDisplay(totalLoanDebt)} VND
+                </strong>
+                <small className="hint">{loanDebtItems.length} {language === "vi" ? "khoản nợ vay" : "loans"}</small>
+              </div>
+              <div className="asset-kpi-card">
+                <span>{language === "vi" ? "Hạn mức khả dụng & Tỷ lệ dùng" : "Available Limit & Utilization"}</span>
+                <strong style={{ color: "#0284c7" }}>
+                  {overallUtilization}%
+                </strong>
+                <small className="hint">{language === "vi" ? `Khả dụng: ${fmtMoneyDisplay(sumMoney([totalCreditLimit, negateMoney(totalCreditDebt)]))} VND` : `Available: ${fmtMoneyDisplay(sumMoney([totalCreditLimit, negateMoney(totalCreditDebt)]))} VND`}</small>
+              </div>
+            </div>
+
+            {/* Main content grid */}
+            <div className="report-split-grid">
+              <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+                {/* 1. Danh mục thẻ tín dụng */}
+                <div>
+                  <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <IconGlyph iconKey="CreditCard" size={16} />
+                    <span>{tr("Credit Card Debt")}</span>
+                  </h4>
+                  {cardDebtItems.length === 0 ? (
+                    <Empty show={true} text={language === "vi" ? "Chưa có thẻ tín dụng nào." : "No credit cards."} />
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      {cardDebtItems.map(c => {
+                        const hasDebt = Number(c.debt) > 0;
+                        return (
+                          <div
+                            key={c.account.id}
+                            style={{
+                              padding: "14px",
+                              borderRadius: "10px",
+                              border: "1px solid var(--line)",
+                              background: "var(--card)",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "8px",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <AccountLogo name={c.account.name} accountType={c.account.account_type} size={28} />
+                                <div>
+                                  <div style={{ fontWeight: 700, fontSize: "0.92rem" }}>{c.account.name}</div>
+                                  <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                                    {language === "vi" ? "Hạn mức" : "Credit limit"}: <b>{fmtMoneyDisplay(c.limit)} VND</b>
+                                  </div>
+                                </div>
+                              </div>
+                              <div style={{ textAlign: "right" }}>
+                                <div style={{ fontSize: "0.95rem", fontWeight: 700, color: hasDebt ? "#dc2626" : "var(--muted)" }}>
+                                  {hasDebt ? `-${fmtMoneyDisplay(c.debt)} VND` : "0 VND"}
+                                </div>
+                                <span className={`badge ${hasDebt ? "negative" : ""}`} style={{ fontSize: "0.72rem" }}>
+                                  {hasDebt ? (language === "vi" ? "Đang có dư nợ" : "Outstanding balance") : (language === "vi" ? "Không có dư nợ" : "No balance")}
+                                </span>
+                              </div>
+                            </div>
+
+                            {Number(c.limit) > 0 && (
+                              <div style={{ marginTop: "4px" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", marginBottom: "4px", color: "var(--muted)" }}>
+                                  <span>{language === "vi" ? `Khả dụng: ${fmtMoneyDisplay(c.available)} VND` : `Available: ${fmtMoneyDisplay(c.available)} VND`}</span>
+                                  <span>{c.utilization}% {language === "vi" ? "hạn mức" : "used"}</span>
+                                </div>
+                                <div style={{ height: "6px", width: "100%", background: "#f1f5f9", borderRadius: "999px", overflow: "hidden" }}>
+                                  <div
+                                    style={{
+                                      height: "100%",
+                                      width: `${c.utilization}%`,
+                                      background: c.utilization > 70 ? "#dc2626" : c.utilization > 30 ? "#f97316" : "#16a34a",
+                                      borderRadius: "999px",
+                                      transition: "width 0.3s ease",
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Danh mục nợ vay & nợ khác */}
+                <div>
+                  <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <IconGlyph iconKey="Wallet" size={16} />
+                    <span>{tr("Loan Debt")}</span>
+                  </h4>
+                  {loanDebtItems.length === 0 ? (
+                    <div style={{ padding: "12px", borderRadius: "8px", background: "var(--card-subtle, #f8fafc)", border: "1px solid var(--line)", fontSize: "0.85rem", color: "var(--muted)" }}>
+                      {language === "vi" ? "Không có khoản nợ vay nào đang ghi nhận." : "No outstanding loan accounts."}
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                      {loanDebtItems.map(l => (
+                        <div
+                          key={l.account.id}
+                          style={{
+                            padding: "14px",
+                            borderRadius: "10px",
+                            border: "1px solid var(--line)",
+                            background: "var(--card)",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: "0.92rem" }}>{l.account.name}</div>
+                            <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>{label(l.account.account_type)}</div>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "#dc2626" }}>
+                              -{fmtMoneyDisplay(l.debt)} {l.account.currency}
+                            </div>
+                            <span className="badge negative" style={{ fontSize: "0.72rem" }}>
+                              {language === "vi" ? "Dư nợ" : "Debt balance"}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Lịch sử giao dịch vay & trả nợ gần đây */}
+                {debtTransactions.length > 0 && (
+                  <div>
+                    <h4 style={{ margin: "0 0 10px 0", fontSize: "0.95rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <IconGlyph iconKey="FileText" size={16} />
+                      <span>{language === "vi" ? "Giao dịch vay & trả nợ gần đây" : "Recent Debt Transactions"}</span>
+                    </h4>
+                    <div style={{ overflowX: "auto" }}>
+                      <table className="payee-table">
+                        <thead>
+                          <tr>
+                            <th>{tr("Date")}</th>
+                            <th>{tr("Category")}</th>
+                            <th>{tr("Note")}</th>
+                            <th>{tr("Amount")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {debtTransactions.map(ev => {
+                            const cat = categoriesQ.data?.find(c => c.id === ev.category_id);
+                            const amount = ev.entries[0]?.amount ?? "0";
+                            const isNeg = amount.startsWith("-");
+                            return (
+                              <tr key={ev.id}>
+                                <td style={{ color: "var(--muted)", fontSize: "0.8rem" }}>{ev.transaction_date}</td>
+                                <td>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                    {cat?.icon && <CategoryIcon name={cat.name} icon={cat.icon} size={16} />}
+                                    <strong>{cat ? categoryLabel(language, cat.name) : tr(ev.event_type)}</strong>
+                                  </div>
+                                </td>
+                                <td style={{ fontSize: "0.82rem", color: "var(--muted)" }}>{ev.note || ev.payee_text || "—"}</td>
+                                <td style={{ fontWeight: 700, color: isNeg ? "#dc2626" : "#16a34a" }}>
+                                  {isNeg ? "" : "+"}{fmtMoneyDisplay(amount)} VND
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right column: Donut Chart */}
+              <div>
+                {donutData.length > 0 ? (
+                  <ReportDonutChart
+                    title={tr("Debt Breakdown")}
+                    data={donutData}
+                    totalLabel={tr("Total Debt")}
+                    totalValueFormatted={`-${fmtMoneyDisplay(totalDebt)} VND`}
+                  />
+                ) : (
+                  <div style={{ padding: "30px", textAlign: "center", background: "var(--card)", borderRadius: "12px", border: "1px solid var(--line)" }}>
+                    <div style={{ fontSize: "2rem", marginBottom: "8px" }}>🎉</div>
+                    <strong style={{ fontSize: "1rem", color: "#16a34a" }}>
+                      {language === "vi" ? "Không có dư nợ" : "No debt"}
+                    </strong>
+                    <p style={{ fontSize: "0.85rem", color: "var(--muted)", margin: "6px 0 0 0" }}>
+                      {language === "vi" ? "Bạn hiện không có khoản nợ vay hoặc nợ thẻ tín dụng nào." : "You currently have no credit card or loan debts."}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {mobileMoreOpen && (
         <div className="ml-popup-backdrop" onClick={() => setMobileMoreOpen(false)}>
           <div className="ml-popup-card" onClick={e => e.stopPropagation()}>
@@ -5365,6 +5770,10 @@ function AccountPeriodTransactionsModal({
 
   const eventsQuery = useQuery({ queryKey: ["events"], queryFn: api.events.list });
   const categoriesQuery = useQuery({ queryKey: ["categories"], queryFn: api.categories.list });
+  const accountsQuery = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
+  const qc = useQueryClient();
+  const [selectedEventForDetail, setSelectedEventForDetail] = useState<FinancialEvent | null>(null);
+  const [editingEvent, setEditingEvent] = useState<FinancialEvent | null>(null);
 
   const { start, end } = (() => {
     if (scope === "ALL") return { start: "1970-01-01", end: "2099-12-31" };
@@ -5601,7 +6010,16 @@ function AccountPeriodTransactionsModal({
             const cat = categoriesQuery.data?.find(c => c.id === ev.category_id);
             const isNeg = entry.amount.startsWith("-");
             return (
-              <div className="account-year-row" key={ev.id}>
+              <div
+                className="account-year-row clickable-txn-row"
+                key={ev.id}
+                onClick={() => setSelectedEventForDetail(ev)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => (e.key === "Enter" || e.key === " ") && setSelectedEventForDetail(ev)}
+                style={{ cursor: "pointer", transition: "background-color 0.15s ease" }}
+                title={language === "vi" ? "Bấm để xem chi tiết, chỉnh sửa hoặc xoá giao dịch" : "Click to view, edit, or delete this transaction"}
+              >
                 <div className="account-year-row-left">
                   <CategoryIconBadge name={cat?.name ?? ev.event_type} icon={cat?.icon} size={34} />
                   <div className="account-year-row-meta">
@@ -5618,6 +6036,35 @@ function AccountPeriodTransactionsModal({
           })}
         </div>
       </div>
+      {selectedEventForDetail && (
+        <TransactionDetailModal
+          event={selectedEventForDetail}
+          accounts={accountsQuery.data ?? [account]}
+          categories={categoriesQuery.data ?? []}
+          language={language}
+          onClose={() => setSelectedEventForDetail(null)}
+          onEdit={() => {
+            const target = selectedEventForDetail;
+            setSelectedEventForDetail(null);
+            setEditingEvent(target);
+          }}
+        />
+      )}
+      {editingEvent && (
+        <Modal title={language === "vi" ? "Chỉnh sửa giao dịch" : "Edit transaction"} onClose={() => setEditingEvent(null)}>
+          <LedgerComposerForm
+            accounts={accountsQuery.data ?? [account]}
+            categories={categoriesQuery.data ?? []}
+            defaultAccountId={account.id}
+            editingEvent={editingEvent}
+            onClose={() => setEditingEvent(null)}
+            onSaved={() => {
+              setEditingEvent(null);
+              invalidateAllFinancialQueries(qc);
+            }}
+          />
+        </Modal>
+      )}
     </Modal>
   );
 }

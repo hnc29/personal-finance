@@ -87,7 +87,14 @@ export interface SavingsCreateInput {
 export type SavingsPatchInput = Partial<Omit<SavingsCreateInput, "funding_account_id">>;
 export interface SavingsCloseInput { closed_date: string; receiving_account_id: number; actual_interest: string }
 export interface SavingsEarlyCloseInput extends SavingsCloseInput { fee?: string }
-export interface SavingsRenewInput { start_date: string; actual_interest?: string; receiving_account_id?: number }
+export interface SavingsRenewInput {
+  start_date: string;
+  actual_interest?: string;
+  receiving_account_id?: number;
+  new_principal?: string;
+  new_annual_rate?: string;
+  new_term_months?: number;
+}
 
 export interface MetalHolding {
   id: number; name: string; product_type: string; brand: string;
