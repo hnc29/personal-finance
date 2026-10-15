@@ -151,7 +151,7 @@ export const AssetsScreen = () => {
         excluded_from_reports: !!m.excluded_from_reports,
       } as MetalHolding));
 
-  const displayedSavings = savingsList.length > 0
+  const allSavings = savingsList.length > 0
     ? savingsList
     : (portfolio?.savings ?? []).map((s) => ({
         id: s.id,
@@ -160,6 +160,9 @@ export const AssetsScreen = () => {
         status: "ACTIVE",
         excluded_from_reports: !!s.excluded_from_reports,
       } as SavingsHolding));
+  const displayedSavings = allSavings.filter(
+    (s) => s.status === "ACTIVE" || s.status === "OPEN"
+  );
 
   const displayedCrypto = cryptoList.length > 0
     ? cryptoList

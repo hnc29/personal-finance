@@ -685,3 +685,67 @@ def test_transfer_with_bidirectional_note_patterns(session: Session) -> None:
     amounts = {e.account_id: e.amount for e in event.entries}
     assert amounts[tcb_main.id] == Decimal("-500000.0000")
     assert amounts[tcb_spending.id] == Decimal("500000.0000")
+
+
+def test_match_moneylover_account_uob_credit_card() -> None:
+    from app.services.moneylover_apply import match_moneylover_account
+
+    # 1. Various user naming patterns for UOB credit card
+    uob_vn = Account(id=1, name="UOB Việt Nam", account_type=AccountType.CREDIT_CARD, currency="VND")
+    assert match_moneylover_account([uob_vn], "UOB") == uob_vn
+
+    uob_vn_nickname = Account(id=2, name="UOB Việt Nam (Thẻ tín dụng)", account_type=AccountType.CREDIT_CARD, currency="VND")
+    assert match_moneylover_account([uob_vn_nickname], "UOB") == uob_vn_nickname
+
+    uob_visa = Account(id=3, name="UOB Việt Nam (Visa)", account_type=AccountType.CREDIT_CARD, currency="VND")
+    assert match_moneylover_account([uob_visa], "UOB") == uob_visa
+
+    uob_parens = Account(id=4, name="UOB (Credit Card)", account_type=AccountType.CREDIT_CARD, currency="VND")
+    assert match_moneylover_account([uob_parens], "UOB") == uob_parens
+
+    uob_the_tin_dung = Account(id=5, name="Thẻ tín dụng UOB", account_type=AccountType.CREDIT_CARD, currency="VND")
+    assert match_moneylover_account([uob_the_tin_dung], "UOB") == uob_the_tin_dung
+
+    uob_the = Account(id=6, name="Thẻ UOB", account_type=AccountType.CREDIT_CARD, currency="VND")
+    assert match_moneylover_account([uob_the], "UOB") == uob_the
+
+    # 2. Disambiguation when both BANK and CREDIT_CARD exist for UOB
+    uob_bank = Account(id=7, name="UOB Việt Nam", account_type=AccountType.BANK, currency="VND")
+    uob_card = Account(id=8, name="UOB Việt Nam (Thẻ tín dụng)", account_type=AccountType.CREDIT_CARD, currency="VND")
+    both = [uob_bank, uob_card]
+
+    assert match_moneylover_account(both, "UOB") == uob_bank
+    assert match_moneylover_account(both, "Thẻ UOB") == uob_card
+    assert match_moneylover_account(both, "UOB Card") == uob_card
+
+
+def test_apply_moneylover_import_uob_credit_card(session: Session) -> None:
+    uob_card = Account(
+        name="UOB Việt Nam (Thẻ tín dụng)",
+        account_type=AccountType.CREDIT_CARD,
+        currency="VND",
+    )
+    session.add(uob_card)
+    session.commit()
+
+    data = _xlsx(
+        [
+            _row("1", date(2026, 8, 25), "Ăn uống", -250_000, "UOB", note="Ăn trưa"),
+        ]
+    )
+    batch = import_moneylover(session, data, "uob_card.xlsx")
+    session.commit()
+
+    result = apply_import_batch(session, batch.id)
+    session.commit()
+
+    assert result.total_rows == 1
+    assert result.applied_rows == 1
+    assert result.unmatched_wallets == {}
+
+    event = session.scalar(select(FinancialEvent))
+    assert event is not None
+    assert event.event_type is FinancialEventType.EXPENSE
+    assert event.entries[0].account_id == uob_card.id
+    assert event.entries[0].amount == Decimal("-250000.0000")
+

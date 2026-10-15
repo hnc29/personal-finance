@@ -2621,14 +2621,17 @@ function SavingsPanel({ hideAmount = false }: { hideAmount?: boolean } = {}) {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [selectedBank, setSelectedBank] = useState<string>("ALL");
   const [searchName, setSearchName] = useState<string>("");
+  const [showClosed, setShowClosed] = useState(false);
 
   const savingsQ = useQuery({ queryKey: ["savings"], queryFn: api.assets.savings.list });
   const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: api.accounts.list });
   const walletAccounts = (accountsQ.data ?? []).filter(a => a.account_type !== "CREDIT_CARD" && a.is_active);
   const rows = savingsQ.data ?? [];
+  const closedCount = rows.filter(r => r.status === "CLOSED").length;
 
-  const distinctBanks = Array.from(new Set(rows.map(r => r.institution))).filter(Boolean);
-  const displayRows = rows.filter(r => {
+  const baseRows = showClosed ? rows : rows.filter(r => r.status === "OPEN");
+  const distinctBanks = Array.from(new Set(baseRows.map(r => r.institution))).filter(Boolean);
+  const displayRows = baseRows.filter(r => {
     if (selectedBank !== "ALL" && r.institution !== selectedBank) return false;
     if (searchName.trim() && !r.name.toLowerCase().includes(searchName.trim().toLowerCase())) return false;
     return true;
@@ -2775,6 +2778,17 @@ function SavingsPanel({ hideAmount = false }: { hideAmount?: boolean } = {}) {
               </button>
             )}
           </div>
+          {closedCount > 0 && (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "0.85rem", cursor: "pointer", color: "var(--muted)", userSelect: "none" }}>
+              <input
+                type="checkbox"
+                checked={showClosed}
+                onChange={e => setShowClosed(e.target.checked)}
+                style={{ cursor: "pointer" }}
+              />
+              <span>{language === "vi" ? `Hiện sổ đã tất toán (${closedCount})` : `Show settled accounts (${closedCount})`}</span>
+            </label>
+          )}
         </div>
         <button type="button" className="primary" onClick={() => setCreateOpen(true)}>
           + {tr("Add savings account")}
@@ -2866,7 +2880,7 @@ function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccount
     create.mutate({
       institution: v("institution"), product_name: v("product_name") || undefined, name: v("name"),
       principal: principal || v("principal"), funding_account_id: Number(v("funding_account_id")), opened_date: openedDate || v("opened_date"),
-      term_months: Number(v("term_months")), annual_rate: v("annual_rate"), non_term_rate: v("non_term_rate") || "0",
+      term_months: Number(v("term_months")), annual_rate: v("annual_rate").replace(",", "."), non_term_rate: (v("non_term_rate") || "0").replace(",", "."),
       interest_payment_method: v("interest_payment_method") as SavingsCreateInput["interest_payment_method"],
       maturity_action: v("maturity_action") as SavingsCreateInput["maturity_action"],
       notes: v("notes") || null,
@@ -2910,8 +2924,8 @@ function SavingsCreateForm({ walletAccounts, onDone, onCancel }: { walletAccount
       {savingsDeduct && walletAccounts.length === 0 && <p className="hint">{tr("No wallet accounts available. Create a cash, bank, or e-wallet account first.")}</p>}
     </fieldset>
     <fieldset><legend>{tr("Interest rate")} &amp; {tr("Maturity date")}</legend>
-      <Field label="Annual interest rate (%/year)"><input name="annual_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" required /></Field>
-      <Field label="Demand interest rate (%/year)"><input name="non_term_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue="0" /></Field>
+      <Field label="Annual interest rate (%/year)"><input name="annual_rate" inputMode="decimal" pattern="^[0-9]+([.,][0-9]{1,4})?$" title={language === "vi" ? "Ví dụ: 8.8 hoặc 8,8" : "Example: 8.8"} required /></Field>
+      <Field label="Demand interest rate (%/year)"><input name="non_term_rate" inputMode="decimal" pattern="^[0-9]+([.,][0-9]{1,4})?$" title={language === "vi" ? "Ví dụ: 0.5 hoặc 0,5" : "Example: 0.5"} defaultValue="0" /></Field>
       <Field label="Interest payment method"><select name="interest_payment_method" defaultValue="AT_MATURITY">{(["AT_MATURITY", "UPFRONT", "PERIODIC"] as const).map(x => <option value={x} key={x}>{label(x)}</option>)}</select></Field>
       <Field label="Maturity date"><input value={previewMaturity} disabled readOnly /></Field>
       <Field label="On maturity"><select name="maturity_action" defaultValue="CLOSE">{(["CLOSE", "RENEW_PRINCIPAL", "RENEW_PRINCIPAL_AND_INTEREST"] as const).map(x => <option value={x} key={x}>{label(x)}</option>)}</select></Field>
@@ -3034,7 +3048,7 @@ function SavingsEditForm({ row, onDone, onCancel }: { row: SavingsAccount; onDon
     patch.mutate({
       institution: v("institution"), product_name: v("product_name"), name: v("name"),
       opened_date: openedDate || v("opened_date"), term_months: Number(v("term_months")),
-      annual_rate: v("annual_rate"), non_term_rate: v("non_term_rate"),
+      annual_rate: v("annual_rate").replace(",", "."), non_term_rate: v("non_term_rate").replace(",", "."),
       maturity_action: v("maturity_action") as SavingsPatchInput["maturity_action"],
       notes: v("notes") || null,
     });
@@ -3046,8 +3060,8 @@ function SavingsEditForm({ row, onDone, onCancel }: { row: SavingsAccount; onDon
     <Field label="Savings account name"><input name="name" defaultValue={row.name} required /></Field>
     <Field label="Deposit date"><DateRow name="opened_date" value={openedDate} onChange={setOpenedDate} language={language} label="Deposit date" /></Field>
     <Field label="Term (months)"><input name="term_months" type="number" min={1} step={1} defaultValue={term?.term_months} required /></Field>
-    <Field label="Annual interest rate (%/year)"><input name="annual_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue={term?.annual_rate ? fmtRate(term.annual_rate) : ""} required /></Field>
-    <Field label="Demand interest rate (%/year)"><input name="non_term_rate" inputMode="decimal" pattern="^\d+(\.\d{1,4})?$" defaultValue={term?.non_term_rate ? fmtRate(term.non_term_rate) : "0"} /></Field>
+    <Field label="Annual interest rate (%/year)"><input name="annual_rate" inputMode="decimal" pattern="^[0-9]+([.,][0-9]{1,4})?$" title={language === "vi" ? "Ví dụ: 8.8 hoặc 8,8" : "Example: 8.8"} defaultValue={term?.annual_rate ? fmtRate(term.annual_rate) : ""} required /></Field>
+    <Field label="Demand interest rate (%/year)"><input name="non_term_rate" inputMode="decimal" pattern="^[0-9]+([.,][0-9]{1,4})?$" title={language === "vi" ? "Ví dụ: 0.5 hoặc 0,5" : "Example: 0.5"} defaultValue={term?.non_term_rate ? fmtRate(term.non_term_rate) : "0"} /></Field>
     <Field label="On maturity"><select name="maturity_action" defaultValue={term?.maturity_action ?? "CLOSE"}>{(["CLOSE", "RENEW_PRINCIPAL", "RENEW_PRINCIPAL_AND_INTEREST"] as const).map(x => <option value={x} key={x}>{label(x)}</option>)}</select></Field>
     <Field label="Notes"><input name="notes" defaultValue={row.notes ?? ""} /></Field>
     <div className="form-actions"><Submit pending={patch.isPending} text="Save changes" /><button type="button" className="secondary" onClick={onCancel}>{tr("Cancel")}</button></div>
@@ -3214,7 +3228,7 @@ function SavingsRenewForm({
       actual_interest: actualInterest || "0",
       receiving_account_id: receivingAccountId ? Number(receivingAccountId) : undefined,
       new_principal: newPrincipal || undefined,
-      new_annual_rate: annualRate || undefined,
+      new_annual_rate: annualRate ? annualRate.trim().replace(",", ".") : undefined,
       new_term_months: termMonths ? Number(termMonths) : undefined,
     });
   }
@@ -3303,7 +3317,8 @@ function SavingsRenewForm({
         <input
           name="annual_rate"
           inputMode="decimal"
-          pattern="^\\d+(\\.\\d{1,4})?$"
+          pattern="^[0-9]+([.,][0-9]{1,4})?$"
+          title={language === "vi" ? "Ví dụ: 8.8 hoặc 8,8 (tối đa 4 chữ số thập phân)" : "Example: 8.8 (up to 4 decimal places)"}
           value={annualRate}
           onChange={e => setAnnualRate(e.target.value)}
           placeholder="0.0"

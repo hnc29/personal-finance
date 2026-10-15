@@ -260,7 +260,22 @@ def import_money_lover(
         from openpyxl import Workbook
 
         try:
-            rows = list(csv.reader(io.StringIO(payload.decode("utf-8-sig"))))
+            content = payload.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            try:
+                content = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                content = payload.decode("latin-1")
+
+        try:
+            first_line = content.splitlines()[0] if content.splitlines() else ""
+            delimiter = ","
+            if first_line.count(";") > first_line.count(",") and first_line.count(";") >= 2:
+                delimiter = ";"
+            elif "\t" in first_line and first_line.count("\t") > first_line.count(","):
+                delimiter = "\t"
+
+            rows = list(csv.reader(io.StringIO(content), delimiter=delimiter))
             workbook = Workbook()
             sheet = workbook.active
             sheet.title = "Sổ giao dịch"
@@ -269,7 +284,7 @@ def import_money_lover(
             converted = io.BytesIO()
             workbook.save(converted)
             payload = converted.getvalue()
-        except (UnicodeDecodeError, csv.Error) as exc:
+        except Exception as exc:
             raise HTTPException(400, "Invalid CSV file") from exc
     try:
         batch = import_moneylover(db, payload, name, user_id=current_user.id)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -34,11 +34,21 @@ def parse_moneylover_date(value: object) -> date:
     handles that real shape as well as a plain "YYYY-MM-DD" string, without
     needing to touch any already-stored raw payload.
     """
-    text = str(value)
+    text = str(value).strip()
     try:
         return date.fromisoformat(text)
     except ValueError:
+        pass
+    try:
         return datetime.fromisoformat(text).date()
+    except ValueError:
+        pass
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%y", "%d-%m-%y"):
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=UTC).date()
+        except ValueError:
+            pass
+    raise ValueError(f"invalid date: {value!r}")
 
 
 def normalize_moneylover_row(

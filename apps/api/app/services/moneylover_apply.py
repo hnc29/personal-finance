@@ -175,51 +175,191 @@ class ApplyResult:
 
 
 _BANK_ROOT_MAP: dict[str, str] = {
+    # Techcombank
     "tech": "techcombank",
     "tcb": "techcombank",
     "techcom": "techcombank",
     "techcombank": "techcombank",
+    # Vietcombank
     "vcb": "vietcombank",
     "vietcom": "vietcombank",
     "vietcombank": "vietcombank",
+    # VPBank
     "vpb": "vpbank",
     "vp": "vpbank",
     "vpbank": "vpbank",
+    # MBBank
     "mbb": "mbbank",
     "mb": "mbbank",
     "mbbank": "mbbank",
+    "quandoi": "mbbank",
+    # BIDV
     "bidv": "bidv",
     "bid": "bidv",
+    # ACB
     "acb": "acb",
+    "achau": "acb",
+    # VietinBank
     "ctg": "vietinbank",
     "vietin": "vietinbank",
     "vietinbank": "vietinbank",
+    # VIB
     "vib": "vib",
+    "quocte": "vib",
+    # SHB
     "shb": "shb",
+    # Shinhan Bank
     "shinhan": "shinhan",
     "shinhanbank": "shinhan",
+    # TPBank
     "tpb": "tpbank",
     "tpbank": "tpbank",
+    "tienphong": "tpbank",
+    # Sacombank
     "stb": "sacombank",
     "sacombank": "sacombank",
+    # HDBank
     "hdb": "hdbank",
     "hdbank": "hdbank",
+    # MSB
     "msb": "msb",
+    "maritime": "msb",
+    "hanghai": "msb",
+    # OCB
     "ocb": "ocb",
+    "phuongdong": "ocb",
+    # SeABank
     "seabank": "seabank",
+    "seab": "seabank",
+    # Eximbank
     "eximbank": "eximbank",
     "eib": "eximbank",
+    "exim": "eximbank",
+    # LPBank
     "lpbank": "lpbank",
+    "lpb": "lpbank",
+    "lienviet": "lpbank",
+    # Agribank
     "agribank": "agribank",
+    "agri": "agribank",
+    "varb": "agribank",
+    # UOB
+    "uob": "uob",
+    # HSBC
+    "hsbc": "hsbc",
+    # CIMB
+    "cimb": "cimb",
+    # Standard Chartered
+    "standardchartered": "standardchartered",
+    "scbvl": "standardchartered",
+    # Woori
+    "woori": "woori",
+    "wooribank": "woori",
+    # ANZ
+    "anz": "anz",
+    "anzvl": "anz",
+    # Hong Leong
+    "hongleong": "hongleong",
+    "hlb": "hongleong",
+    "hlbvn": "hongleong",
+    # Public Bank
+    "publicbank": "publicbank",
+    "pbvn": "publicbank",
+    # Indovina
+    "indovina": "indovina",
+    "ivb": "indovina",
+    # VRB
+    "vrb": "vrb",
+    "vietnga": "vrb",
+    # SCB (Sài Gòn)
+    "scb": "scb",
+    "saigon": "scb",
+    # BVBank (Bản Việt)
+    "bvbank": "bvbank",
+    "bvb": "bvbank",
+    "banviet": "bvbank",
+    # Bac A Bank
+    "bacabank": "bacabank",
+    "baca": "bacabank",
+    "bab": "bacabank",
+    # BaoViet Bank
+    "baoviet": "baovietbank",
+    "baovietbank": "baovietbank",
+    # PVcomBank
+    "pvcom": "pvcombank",
+    "pvcombank": "pvcombank",
+    "pvc": "pvcombank",
+    # Kienlongbank
+    "kienlong": "kienlongbank",
+    "kienlongbank": "kienlongbank",
+    "klb": "kienlongbank",
+    # Nam A Bank
+    "nama": "namabank",
+    "namabank": "namabank",
+    "nab": "namabank",
+    # Vietbank
+    "vietbank": "vietbank",
+    # VietABank
+    "vietabank": "vietabank",
+    "vab": "vietabank",
+    # Saigonbank
+    "saigonbank": "saigonbank",
+    "sgb": "saigonbank",
+    # PGBank
+    "pgbank": "pgbank",
+    "pgb": "pgbank",
+    # ABBANK
+    "abbank": "abbank",
+    "abb": "abbank",
+    "anbinh": "abbank",
+    # NCB
+    "ncb": "ncb",
+    # GPBank
+    "gpbank": "gpbank",
+    # Vikki Bank
+    "vikki": "vikki",
+    "vikkibank": "vikki",
+    # VCBNeo
+    "vcbneo": "vcbneo",
+    # MBV
+    "mbv": "mbv",
+    # Co-opBank
+    "coopbank": "coopbank",
+    # Timo, Cake, Liobank
+    "timo": "timo",
+    "cake": "cake",
+    "liobank": "liobank",
+    "lio": "liobank",
+    # Wallets
     "momo": "momo",
     "zalopay": "zalopay",
     "zalo": "zalopay",
     "shopeepay": "shopeepay",
+    "airpay": "shopeepay",
+    "spay": "shopeepay",
     "viettelmoney": "viettelmoney",
     "viettelpay": "viettelmoney",
+    "viettel": "viettelmoney",
+    "vnpay": "vnpay",
+    "payoo": "payoo",
     "cash": "cash",
     "tienmat": "cash",
 }
+
+_GENERIC_TOKENS: set[str] = {
+    "viet",
+    "nam",
+    "vn",
+    "bank",
+    "ngan",
+    "hang",
+    "tmcp",
+    "nhtm",
+    "tnhh",
+    "mtv",
+    "cp",
+}
+_CARD_DESCRIPTORS: set[str] = {"the", "tin", "dung", "credit", "card"}
 
 
 def _normalize_wallet_text(s: str) -> str:
@@ -244,6 +384,9 @@ def _extract_canonical_tokens(name: str) -> tuple[str, ...]:
     if "tien" in tokens and "mat" in tokens:
         tokens = ["cash" if t in ("tien", "mat") else t for t in tokens]
         tokens = list(dict.fromkeys(tokens))
+    has_bank = any(t in _BANK_ROOT_MAP.values() for t in tokens)
+    if has_bank and len(tokens) > 1:
+        tokens = [t for t in tokens if t not in _GENERIC_TOKENS]
     return tuple(tokens)
 
 
@@ -310,9 +453,10 @@ def match_moneylover_account(
             if not common:
                 continue
 
-            matches_type = (
-                is_card_wallet and a.account_type.value == "CREDIT_CARD"
-            ) or (not is_card_wallet and a.account_type.value != "CREDIT_CARD")
+            prefix = re.sub(r"\(.*?\)", "", a.name).strip()
+            prefix_tokens = (
+                _extract_canonical_tokens(prefix) if prefix != a.name else ()
+            )
 
             score = 0
             if w_tokens == a_tokens:
@@ -320,13 +464,28 @@ def match_moneylover_account(
             elif w_token_set == a_token_set:
                 score = 900
             else:
-                extra_tokens = abs(len(w_tokens) - len(a_tokens))
+                # If account is a credit card, ignore card descriptor tokens in account name
+                # (e.g. 'Thẻ tín dụng', 'Credit Card') so they don't penalize the bank match.
+                non_card_a_tokens = (
+                    [t for t in a_tokens if t not in _CARD_DESCRIPTORS]
+                    if a.account_type.value == "CREDIT_CARD"
+                    else list(a_tokens)
+                )
+                extra_tokens = abs(len(w_tokens) - len(non_card_a_tokens))
                 score = len(common) * 100 - extra_tokens * 25
+                if prefix_tokens and prefix_tokens == w_tokens:
+                    score += 200
 
-            if matches_type:
-                score += 50
+            if is_card_wallet:
+                if a.account_type.value == "CREDIT_CARD":
+                    score += 50
+                else:
+                    score -= 100
             else:
-                score -= 100
+                if a.account_type.value != "CREDIT_CARD":
+                    score += 20
+                else:
+                    score += 0
 
             scored_candidates.append((score, a))
 

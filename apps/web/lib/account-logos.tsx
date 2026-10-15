@@ -343,6 +343,16 @@ const RAW_BANKS: Record<string, BankBrandDraft> = {
     badgeFg: "#ffffff",
     logo: "hsbc",
   },
+  UOB: {
+    name: "UOB",
+    shortLabel: "UOB",
+    primaryColor: "#0b2341",
+    secondaryColor: "#e62129",
+    textColor: "#ffffff",
+    badgeBg: "#0b2341",
+    badgeFg: "#ffffff",
+    logo: "uob",
+  },
   STANDARDCHARTERED: {
     name: "Standard Chartered",
     shortLabel: "SCB",
@@ -616,6 +626,7 @@ export function getAccountBrand(name: string, accountType: AccountType = "BANK")
 
   if (norm.includes("SHINHAN")) return BANKS.SHINHAN;
   if (norm.includes("HSBC")) return BANKS.HSBC;
+  if (norm.includes("UOB")) return BANKS.UOB;
   if (norm.includes("STANDARD") || norm.includes("SCB")) return BANKS.STANDARDCHARTERED;
   if (norm.includes("CITI")) return BANKS.CITIBANK;
   if (norm.includes("VRB") || norm.includes("VIETNGA")) return BANKS.VRB;
